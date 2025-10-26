@@ -8,6 +8,7 @@
 #include "States/FleeState.h"
 #include "States/DeadState.h"
 #include "AIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/Character.h"
 
 
@@ -79,9 +80,72 @@ void UStateMachine::ChangeState(UState* NewState)
 
 void UStateMachine::GetObservation(float Health, float Distance, int32 Num)
 {
-    this->AgentHealth = Health;
+	// Legacy function - updates both old and new observation structures
+	this->AgentHealth = Health;
 	this->DistanceToDestination = Distance;
 	this->EnemiesNum = Num;
+
+	// Sync with new observation structure
+	CurrentObservation.Health = Health;
+	CurrentObservation.DistanceToDestination = Distance;
+	CurrentObservation.VisibleEnemyCount = Num;
+}
+
+void UStateMachine::UpdateObservation(const FObservationElement& NewObservation)
+{
+	CurrentObservation = NewObservation;
+
+	// Sync legacy fields for backward compatibility with existing MCTS states
+	AgentHealth = NewObservation.Health;
+	DistanceToDestination = NewObservation.DistanceToDestination;
+	EnemiesNum = NewObservation.VisibleEnemyCount;
+}
+
+void UStateMachine::UpdateAgentState(FVector Position, FVector Velocity, FRotator Rotation, float Health, float Stamina, float Shield)
+{
+	CurrentObservation.Position = Position;
+	CurrentObservation.Velocity = Velocity;
+	CurrentObservation.Rotation = Rotation;
+	CurrentObservation.Health = Health;
+	CurrentObservation.Stamina = Stamina;
+	CurrentObservation.Shield = Shield;
+
+	// Sync legacy field
+	AgentHealth = Health;
+}
+
+void UStateMachine::UpdateCombatState(float WeaponCooldown, int32 Ammunition, int32 WeaponType)
+{
+	CurrentObservation.WeaponCooldown = WeaponCooldown;
+	CurrentObservation.Ammunition = Ammunition;
+	CurrentObservation.CurrentWeaponType = WeaponType;
+}
+
+void UStateMachine::UpdateEnemyInfo(int32 VisibleCount, const TArray<FEnemyObservation>& NearbyEnemies)
+{
+	CurrentObservation.VisibleEnemyCount = VisibleCount;
+	CurrentObservation.NearbyEnemies = NearbyEnemies;
+
+	// Ensure array has exactly 5 elements (pad with empty observations if needed)
+	while (CurrentObservation.NearbyEnemies.Num() < 5)
+	{
+		CurrentObservation.NearbyEnemies.Add(FEnemyObservation());
+	}
+	if (CurrentObservation.NearbyEnemies.Num() > 5)
+	{
+		CurrentObservation.NearbyEnemies.SetNum(5);
+	}
+
+	// Sync legacy field
+	EnemiesNum = VisibleCount;
+}
+
+void UStateMachine::UpdateTacticalContext(bool bHasCover, float CoverDistance, FVector2D CoverDirection, ETerrainType Terrain)
+{
+	CurrentObservation.bHasCover = bHasCover;
+	CurrentObservation.NearestCoverDistance = CoverDistance;
+	CurrentObservation.CoverDirection = CoverDirection;
+	CurrentObservation.CurrentTerrain = Terrain;
 }
 
 void UStateMachine::TriggerBlueprintEvent(const FName& EventName)
@@ -119,6 +183,121 @@ UState* UStateMachine::GetFleeState()
 UState* UStateMachine::GetDeadState()
 {
     return DeadState;
+}
+
+// ========================================
+// BLACKBOARD INTEGRATION METHODS
+// ========================================
+
+AAIController* UStateMachine::GetAIController() const
+{
+	if (!OwnerPawn)
+	{
+		// Try to get owner pawn if not cached
+		APawn* Pawn = Cast<APawn>(GetOwner());
+		if (!Pawn)
+		{
+			return nullptr;
+		}
+	}
+
+	APawn* Pawn = OwnerPawn ? OwnerPawn : Cast<APawn>(GetOwner());
+	if (!Pawn)
+	{
+		return nullptr;
+	}
+
+	return Cast<AAIController>(Pawn->GetController());
+}
+
+UBlackboardComponent* UStateMachine::GetBlackboard() const
+{
+	AAIController* AIController = GetAIController();
+	if (!AIController)
+	{
+		return nullptr;
+	}
+
+	return AIController->GetBlackboardComponent();
+}
+
+void UStateMachine::SetCurrentStrategy(const FString& Strategy)
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboard();
+	if (BlackboardComp)
+	{
+		BlackboardComp->SetValueAsString(FName("CurrentStrategy"), Strategy);
+		UE_LOG(LogTemp, Log, TEXT("StateMachine: Set strategy to '%s'"), *Strategy);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StateMachine: Cannot set strategy - no Blackboard component available"));
+	}
+}
+
+void UStateMachine::SetTargetEnemy(AActor* TargetEnemy)
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboard();
+	if (BlackboardComp)
+	{
+		BlackboardComp->SetValueAsObject(FName("TargetEnemy"), TargetEnemy);
+		if (TargetEnemy)
+		{
+			UE_LOG(LogTemp, Log, TEXT("StateMachine: Set target enemy to '%s'"), *TargetEnemy->GetName());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("StateMachine: Cleared target enemy"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StateMachine: Cannot set target enemy - no Blackboard component available"));
+	}
+}
+
+void UStateMachine::SetDestination(FVector Destination)
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboard();
+	if (BlackboardComp)
+	{
+		BlackboardComp->SetValueAsVector(FName("Destination"), Destination);
+		UE_LOG(LogTemp, Log, TEXT("StateMachine: Set destination to %s"), *Destination.ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StateMachine: Cannot set destination - no Blackboard component available"));
+	}
+}
+
+void UStateMachine::SetCoverLocation(FVector CoverLocation)
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboard();
+	if (BlackboardComp)
+	{
+		BlackboardComp->SetValueAsVector(FName("CoverLocation"), CoverLocation);
+		UE_LOG(LogTemp, Log, TEXT("StateMachine: Set cover location to %s"), *CoverLocation.ToString());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StateMachine: Cannot set cover location - no Blackboard component available"));
+	}
+}
+
+void UStateMachine::SetThreatLevel(float ThreatLevel)
+{
+	UBlackboardComponent* BlackboardComp = GetBlackboard();
+	if (BlackboardComp)
+	{
+		// Clamp threat level to [0, 1] range
+		float ClampedThreat = FMath::Clamp(ThreatLevel, 0.0f, 1.0f);
+		BlackboardComp->SetValueAsFloat(FName("ThreatLevel"), ClampedThreat);
+		UE_LOG(LogTemp, Log, TEXT("StateMachine: Set threat level to %.2f"), ClampedThreat);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StateMachine: Cannot set threat level - no Blackboard component available"));
+	}
 }
 
 

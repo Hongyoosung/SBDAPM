@@ -1,5 +1,9 @@
 #include "AI/MCTS.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "States/FleeState.h"
+#include "States/AttackState.h"
+#include "States/MoveToState.h"
+#include "Core/StateMachine.h"
 
 UMCTS::UMCTS()
     : RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0), ExplorationParameter(1.41f)
@@ -140,8 +144,8 @@ float UMCTS::CalculateObservationSimilarity(const FObservationElement& Obs1, con
 {
     // �� ����� ���̸� ����ϰ� ����ȭ
     float DistanceDiff = FMath::Abs(Obs1.DistanceToDestination - Obs2.DistanceToDestination) / 100.0f; // �Ÿ��� 100���� ������ ����ȭ
-    float HealthDiff = FMath::Abs(Obs1.AgentHealth - Obs2.AgentHealth) / 100.0f; // ü���� 100���� ������ ����ȭ
-    float EnemiesDiff = FMath::Abs(Obs1.EnemiesNum - Obs2.EnemiesNum) / 10.0f; // ���� ���� 10���� ������ ����ȭ
+    float HealthDiff = FMath::Abs(Obs1.Health - Obs2.Health) / 100.0f; // ü���� 100���� ������ ����ȭ
+    float EnemiesDiff = FMath::Abs(Obs1.VisibleEnemyCount - Obs2.VisibleEnemyCount) / 10.0f; // ���� ���� 10���� ������ ����ȭ
 
     // �� ��ҿ� ����ġ ����
     const float DistanceWeight = 0.4f;
@@ -205,12 +209,80 @@ void UMCTS::Backpropagate()
 
 float UMCTS::CalculateImmediateReward(UMCTSNode* Node) const
 {
-    // ���� ����� �������� ������� ��� ���� ���
-    float DistanceReward = 100.0f - Node->Observation.DistanceToDestination;
-    float HealthReward = Node->Observation.AgentHealth;
-    float EnemyPenalty = -10.0f * Node->Observation.EnemiesNum;
+    // Note: We need to access StateMachine to determine current state
+    // For now, we'll use a simpler approach based on observation data
+    // TODO: Pass StateMachine reference to this function for state-specific rewards
 
-    return DistanceReward + HealthReward + EnemyPenalty;
+    const FObservationElement& Obs = Node->Observation;
+
+    // Default reward calculation (for MoveToState, AttackState, etc.)
+    float BaseDistanceReward = 100.0f - Obs.DistanceToDestination;
+    float BaseHealthReward = Obs.Health;
+    float BaseEnemyPenalty = -10.0f * Obs.VisibleEnemyCount;
+
+    // Detect if this is likely a flee scenario based on observation characteristics
+    // Heuristic: If health is low (<40) AND enemies are numerous (>2), likely fleeing
+    bool bLikelyFleeScenario = (Obs.Health < 40.0f) && (Obs.VisibleEnemyCount > 2);
+
+    if (bLikelyFleeScenario)
+    {
+        // FLEE-SPECIFIC REWARD CALCULATION
+        // When fleeing, prioritize survival and distance from enemies
+
+        // 1. Cover Availability Reward
+        float CoverReward = Obs.bHasCover ? 100.0f : 0.0f;
+
+        // 2. Distance from Enemies Reward
+        // Calculate average enemy distance from NearbyEnemies array
+        float TotalEnemyDistance = 0.0f;
+        int32 ValidEnemies = 0;
+        for (const FEnemyObservation& Enemy : Obs.NearbyEnemies)
+        {
+            if (Enemy.Distance < 3000.0f) // Only count nearby enemies (within 30m)
+            {
+                TotalEnemyDistance += Enemy.Distance;
+                ValidEnemies++;
+            }
+        }
+        float AvgEnemyDistance = ValidEnemies > 0 ? TotalEnemyDistance / ValidEnemies : 3000.0f;
+        // Normalize distance reward (farther = better)
+        float DistanceFromEnemiesReward = AvgEnemyDistance / 50.0f; // Scale to 0-60 range
+
+        // 3. Health Preservation Reward
+        // Reward maintaining health (penalize damage taken)
+        // Note: We'd need previous health to calculate this properly
+        // For now, just reward higher health during flee
+        float HealthPreservationReward = Obs.Health * 0.5f; // Higher health = better
+
+        // 4. Stamina Penalty (can't sprint effectively if low stamina)
+        float StaminaPenalty = (Obs.Stamina < 20.0f) ? -30.0f : 0.0f;
+
+        // 5. Cover Distance Reward (prefer closer cover when available)
+        float CoverDistanceReward = 0.0f;
+        if (Obs.bHasCover)
+        {
+            // Closer cover is better (max reward at 0 distance, min at 1500cm)
+            CoverDistanceReward = FMath::Max(0.0f, 50.0f - (Obs.NearestCoverDistance / 30.0f));
+        }
+
+        float FleeReward = CoverReward + DistanceFromEnemiesReward +
+                          HealthPreservationReward + StaminaPenalty + CoverDistanceReward;
+
+        UE_LOG(LogTemp, Verbose, TEXT("MCTS Flee Reward: Total=%.1f (Cover=%.1f, DistFromEnemy=%.1f, Health=%.1f, Stamina=%.1f, CoverDist=%.1f)"),
+            FleeReward, CoverReward, DistanceFromEnemiesReward, HealthPreservationReward, StaminaPenalty, CoverDistanceReward);
+
+        return FleeReward;
+    }
+    else
+    {
+        // DEFAULT REWARD CALCULATION (Attack, MoveTo, etc.)
+        float DefaultReward = BaseDistanceReward + BaseHealthReward + BaseEnemyPenalty;
+
+        UE_LOG(LogTemp, Verbose, TEXT("MCTS Default Reward: Total=%.1f (Distance=%.1f, Health=%.1f, Enemy=%.1f)"),
+            DefaultReward, BaseDistanceReward, BaseHealthReward, BaseEnemyPenalty);
+
+        return DefaultReward;
+    }
 }
 
 
@@ -289,8 +361,8 @@ FObservationElement UMCTS::GetCurrentObservation(UStateMachine* StateMachine)
     FObservationElement Observation{};
 
     Observation.DistanceToDestination = StateMachine->DistanceToDestination;
-    Observation.AgentHealth = StateMachine->AgentHealth;
-    Observation.EnemiesNum = StateMachine->EnemiesNum;
+    Observation.Health = StateMachine->AgentHealth;
+    Observation.VisibleEnemyCount = StateMachine->EnemiesNum;
 
     return Observation;
 }

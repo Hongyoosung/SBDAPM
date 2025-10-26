@@ -19,6 +19,10 @@
 
 ### System Integration
 
+**Hybrid Architecture: Strategic AI + Tactical Execution**
+
+SBDAPM uses a layered architecture separating high-level strategic decision-making from low-level tactical execution:
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Unreal Engine Environment                 │
@@ -27,38 +31,101 @@
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   StateMachine Component                     │
-│              (UActorComponent - Attachable)                  │
+│              STRATEGIC LAYER (High-Level Decisions)          │
 │                                                              │
-│  ┌────────────┐  ┌─────────────┐  ┌──────────┐            │
-│  │ MoveToState│  │ AttackState │  │FleeState │  DeadState │
-│  └─────┬──────┘  └──────┬──────┘  └────┬─────┘            │
-│        │                 │               │                   │
-└────────┼─────────────────┼───────────────┼──────────────────┘
-         │                 │               │
-         ▼                 ▼               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    MCTS Decision Engine                      │
-│                                                              │
-│  1. Selection    → UCT formula selects promising nodes      │
-│  2. Expansion    → Create child nodes for actions           │
-│  3. Simulation   → Calculate immediate rewards              │
-│  4. Backpropagate→ Update tree statistics                   │
-│                                                              │
-│  Input:  Observation (Health, Distance, Enemies)            │
-│  Output: Best Action to Execute                             │
-└────────────────────────┬────────────────────────────────────┘
-                         │
+│  ┌──────────────────────────────────────────────────┐      │
+│  │           StateMachine Component                  │      │
+│  │         (Strategic State Management)              │      │
+│  │                                                    │      │
+│  │  ┌──────────┐  ┌───────────┐  ┌──────────┐      │      │
+│  │  │MoveToState│  │AttackState│  │FleeState │      │      │
+│  │  └─────┬────┘  └─────┬─────┘  └────┬─────┘      │      │
+│  │        │             │              │             │      │
+│  └────────┼─────────────┼──────────────┼─────────────┘      │
+│           │             │              │                     │
+│           ▼             ▼              ▼                     │
+│  ┌─────────────────────────────────────────────────┐       │
+│  │         MCTS Decision Engine + RL Policy         │       │
+│  │                                                   │       │
+│  │  Input:  71-feature Observation Vector           │       │
+│  │  Process: MCTS tree search OR Neural Network     │       │
+│  │  Output: Strategic Decision (Behavior to execute)│       │
+│  │                                                   │       │
+│  │  Decisions:                                       │       │
+│  │  - Which strategy? (Aggressive/Defensive/Evasive)│       │
+│  │  - Which behavior tree subtree to activate?      │       │
+│  │  - When to transition states?                    │       │
+│  └───────────────────┬───────────────────────────────┘       │
+└────────────────────────┼────────────────────────────────────┘
+                         │ (Blackboard key: "SelectedStrategy")
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      Action System                           │
+│              TACTICAL LAYER (Low-Level Execution)            │
 │                                                              │
-│  Movement:  Forward, Backward, Left, Right                   │
-│  Combat:    Skill Attack, Default Attack                     │
+│  ┌──────────────────────────────────────────────────┐      │
+│  │           Unreal Behavior Tree                    │      │
+│  │         (Action Execution & Coordination)         │      │
+│  │                                                    │      │
+│  │  Root Selector                                    │      │
+│  │  ├─ Flee Behavior Subtree                         │      │
+│  │  │  ├─ Find Cover (EQS)                           │      │
+│  │  │  ├─ Sprint to Cover (MoveTo)                   │      │
+│  │  │  └─ Evasive Movement (Custom Task)             │      │
+│  │  │                                                 │      │
+│  │  ├─ Attack Behavior Subtree                       │      │
+│  │  │  ├─ Find Firing Position (EQS)                 │      │
+│  │  │  ├─ Aim at Target (RotateToFaceBBEntry)        │      │
+│  │  │  ├─ Execute Attack (Custom Task)               │      │
+│  │  │  └─ Strafe/Dodge (MoveTo)                      │      │
+│  │  │                                                 │      │
+│  │  └─ MoveTo Behavior Subtree                       │      │
+│  │     ├─ Find Path to Destination (MoveTo)          │      │
+│  │     ├─ Avoid Obstacles (EQS + MoveTo)             │      │
+│  │     └─ Update Progress (Custom Task)              │      │
+│  │                                                    │      │
+│  └────────────────────────────────────────────────────┘      │
 │                                                              │
-│  Execution: Triggers Blueprint Events for Game Logic        │
+│  ┌──────────────────────────────────────────────────┐      │
+│  │         Behavior Tree Tasks & Services           │      │
+│  │                                                   │      │
+│  │  Tasks:                                           │      │
+│  │  - BTTask_ExecuteAttack                           │      │
+│  │  - BTTask_UpdateObservation                       │      │
+│  │  - BTTask_EvasiveMovement                         │      │
+│  │                                                   │      │
+│  │  Services:                                        │      │
+│  │  - BTService_UpdateThreatAssessment               │      │
+│  │  - BTService_SyncObservationToBlackboard          │      │
+│  │                                                   │      │
+│  │  Decorators:                                      │      │
+│  │  - BTDecorator_CheckStrategy (reads Blackboard)   │      │
+│  │  - BTDecorator_HealthThreshold                    │      │
+│  └───────────────────────────────────────────────────┘      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Layer Responsibilities
+
+**Strategic Layer (FSM + MCTS/RL):**
+- Analyze 71-feature observation space
+- Decide high-level strategy (when to attack vs. flee vs. move)
+- Select which Behavior Tree subtree to activate
+- Learn long-term policies through reinforcement learning
+- Update Blackboard with strategic decisions
+
+**Tactical Layer (Behavior Tree + EQS):**
+- Execute pathfinding and navigation
+- Handle combat mechanics (aiming, shooting, reloading)
+- Coordinate animations and abilities
+- Query environment (find cover, firing positions)
+- React to immediate obstacles and threats
+
+### Key Integration Points
+
+1. **Blackboard Communication:** Strategic layer writes decisions to Blackboard keys
+2. **Observation Updates:** BTService periodically updates observation data
+3. **Strategy Execution:** BTDecorator checks Blackboard to determine which subtree runs
+4. **Reward Feedback:** Behavior Tree task completion feeds rewards back to MCTS/RL
 
 ---
 
@@ -189,85 +256,185 @@ float CalculateObservationSimilarity(FObservationElement A, FObservationElement 
 
 ---
 
-### 3. State Implementations
+### 3. State Implementations (Strategic Layer)
 
-#### MoveToState (Fully Implemented)
+**UPDATED ARCHITECTURE:** States now control high-level strategy and activate Behavior Tree subtrees, rather than directly executing actions.
+
+#### MoveToState (Updated for BT Integration)
 **Files:** `States/MoveToState.h/cpp`
 
-**Purpose:** Plans and executes movement towards a destination.
+**Purpose:** Strategic navigation state - determines *when* and *how* to approach destination.
 
-**Actions:**
-- `MoveForwardAction`
-- `MoveBackwardAction`
-- `MoveLeftAction`
-- `MoveRightAction`
+**MCTS Decisions:**
+- Which movement strategy? (Direct, Cautious, Stealth)
+- Should we engage enemies encountered en route?
+- Should we detour for resources?
+
+**Behavior Tree Integration:**
+- Sets Blackboard key: `CurrentStrategy` = "MoveTo"
+- Activates MoveTo subtree in Behavior Tree
+- BT handles pathfinding, obstacle avoidance, actual movement
 
 **Flow:**
-1. `EnterState()`: Initialize MCTS, create action list
-2. `UpdateState()`: Run MCTS to select best movement action
-3. `ExitState()`: Backpropagate results to update tree
+1. `EnterState()`: Initialize MCTS, set Blackboard strategy
+2. `UpdateState()`: Run MCTS to select movement strategy, update Blackboard
+3. `ExitState()`: Backpropagate results, clear strategy
 
-#### AttackState (Fully Implemented)
+#### AttackState (Updated for BT Integration)
 **Files:** `States/AttackState.h/cpp`
 
-**Purpose:** Plans and executes combat actions.
+**Purpose:** Strategic combat state - determines *when* and *how* to engage enemies.
 
-**Actions:**
-- `SkillAttackAction` - Special ability attacks
-- `DefaultAttackAction` - Basic melee attacks
+**MCTS Decisions:**
+- Which combat strategy? (Aggressive, Defensive, Flanking)
+- Which target to prioritize?
+- When to retreat or reposition?
 
-**Flow:** Similar to MoveToState but with combat-specific actions.
+**Behavior Tree Integration:**
+- Sets Blackboard keys: `CurrentStrategy` = "Attack", `TargetEnemy` = selected enemy
+- Activates Attack subtree in Behavior Tree
+- BT handles aiming, firing, dodging, ability execution
 
-#### FleeState (Stub Implementation)
+**Flow:** Similar to MoveToState but with combat-specific strategic decisions.
+
+#### FleeState (Requires Implementation)
 **Files:** `States/FleeState.h/cpp`
 
-**Status:** Incomplete - no actions defined, no MCTS integration.
+**Status:** **INCOMPLETE** - needs strategic decision logic and BT integration.
 
-**Intended Purpose:** Escape from dangerous situations (low health, overwhelming enemies).
+**Intended Purpose:** Strategic retreat state - determines optimal escape strategy.
 
-#### DeadState (Stub Implementation)
+**MCTS Decisions Needed:**
+- Which flee strategy? (Sprint to cover, Evasive movement, Call for help)
+- Which cover location to target?
+- Should we fight back while retreating?
+
+**Behavior Tree Integration Needed:**
+- Set Blackboard keys: `CurrentStrategy` = "Flee", `CoverLocation` = target
+- Activate Flee subtree in Behavior Tree
+- BT handles pathfinding to cover, evasive movement, sprinting
+
+#### DeadState (Terminal State)
 **Files:** `States/DeadState.h/cpp`
 
-**Status:** Terminal state with no actions. Could be used for death animations, respawn logic, etc.
+**Status:** Terminal state with no strategic decisions.
+
+**Behavior Tree Integration:**
+- Sets Blackboard: `CurrentStrategy` = "Dead"
+- Stops Behavior Tree execution
+- Triggers death animation, respawn logic (if applicable)
 
 ---
 
-### 4. Action System
+### 4. Behavior Tree System (Tactical Layer)
 
-**Files:** `Actions/Action.h/cpp`, `Actions/AttackActions/*`, `Actions/MoveToActions/*`
+**NEW ARCHITECTURE COMPONENT:** Unreal Engine Behavior Trees handle all tactical execution.
 
-#### Base Action Class
+#### Overview
+
+The Behavior Tree is responsible for:
+- **Pathfinding & Navigation:** Using NavMesh and MoveTo tasks
+- **Action Execution:** Attack, dodge, interact with objects
+- **Environment Queries:** Using EQS to find cover, firing positions, etc.
+- **Animation Coordination:** Triggering appropriate animation montages
+- **Immediate Reactions:** Responding to damage, obstacles, etc.
+
+#### Key Behavior Tree Components
+
+**Tasks (Custom C++ implementations needed):**
 ```cpp
-class UAction : public UObject
+// Execute an attack based on current weapon
+class UBTTask_ExecuteAttack : public UBTTaskNode
 {
-public:
-    virtual void ExecuteAction(UStateMachine* StateMachine);
+    // Reads Blackboard: CurrentWeapon, TargetEnemy
+    // Executes: Aim, fire, play animation
+    // Returns: Success/Failure
+};
+
+// Update observation data for strategic layer
+class UBTTask_UpdateObservation : public UBTTaskNode
+{
+    // Gathers: Enemy positions, health, ammo, etc.
+    // Updates: StateMachine->UpdateObservation(...)
+};
+
+// Perform evasive movement pattern
+class UBTTask_EvasiveMovement : public UBTTaskNode
+{
+    // Executes: Zigzag movement, dodge roll, etc.
 };
 ```
 
-#### Action Types
-
-**Movement Actions:**
-All movement actions trigger corresponding Blueprint events:
+**Services (Continuous monitoring):**
 ```cpp
-// Example: MoveForwardAction
-void UMoveForwardAction::ExecuteAction(UStateMachine* StateMachine)
+// Update threat level and enemy tracking
+class UBTService_UpdateThreatAssessment : public UBTService
 {
-    StateMachine->TriggerBlueprintEvent("MoveF");
-}
+    // Every tick: Scan for enemies, update danger level
+    // Updates Blackboard: NearestEnemy, ThreatLevel
+};
+
+// Sync observation data to Blackboard for BT decisions
+class UBTService_SyncObservationToBlackboard : public UBTService
+{
+    // Every tick: Read StateMachine->CurrentObservation
+    // Updates Blackboard keys for tactical decisions
+};
 ```
 
-**Attack Actions:**
-Currently log execution but delegate actual combat logic to Blueprints:
+**Decorators (Conditional execution):**
 ```cpp
-void USkillAttackAction::ExecuteAction(UStateMachine* StateMachine)
+// Check if current strategy matches required strategy
+class UBTDecorator_CheckStrategy : public UBTDecorator
 {
-    UE_LOG(LogTemp, Warning, TEXT("SkillAttack Action Executed"));
-    // Blueprint event triggering needed
-}
+    UPROPERTY(EditAnywhere)
+    FString RequiredStrategy; // "Attack", "Flee", "MoveTo"
+
+    // Reads Blackboard: CurrentStrategy
+    // Returns: true if matches RequiredStrategy
+};
 ```
 
-**Design Pattern:** Actions serve as lightweight commands that delegate to Blueprint for game-specific implementation. This separates AI decision-making (C++) from game logic (Blueprint).
+#### Behavior Tree Structure
+
+**Blueprint Asset:** `BT_SBDAPM_Agent.uasset`
+
+```
+Root (Selector)
+├─ [Decorator: IsDead?] DeadBehavior
+├─ [Decorator: Strategy == "Flee"] FleeBehavior
+│  ├─ [Service: UpdateThreatAssessment] Sequence
+│  │  ├─ Task: Find Cover (EQS)
+│  │  ├─ Task: MoveTo Cover
+│  │  └─ Task: Evasive Movement
+├─ [Decorator: Strategy == "Attack"] AttackBehavior
+│  ├─ [Service: UpdateTargetTracking] Sequence
+│  │  ├─ Task: Find Firing Position (EQS)
+│  │  ├─ Task: MoveTo Position
+│  │  ├─ Task: Aim at Target
+│  │  └─ Task: Execute Attack
+└─ [Decorator: Strategy == "MoveTo"] MoveToBehavior
+   ├─ [Service: UpdateObservation] Sequence
+   │  ├─ Task: Find Path (MoveTo)
+   │  └─ Task: Follow Path
+```
+
+#### Integration with Strategic Layer
+
+**Blackboard Keys:**
+- `CurrentStrategy` (String): Set by FSM states, read by BT decorators
+- `TargetEnemy` (Actor): Set by AttackState MCTS, used by attack tasks
+- `CoverLocation` (Vector): Set by FleeState MCTS, used by flee tasks
+- `Destination` (Vector): Set by MoveToState, used by navigation tasks
+- `ObservationData` (Struct): Synced from StateMachine for BT services
+
+**Execution Flow:**
+1. Strategic layer (FSM + MCTS) analyzes observation
+2. Selects optimal strategy and updates Blackboard
+3. BT decorators activate appropriate subtree based on strategy
+4. BT tasks execute tactical actions
+5. BT services update observation data
+6. Strategic layer reads results, updates policy
 
 ---
 
@@ -275,37 +442,104 @@ void USkillAttackAction::ExecuteAction(UStateMachine* StateMachine)
 
 **Files:** `ObservationElement.h/cpp`
 
-#### Structure
+**STATUS:** ✅ **UPDATED** - Now provides 71 features (up from original 3)
+
+#### Enhanced Structure (71 Features)
+
+The observation system has been significantly expanded to provide rich environmental and agent state information:
+
 ```cpp
 USTRUCT(BlueprintType)
 struct FObservationElement
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadWrite)
-    float DistanceToDestination;
+    // AGENT STATE (12 features)
+    FVector Position;           // 3: X, Y, Z
+    FVector Velocity;           // 3: VX, VY, VZ
+    FRotator Rotation;          // 3: Pitch, Yaw, Roll
+    float Health;               // 1: 0-100
+    float Stamina;              // 1: 0-100
+    float Shield;               // 1: 0-100
 
-    UPROPERTY(BlueprintReadWrite)
-    float AgentHealth;
+    // COMBAT STATE (3 features)
+    float WeaponCooldown;       // 1: seconds remaining
+    int32 Ammunition;           // 1: bullets/charges
+    int32 CurrentWeaponType;    // 1: weapon ID
 
-    UPROPERTY(BlueprintReadWrite)
-    int32 EnemiesNum;
+    // ENVIRONMENT PERCEPTION (32 features)
+    TArray<float> RaycastDistances;        // 16: normalized distances
+    TArray<ERaycastHitType> RaycastHitTypes; // 16: object types detected
+
+    // ENEMY INFORMATION (16 features)
+    int32 VisibleEnemyCount;              // 1: total visible
+    TArray<FEnemyObservation> NearbyEnemies; // 5×3=15: closest enemies
+
+    // TACTICAL CONTEXT (5 features)
+    bool bHasCover;             // 1: cover available?
+    float NearestCoverDistance; // 1: distance to cover
+    FVector2D CoverDirection;   // 2: normalized direction
+    ETerrainType CurrentTerrain;// 1: terrain type enum
+
+    // TEMPORAL FEATURES (2 features)
+    float TimeSinceLastAction;  // 1: seconds elapsed
+    int32 LastActionType;       // 1: action ID
+
+    // LEGACY (1 feature - backward compatibility)
+    float DistanceToDestination; // 1: distance to goal
+
+    // Utility functions
+    TArray<float> ToFeatureVector() const;  // Returns 71 normalized values
+    void Reset();
+    int32 GetFeatureCount() const { return 71; }
 };
 ```
 
-**Observation Flow:**
-1. Blueprint calls `StateMachine->GetObservation(Health, Distance, Enemies)`
-2. StateMachine stores values in member variables
-3. MCTS retrieves observations during tree search
-4. Observations influence reward calculation and similarity metrics
+#### Supporting Structures
 
-**Critical Limitation:** Only 3 features. Modern RL systems typically use:
-- Vision/sensor data (ray casts, perception)
-- Velocity, acceleration
-- Animation state
-- Inventory/equipment state
-- Environmental context (terrain, weather)
-- Temporal features (time since last action)
+**FEnemyObservation:**
+```cpp
+USTRUCT(BlueprintType)
+struct FEnemyObservation
+{
+    float Distance;        // Distance to enemy
+    float Health;          // Enemy's health percentage
+    float RelativeAngle;   // Angle from agent's forward (-180 to 180)
+};
+```
+
+**Enums:**
+- `ERaycastHitType`: None, Wall, Enemy, Cover, HealthPack, Weapon, Other
+- `ETerrainType`: Flat, Inclined, Rough, Water, Unknown
+
+#### Observation Flow
+
+**Blueprint → Strategic Layer:**
+1. BT Service gathers environmental data each tick
+2. Calls `StateMachine->UpdateObservation(FObservationElement)`
+3. Or uses granular updates: `UpdateAgentState()`, `UpdateCombatState()`, etc.
+
+**Strategic Layer Usage:**
+1. FSM states access `StateMachine->CurrentObservation`
+2. MCTS uses observations for:
+   - Reward calculation
+   - Observation similarity (for tree reuse)
+   - State evaluation
+
+**Feature Normalization:**
+- All features normalized to [0, 1] range via `ToFeatureVector()`
+- Ready for neural network input (Phase 2)
+- Consistent scaling improves MCTS performance
+
+#### Key Improvements
+
+✅ **Rich Perception:** 16-ray raycasting provides 360° awareness
+✅ **Tactical Information:** Cover detection, terrain analysis
+✅ **Combat Awareness:** Weapon state, ammunition tracking
+✅ **Enemy Tracking:** Top 5 nearest enemies with full details
+✅ **Temporal Context:** Action history for sequence learning
+✅ **Blueprint Exposed:** All fields accessible in BT tasks/services
+✅ **NN-Ready:** `ToFeatureVector()` outputs normalized array
 
 ---
 
@@ -412,24 +646,9 @@ The Unreal Engine LearningAgents plugin is enabled but **completely unused**. Th
 
 **Problems:**
 - Headers and implementations in same directories
-- No Public/Private separation
 - No clear API boundary
 - Difficult to maintain and extend
 
-**Standard Unreal Structure Should Be:**
-```
-Source/GameAI_Project/
-├── Public/              # API headers (.h)
-│   ├── Core/
-│   ├── States/
-│   ├── Actions/
-│   └── MCTS/
-└── Private/             # Implementations (.cpp) + internal headers
-    ├── Core/
-    ├── States/
-    ├── Actions/
-    └── MCTS/
-```
 
 **Impact:**
 - Increases build times (all headers exposed)
@@ -759,7 +978,6 @@ GameAI_Project.exe
 ## Future Roadmap
 
 ### Phase 1: Code Refactoring (Weeks 1-2)
-- [ ] Reorganize into Public/Private structure
 - [ ] Complete FleeState and DeadState implementations
 - [ ] Add unit tests for core components
 - [ ] Expose parameters to Blueprint

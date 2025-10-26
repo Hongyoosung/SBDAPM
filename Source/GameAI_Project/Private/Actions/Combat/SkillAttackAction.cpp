@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Actions/SkillAttackAction.h"
+#include "Actions/Combat/SkillAttackAction.h"
 #include "Core/StateMachine.h"
 
 void USkillAttackAction::ExecuteAction(UStateMachine* StateMachine)
