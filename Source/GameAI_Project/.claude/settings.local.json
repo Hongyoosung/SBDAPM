@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Foryoucom/Documents/GitHub/4d/SBDAPM/**)",
+      "Bash(dir:*)",
+      "Read(//c/**)",
+      "Bash(mkdir:*)",
+      "Bash(git mv:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

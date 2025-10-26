@@ -9,5 +9,8 @@ public class GameAI_Project : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
+
+		// Add Public directory to include paths
+		PublicIncludePaths.Add(ModuleDirectory + "/Public");
 	}
 }
