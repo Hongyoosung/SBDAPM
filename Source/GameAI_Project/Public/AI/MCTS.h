@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "Core/StateMachine.h"
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 #include "AI/MCTSNode.h"
 #include "MCTS.generated.h"
 

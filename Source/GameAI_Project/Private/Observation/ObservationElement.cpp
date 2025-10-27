@@ -1,6 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 
 TArray<float> FObservationElement::ToFeatureVector() const
 {
@@ -17,17 +15,17 @@ TArray<float> FObservationElement::ToFeatureVector() const
     Features.Add(Position.Z / 10000.0f);
 
     // Velocity (3)
-    Features.Add(Velocity.X / 1000.0f);  // Normalize by max expected velocity
-    Features.Add(Velocity.Y / 1000.0f);
-    Features.Add(Velocity.Z / 1000.0f);
+    Features.Add(FMath::Clamp(Velocity.X / 1000.0f, -1.0f, 1.0f));
+    Features.Add(FMath::Clamp(Velocity.Y / 1000.0f, -1.0f, 1.0f));
+    Features.Add(FMath::Clamp(Velocity.Z / 1000.0f, -1.0f, 1.0f));
 
     // Rotation (3) - Convert to normalized values
-    Features.Add(Rotation.Pitch / 180.0f);  // -1 to 1
+    Features.Add(Rotation.Pitch / 180.0f);  // [-1, 1]
     Features.Add(Rotation.Yaw / 180.0f);
     Features.Add(Rotation.Roll / 180.0f);
 
-    // Health, Stamina, Shield (3) - Already 0-100
-    Features.Add(Health / 100.0f);     // Normalize to 0-1
+    // Health, Stamina, Shield (3)
+    Features.Add(AgentHealth / 100.0f);  // [0, 1]
     Features.Add(Stamina / 100.0f);
     Features.Add(Shield / 100.0f);
 
@@ -35,9 +33,9 @@ TArray<float> FObservationElement::ToFeatureVector() const
     // COMBAT STATE (3 features)
     // ========================================
 
-    Features.Add(FMath::Clamp(WeaponCooldown / 10.0f, 0.0f, 1.0f));  // Normalize by max cooldown
-    Features.Add(FMath::Clamp(Ammunition / 100.0f, 0.0f, 1.0f));     // Normalize by max ammo
-    Features.Add(CurrentWeaponType / 10.0f);  // Normalize weapon type (assuming max 10 weapon types)
+    Features.Add(FMath::Clamp(WeaponCooldown / 5.0f, 0.0f, 1.0f));  // Max 5s cooldown
+    Features.Add(Ammunition / 100.0f);
+    Features.Add(static_cast<float>(CurrentWeaponType) / 10.0f);  // Max 10 weapon types
 
     // ========================================
     // ENVIRONMENT PERCEPTION (32 features)
@@ -49,17 +47,13 @@ TArray<float> FObservationElement::ToFeatureVector() const
         Features.Add(i < RaycastDistances.Num() ? RaycastDistances[i] : 1.0f);
     }
 
-    // Raycast Hit Types (16) - One-hot encode or normalize enum values
+    // Raycast Hit Types (16)
     for (int32 i = 0; i < 16; ++i)
     {
-        if (i < RaycastHitTypes.Num())
-        {
-            Features.Add(static_cast<float>(RaycastHitTypes[i]) / 6.0f);  // Normalize enum (0-6)
-        }
-        else
-        {
-            Features.Add(0.0f);
-        }
+        ERaycastHitType HitType = (i < RaycastHitTypes.Num())
+            ? RaycastHitTypes[i]
+            : ERaycastHitType::None;
+        Features.Add(static_cast<float>(HitType) / 7.0f);  // 8 enum values (0-7)
     }
 
     // ========================================
@@ -67,23 +61,22 @@ TArray<float> FObservationElement::ToFeatureVector() const
     // ========================================
 
     // Visible Enemy Count (1)
-    Features.Add(FMath::Clamp(VisibleEnemyCount / 20.0f, 0.0f, 1.0f));  // Normalize by max expected enemies
+    Features.Add(FMath::Clamp(static_cast<float>(VisibleEnemyCount) / 10.0f, 0.0f, 1.0f));
 
     // Nearby Enemies (5 × 3 = 15)
     for (int32 i = 0; i < 5; ++i)
     {
         if (i < NearbyEnemies.Num())
         {
-            Features.Add(FMath::Clamp(NearbyEnemies[i].Distance / 5000.0f, 0.0f, 1.0f));  // Normalize distance
-            Features.Add(NearbyEnemies[i].Health / 100.0f);  // Normalize health
-            Features.Add((NearbyEnemies[i].RelativeAngle + 180.0f) / 360.0f);  // Normalize angle to 0-1
+            TArray<float> EnemyFeatures = NearbyEnemies[i].ToFeatureArray();
+            Features.Append(EnemyFeatures);
         }
         else
         {
-            // No enemy data available - use neutral values
-            Features.Add(1.0f);  // Max distance (no enemy)
-            Features.Add(0.0f);  // No health
-            Features.Add(0.5f);  // Neutral angle
+            // Padding for missing enemies
+            Features.Add(1.0f);  // Max distance
+            Features.Add(1.0f);  // Full health (no threat)
+            Features.Add(0.0f);  // No angle
         }
     }
 
@@ -91,28 +84,26 @@ TArray<float> FObservationElement::ToFeatureVector() const
     // TACTICAL CONTEXT (5 features)
     // ========================================
 
-    Features.Add(bHasCover ? 1.0f : 0.0f);  // Boolean to float
-    Features.Add(FMath::Clamp(NearestCoverDistance / 5000.0f, 0.0f, 1.0f));  // Normalize distance
-    Features.Add(CoverDirection.X);  // Already normalized -1 to 1
+    Features.Add(bHasCover ? 1.0f : 0.0f);
+    Features.Add(FMath::Clamp(NearestCoverDistance / 5000.0f, 0.0f, 1.0f));  // Max 50m
+    Features.Add(CoverDirection.X);  // Already normalized
     Features.Add(CoverDirection.Y);
-    Features.Add(static_cast<float>(CurrentTerrain) / 4.0f);  // Normalize terrain enum (0-4)
+    Features.Add(static_cast<float>(CurrentTerrain) / 4.0f);  // 5 enum values (0-4)
 
     // ========================================
     // TEMPORAL FEATURES (2 features)
     // ========================================
 
-    Features.Add(FMath::Clamp(TimeSinceLastAction / 10.0f, 0.0f, 1.0f));  // Normalize by max expected time
-    Features.Add(LastActionType / 20.0f);  // Normalize action type (assuming max 20 action types)
+    Features.Add(FMath::Clamp(TimeSinceLastAction / 10.0f, 0.0f, 1.0f));  // Max 10s
+    Features.Add(static_cast<float>(FMath::Max(LastActionType, 0)) / 20.0f);  // Max 20 actions
 
     // ========================================
-    // LEGACY FIELDS (1 feature)
+    // LEGACY (1 feature)
     // ========================================
 
-    Features.Add(FMath::Clamp(DistanceToDestination / 5000.0f, 0.0f, 1.0f));  // Normalize distance
+    Features.Add(FMath::Clamp(DistanceToDestination / 10000.0f, 0.0f, 1.0f));
 
-    // Verify we have exactly 71 features
     check(Features.Num() == 71);
-
     return Features;
 }
 
@@ -122,7 +113,7 @@ void FObservationElement::Reset()
     Position = FVector::ZeroVector;
     Velocity = FVector::ZeroVector;
     Rotation = FRotator::ZeroRotator;
-    Health = 100.0f;
+    AgentHealth = 100.0f;
     Stamina = 100.0f;
     Shield = 0.0f;
 
@@ -151,4 +142,27 @@ void FObservationElement::Reset()
 
     // Legacy
     DistanceToDestination = 0.0f;
+}
+
+float FObservationElement::CalculateSimilarity(
+    const FObservationElement& A,
+    const FObservationElement& B)
+{
+    // Weighted feature comparison
+    float HealthDiff = FMath::Abs(A.AgentHealth - B.AgentHealth) / 100.0f;
+    float DistanceDiff = FMath::Abs(A.DistanceToDestination - B.DistanceToDestination) / 10000.0f;
+    float EnemyDiff = FMath::Abs(A.VisibleEnemyCount - B.VisibleEnemyCount) / 10.0f;
+
+    // Position similarity
+    float PositionDiff = FVector::Dist(A.Position, B.Position) / 10000.0f;
+
+    // Weighted average
+    float WeightedDiff =
+        0.3f * HealthDiff +
+        0.25f * DistanceDiff +
+        0.25f * EnemyDiff +
+        0.2f * PositionDiff;
+
+    // Convert difference to similarity (exponential decay)
+    return FMath::Exp(-WeightedDiff * 5.0f);  // [0, 1], higher = more similar
 }

@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "Actions/Action.h"
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 #include "MCTSNode.generated.h"
 
 UCLASS()

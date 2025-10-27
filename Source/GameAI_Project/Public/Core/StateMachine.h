@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 #include "StateMachine.generated.h"
 
 class UState;

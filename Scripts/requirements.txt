@@ -1,0 +1,19 @@
+# Python dependencies for RL training
+
+# Deep Learning
+torch>=2.0.0
+numpy>=1.24.0
+
+# Reinforcement Learning
+stable-baselines3>=2.0.0
+
+# Visualization
+tensorboard>=2.12.0
+matplotlib>=3.7.0
+
+# ONNX support
+onnx>=1.14.0
+onnxruntime>=1.15.0
+
+# Utilities
+tqdm>=4.65.0

@@ -2,7 +2,7 @@
 
 #include "BehaviorTree/BTService_UpdateObservation.h"
 #include "Core/StateMachine.h"
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/Character.h"

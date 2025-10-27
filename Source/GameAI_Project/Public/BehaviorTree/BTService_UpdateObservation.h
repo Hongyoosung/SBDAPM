@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTService.h"
-#include "Core/ObservationElement.h"
+#include "Observation/ObservationElement.h"
 #include "BTService_UpdateObservation.generated.h"
 
 class UStateMachine;
