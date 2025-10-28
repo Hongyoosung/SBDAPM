@@ -6,7 +6,8 @@
       "Read(//c/**)",
       "Bash(mkdir:*)",
       "Bash(git mv:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

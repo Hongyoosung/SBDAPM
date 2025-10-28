@@ -180,22 +180,18 @@ struct GAMEAI_PROJECT_API FTeamObservation
     //--------------------------------------------------------------------------
 
     /** Convert to feature vector for MCTS/NN */
-    UFUNCTION(BlueprintCallable, Category = "Team Observation")
     TArray<float> ToFeatureVector() const;
 
     /** Get total feature count: 40 + (N × 71) */
-    UFUNCTION(BlueprintPure, Category = "Team Observation")
     int32 GetFeatureCount() const
     {
         return 40 + (FollowerObservations.Num() * 71);
     }
 
     /** Reset to default values */
-    UFUNCTION(BlueprintCallable, Category = "Team Observation")
     void Reset();
 
     /** Build team observation from array of agents */
-    UFUNCTION(BlueprintCallable, Category = "Team Observation")
     static FTeamObservation BuildFromTeam(
         const TArray<AActor*>& TeamMembers,
         AActor* ObjectiveActor = nullptr,
@@ -203,7 +199,6 @@ struct GAMEAI_PROJECT_API FTeamObservation
     );
 
     /** Calculate observation similarity (for MCTS tree reuse) */
-    UFUNCTION(BlueprintCallable, Category = "Team Observation")
     static float CalculateSimilarity(
         const FTeamObservation& A,
         const FTeamObservation& B

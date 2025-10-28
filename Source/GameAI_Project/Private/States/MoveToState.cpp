@@ -57,7 +57,7 @@ void UMoveToState::UpdateState(UStateMachine* StateMachine, float Reward, float 
 
         // Log strategic context for debugging
         UE_LOG(LogTemp, Display, TEXT("MoveToState Strategic Context:"));
-        UE_LOG(LogTemp, Display, TEXT("  - Health: %.1f, Shield: %.1f"), CurrentObs.Health, CurrentObs.Shield);
+        UE_LOG(LogTemp, Display, TEXT("  - Health: %.1f, Shield: %.1f"), CurrentObs.AgentHealth, CurrentObs.Shield);
         UE_LOG(LogTemp, Display, TEXT("  - Enemies: %d, HasCover: %s"),
                CurrentObs.VisibleEnemyCount, CurrentObs.bHasCover ? TEXT("Yes") : TEXT("No"));
         UE_LOG(LogTemp, Display, TEXT("  - Stamina: %.1f"), CurrentObs.Stamina);
@@ -69,11 +69,11 @@ void UMoveToState::UpdateState(UStateMachine* StateMachine, float Reward, float 
         FString MovementMode = "Normal";
 
         // Determine movement mode based on observation
-        if (CurrentObs.Health < 40.0f || CurrentObs.VisibleEnemyCount >= 3)
+        if (CurrentObs.AgentHealth < 40.0f || CurrentObs.VisibleEnemyCount >= 3)
         {
             MovementMode = "Defensive";  // Prioritize cover and safety
         }
-        else if (CurrentObs.Health > 80.0f && CurrentObs.Stamina > 70.0f)
+        else if (CurrentObs.AgentHealth > 80.0f && CurrentObs.Stamina > 70.0f)
         {
             MovementMode = "Aggressive";  // Can take risks for better positioning
         }

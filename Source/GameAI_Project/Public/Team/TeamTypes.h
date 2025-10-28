@@ -82,6 +82,7 @@ enum class EStrategicCommandType : uint8
 UENUM(BlueprintType)
 enum class EEventPriority : uint8
 {
+	None = 0        UMETA(DisplayName = "None"),
 	Low = 1         UMETA(DisplayName = "Low Priority"),
 	Medium = 5      UMETA(DisplayName = "Medium Priority"),
 	High = 8        UMETA(DisplayName = "High Priority"),

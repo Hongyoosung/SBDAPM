@@ -128,6 +128,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
 	ETacticalAction LastTacticalAction = ETacticalAction::DefensiveHold;
 
+	/** Time since last tactical action was taken (seconds) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	float TimeSinceLastTacticalAction = 0.0f;
+
 	/** Previous observation (for experience collection) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
 	FObservationElement PreviousObservation;

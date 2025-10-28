@@ -68,7 +68,10 @@ void UTeamLeaderComponent::InitializeMCTS()
 	StrategicMCTS = NewObject<UMCTS>(this);
 	if (StrategicMCTS)
 	{
-		// Configure MCTS for team-level decisions
+		// Initialize MCTS for team-level decisions
+		StrategicMCTS->InitializeTeamMCTS(MCTSSimulations, 1.41f);
+
+		// Also set properties directly for compatibility
 		StrategicMCTS->MaxSimulations = MCTSSimulations;
 		StrategicMCTS->ExplorationParameter = 1.41f;
 		StrategicMCTS->DiscountFactor = 0.95f;
@@ -352,43 +355,11 @@ void UTeamLeaderComponent::RunStrategicDecisionMaking()
 	// Build observation
 	CurrentTeamObservation = BuildTeamObservation();
 
-	// TODO: Implement full MCTS strategic action space
-	// For now, use simple rule-based commands based on team observation
-	TMap<AActor*, FStrategicCommand> NewCommands;
-
-	for (AActor* Follower : GetAliveFollowers())
-	{
-		FStrategicCommand Command;
-
-		// Simple rule-based command generation
-		if (CurrentTeamObservation.TotalVisibleEnemies > 0)
-		{
-			// Enemies detected - assault
-			Command.CommandType = EStrategicCommandType::Assault;
-			Command.Priority = 7;
-		}
-		else if (CurrentTeamObservation.AverageTeamHealth < 50.0f)
-		{
-			// Low health - take cover
-			Command.CommandType = EStrategicCommandType::TakeCover;
-			Command.Priority = 8;
-		}
-		else if (ObjectiveActor && CurrentTeamObservation.DistanceToObjective > 1000.0f)
-		{
-			// Far from objective - advance
-			Command.CommandType = EStrategicCommandType::Advance;
-			Command.TargetLocation = ObjectiveActor->GetActorLocation();
-			Command.Priority = 5;
-		}
-		else
-		{
-			// Default - patrol
-			Command.CommandType = EStrategicCommandType::Patrol;
-			Command.Priority = 3;
-		}
-
-		NewCommands.Add(Follower, Command);
-	}
+	// Run MCTS to generate strategic commands
+	TMap<AActor*, FStrategicCommand> NewCommands = StrategicMCTS->RunTeamMCTS(
+		CurrentTeamObservation,
+		GetAliveFollowers()
+	);
 
 	// Issue commands
 	OnMCTSComplete(NewCommands);
@@ -422,44 +393,17 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 	TArray<AActor*> FollowersCopy = GetAliveFollowers();
 	AActor* ObjectiveCopy = ObjectiveActor;
 
+	// Capture MCTS pointer for async task
+	UMCTS* MCTSPtr = StrategicMCTS;
+
 	// Launch async task
-	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, TeamObsCopy, FollowersCopy, ObjectiveCopy]()
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, MCTSPtr, TeamObsCopy, FollowersCopy]()
 	{
 		// Run MCTS on background thread
-		// TODO: Implement thread-safe MCTS execution
-
-		// For now, simple rule-based logic
-		TMap<AActor*, FStrategicCommand> NewCommands;
-
-		for (AActor* Follower : FollowersCopy)
-		{
-			FStrategicCommand Command;
-
-			// Simple rule-based command generation
-			if (TeamObsCopy.TotalVisibleEnemies > 0)
-			{
-				Command.CommandType = EStrategicCommandType::Assault;
-				Command.Priority = 7;
-			}
-			else if (TeamObsCopy.AverageTeamHealth < 50.0f)
-			{
-				Command.CommandType = EStrategicCommandType::TakeCover;
-				Command.Priority = 8;
-			}
-			else if (ObjectiveCopy && TeamObsCopy.DistanceToObjective > 1000.0f)
-			{
-				Command.CommandType = EStrategicCommandType::Advance;
-				Command.TargetLocation = ObjectiveCopy->GetActorLocation();
-				Command.Priority = 5;
-			}
-			else
-			{
-				Command.CommandType = EStrategicCommandType::Patrol;
-				Command.Priority = 3;
-			}
-
-			NewCommands.Add(Follower, Command);
-		}
+		TMap<AActor*, FStrategicCommand> NewCommands = MCTSPtr->RunTeamMCTS(
+			TeamObsCopy,
+			FollowersCopy
+		);
 
 		// Return to game thread to issue commands
 		AsyncTask(ENamedThreads::GameThread, [this, NewCommands]()
@@ -477,8 +421,12 @@ void UTeamLeaderComponent::OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCo
 	// Issue commands to followers
 	IssueCommands(NewCommands);
 
+	// Wrap commands in FStrategicCommandMap struct for delegate
+	FStrategicCommandMap CommandMap;
+	CommandMap.Commands = NewCommands;
+
 	// Broadcast event
-	OnStrategicDecisionMade.Broadcast(NewCommands);
+	OnStrategicDecisionMade.Broadcast(CommandMap);
 
 	bMCTSRunning = false;
 }

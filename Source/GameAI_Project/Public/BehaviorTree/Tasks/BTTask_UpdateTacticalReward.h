@@ -8,6 +8,17 @@
 #include "BTTask_UpdateTacticalReward.generated.h"
 
 /**
+ * Reward calculation modes for tactical reward task
+ */
+UENUM(BlueprintType)
+enum class ERewardMode : uint8
+{
+	Manual UMETA(DisplayName = "Manual (Specify Value)"),
+	FromBlackboard UMETA(DisplayName = "From Blackboard"),
+	AutoCalculate UMETA(DisplayName = "Auto-Calculate")
+};
+
+/**
  * Behavior Tree Task: Update Tactical Reward
  *
  * Provides reward feedback to the follower's RL policy based on
@@ -45,7 +56,7 @@ public:
 
 	/** Reward calculation mode */
 	UPROPERTY(EditAnywhere, Category = "Reward")
-	TEnumAsByte<ERewardMode> RewardMode = ERewardMode::AutoCalculate;
+	ERewardMode RewardMode = ERewardMode::AutoCalculate;
 
 	/** Manual reward value (used if RewardMode = Manual) */
 	UPROPERTY(EditAnywhere, Category = "Reward", meta = (EditCondition = "RewardMode == ERewardMode::Manual"))
@@ -80,15 +91,6 @@ public:
 	bool bLogReward = true;
 
 protected:
-	/** Reward calculation modes */
-	UENUM()
-	enum ERewardMode
-	{
-		Manual UMETA(DisplayName = "Manual (Specify Value)"),
-		FromBlackboard UMETA(DisplayName = "From Blackboard"),
-		AutoCalculate UMETA(DisplayName = "Auto-Calculate")
-	};
-
 	/** Get follower component from AI controller */
 	class UFollowerAgentComponent* GetFollowerComponent(UBehaviorTreeComponent& OwnerComp) const;
 

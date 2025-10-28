@@ -25,11 +25,12 @@ enum class ERaycastHitType : uint8
 UENUM(BlueprintType)
 enum class ETerrainType : uint8
 {
+    Unknown     UMETA(DisplayName = "Unknown"),
     Flat        UMETA(DisplayName = "Flat Ground"),
-    Inclined    UMETA(DisplayName = "Inclined/Slope"),
+    Incline     UMETA(DisplayName = "Inclined/Slope"),
     Rough       UMETA(DisplayName = "Rough Terrain"),
-    Water       UMETA(DisplayName = "Water/Liquid"),
-    Unknown     UMETA(DisplayName = "Unknown")
+    Steep       UMETA(DisplayName = "Steep Slope"),
+    Cliff       UMETA(DisplayName = "Cliff/Vertical")
 };
 
 /**

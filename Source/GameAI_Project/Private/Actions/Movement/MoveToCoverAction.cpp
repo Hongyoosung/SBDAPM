@@ -198,11 +198,11 @@ float UMoveToCoverAction::EvaluateCoverUrgency(UStateMachine* StateMachine) cons
     float Urgency = 0.0f;
 
     // Factor 1: Low health = high urgency
-    if (CurrentObs.Health < 30.0f)
+    if (CurrentObs.AgentHealth < 30.0f)
     {
         Urgency += 0.5f;
     }
-    else if (CurrentObs.Health < 60.0f)
+    else if (CurrentObs.AgentHealth < 60.0f)
     {
         Urgency += 0.3f;
     }
@@ -232,7 +232,7 @@ float UMoveToCoverAction::EvaluateCoverUrgency(UStateMachine* StateMachine) cons
     }
 
     // Factor 4: Low shield = higher urgency
-    if (CurrentObs.Shield <= 0.0f && CurrentObs.Health < 80.0f)
+    if (CurrentObs.Shield <= 0.0f && CurrentObs.AgentHealth < 80.0f)
     {
         Urgency += 0.2f;
     }

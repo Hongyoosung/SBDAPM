@@ -10,7 +10,7 @@
  * Tactical actions that can be selected by the RL policy
  * These are lower-level actions executed within a strategic context
  */
-UENUM(BlueprintType)
+UENUM(BlueprintType, meta=(UseAsBlackboardKey))
 enum class ETacticalAction : uint8
 {
 	// Combat Tactics (used in Assault state)

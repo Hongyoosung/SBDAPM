@@ -5,6 +5,7 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "AIController.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Bool.h"
 
 UBTTask_UpdateTacticalReward::UBTTask_UpdateTacticalReward()
 {

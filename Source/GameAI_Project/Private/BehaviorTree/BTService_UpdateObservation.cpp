@@ -3,12 +3,16 @@
 #include "BehaviorTree/BTService_UpdateObservation.h"
 #include "Core/StateMachine.h"
 #include "Observation/ObservationElement.h"
+#include "Team/FollowerAgentComponent.h"
+#include "Interfaces/CombatStatsInterface.h"
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 
 UBTService_UpdateObservation::UBTService_UpdateObservation()
 {
@@ -60,22 +64,29 @@ void UBTService_UpdateObservation::TickNode(UBehaviorTreeComponent& OwnerComp, u
 		// Gather observation data
 		FObservationElement NewObservation = GatherObservationData(AIController, ControlledPawn);
 
-		// Get the StateMachine component
+		// Update FollowerAgentComponent's local observation
+		UFollowerAgentComponent* FollowerComp = ControlledPawn->FindComponentByClass<UFollowerAgentComponent>();
+		if (FollowerComp)
+		{
+			FollowerComp->UpdateLocalObservation(NewObservation);
+
+			if (bEnableDebugLog)
+			{
+				UE_LOG(LogTemp, Log, TEXT("BTService_UpdateObservation: Updated FollowerAgent observation - Health: %.1f, Enemies: %d, LastAction: %d"),
+					NewObservation.AgentHealth, NewObservation.VisibleEnemyCount, NewObservation.LastActionType);
+			}
+		}
+
+		// Get the StateMachine component (legacy support)
 		UStateMachine* StateMachine = ControlledPawn->FindComponentByClass<UStateMachine>();
 		if (StateMachine)
 		{
 			// Update the StateMachine's observation
 			StateMachine->UpdateObservation(NewObservation);
-
-			if (bEnableDebugLog)
-			{
-				UE_LOG(LogTemp, Log, TEXT("BTService_UpdateObservation: Updated StateMachine observation - Health: %.1f, Enemies: %d"),
-					NewObservation.Health, NewObservation.VisibleEnemyCount);
-			}
 		}
-		else if (bEnableDebugLog)
+		else if (bEnableDebugLog && !FollowerComp)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("BTService_UpdateObservation: No StateMachine component found on pawn"));
+			UE_LOG(LogTemp, Warning, TEXT("BTService_UpdateObservation: No FollowerAgentComponent or StateMachine found on pawn"));
 		}
 
 		// Sync to Blackboard
@@ -108,6 +119,20 @@ FObservationElement UBTService_UpdateObservation::GatherObservationData(AAIContr
 	DetectCover(Observation, ControlledPawn);
 	UpdateCombatState(Observation, ControlledPawn);
 
+	// Get temporal features from FollowerAgentComponent
+	UFollowerAgentComponent* FollowerComp = ControlledPawn->FindComponentByClass<UFollowerAgentComponent>();
+	if (FollowerComp)
+	{
+		Observation.TimeSinceLastAction = FollowerComp->TimeSinceLastTacticalAction;
+		Observation.LastActionType = static_cast<int32>(FollowerComp->LastTacticalAction);
+	}
+	else
+	{
+		// Fallback if no FollowerAgentComponent is present
+		Observation.TimeSinceLastAction = 0.0f;
+		Observation.LastActionType = -1;
+	}
+
 	return Observation;
 }
 
@@ -122,25 +147,23 @@ void UBTService_UpdateObservation::UpdateAgentState(FObservationElement& Observa
 	// Rotation
 	Observation.Rotation = ControlledPawn->GetActorRotation();
 
-	// Health (try to get from Character, otherwise use default)
-	ACharacter* Character = Cast<ACharacter>(ControlledPawn);
-	if (Character)
+	// Try to get combat stats from ICombatStatsInterface
+	ICombatStatsInterface* CombatStats = Cast<ICombatStatsInterface>(ControlledPawn);
+	if (CombatStats)
 	{
-		// Note: This assumes your character has a Health property accessible via Blueprint
-		// You may need to adjust this based on your actual health system
-		// For now, we'll use a placeholder that can be overridden in Blueprint
-		Observation.Health = 100.0f; // TODO: Get actual health from character
+		// Get health, stamina, shield from interface
+		Observation.AgentHealth = CombatStats->Execute_GetHealthPercentage(ControlledPawn);
+		Observation.Stamina = CombatStats->Execute_GetStaminaPercentage(ControlledPawn);
+		Observation.Shield = CombatStats->Execute_GetShieldPercentage(ControlledPawn);
 	}
 	else
 	{
-		Observation.Health = 100.0f;
+		// Fallback: Use default values
+		// In practice, users should implement ICombatStatsInterface on their character
+		Observation.AgentHealth = 100.0f;
+		Observation.Stamina = 100.0f;
+		Observation.Shield = 0.0f;
 	}
-
-	// Stamina (placeholder)
-	Observation.Stamina = 100.0f; // TODO: Get actual stamina
-
-	// Shield (placeholder)
-	Observation.Shield = 0.0f; // TODO: Get actual shield value
 }
 
 void UBTService_UpdateObservation::PerformRaycastPerception(FObservationElement& Observation, APawn* ControlledPawn)
@@ -347,11 +370,81 @@ void UBTService_UpdateObservation::DetectCover(FObservationElement& Observation,
 
 void UBTService_UpdateObservation::UpdateCombatState(FObservationElement& Observation, APawn* ControlledPawn)
 {
-	// Placeholder combat state
-	// TODO: Integrate with your weapon/combat system
-	Observation.WeaponCooldown = 0.0f;
-	Observation.Ammunition = 30;
-	Observation.CurrentWeaponType = 0;
+	// Try to get combat stats from ICombatStatsInterface
+	ICombatStatsInterface* CombatStats = Cast<ICombatStatsInterface>(ControlledPawn);
+	if (CombatStats)
+	{
+		// Get weapon/combat stats from interface
+		Observation.WeaponCooldown = CombatStats->Execute_GetWeaponCooldown(ControlledPawn);
+		Observation.Ammunition = CombatStats->Execute_GetAmmunition(ControlledPawn);
+		Observation.CurrentWeaponType = CombatStats->Execute_GetWeaponType(ControlledPawn);
+	}
+	else
+	{
+		// Fallback: Use default values
+		Observation.WeaponCooldown = 0.0f;
+		Observation.Ammunition = 100.0f;
+		Observation.CurrentWeaponType = 0;
+	}
+
+	// Detect terrain type
+	Observation.CurrentTerrain = DetectTerrainType(ControlledPawn);
+}
+
+ETerrainType UBTService_UpdateObservation::DetectTerrainType(APawn* ControlledPawn)
+{
+	UWorld* World = ControlledPawn->GetWorld();
+	if (!World)
+	{
+		return ETerrainType::Flat;
+	}
+
+	FVector StartLocation = ControlledPawn->GetActorLocation();
+	FVector EndLocation = StartLocation - FVector(0, 0, 200.0f); // Trace downward 2 meters
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(ControlledPawn);
+
+	bool bHit = World->LineTraceSingleByChannel(
+		HitResult,
+		StartLocation,
+		EndLocation,
+		ECC_Visibility,
+		QueryParams
+	);
+
+	if (bHit)
+	{
+		// Check surface normal to determine terrain type
+		FVector SurfaceNormal = HitResult.ImpactNormal;
+		float SlopeAngle = FMath::Acos(FVector::DotProduct(SurfaceNormal, FVector::UpVector));
+		float SlopeAngleDegrees = FMath::RadiansToDegrees(SlopeAngle);
+
+		// Classify terrain based on slope angle
+		if (SlopeAngleDegrees < 5.0f)
+		{
+			return ETerrainType::Flat;
+		}
+		else if (SlopeAngleDegrees < 20.0f)
+		{
+			return ETerrainType::Incline;
+		}
+		else if (SlopeAngleDegrees < 45.0f)
+		{
+			return ETerrainType::Rough;
+		}
+		else if (SlopeAngleDegrees < 70.0f)
+		{
+			return ETerrainType::Steep;
+		}
+		else
+		{
+			return ETerrainType::Cliff;
+		}
+	}
+
+	return ETerrainType::Flat;
 }
 
 void UBTService_UpdateObservation::SyncToBlackboard(UBlackboardComponent* BlackboardComp, const FObservationElement& Observation)

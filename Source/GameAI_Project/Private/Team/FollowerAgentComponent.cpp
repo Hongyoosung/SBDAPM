@@ -385,6 +385,7 @@ ETacticalAction UFollowerAgentComponent::QueryRLPolicy()
 	// Store for experience collection
 	PreviousObservation = CurrentObs;
 	LastTacticalAction = SelectedAction;
+	TimeSinceLastTacticalAction = 0.0f;  // Reset timer when new action is selected
 
 	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': RL policy selected action: %s"),
 		*GetOwner()->GetName(), *URLPolicyNetwork::GetActionName(SelectedAction));
@@ -406,20 +407,18 @@ TArray<float> UFollowerAgentComponent::GetRLActionProbabilities()
 
 void UFollowerAgentComponent::ProvideReward(float Reward, bool bTerminal)
 {
-	if (!bUseRLPolicy || !TacticalPolicy || !bCollectExperiences)
-	{
-		return;
-	}
-
-	// Accumulate reward
+	// Always accumulate reward (independent of RL policy or experience collection)
 	AccumulatedReward += Reward;
 
-	// Store experience
-	FObservationElement CurrentObs = GetLocalObservation();
-	TacticalPolicy->StoreExperience(PreviousObservation, LastTacticalAction, Reward, CurrentObs, bTerminal);
-
-	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
+	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
 		*GetOwner()->GetName(), Reward, AccumulatedReward, bTerminal ? TEXT("Yes") : TEXT("No"));
+
+	// Store experience if RL policy is enabled and collecting experiences
+	if (bUseRLPolicy && TacticalPolicy && bCollectExperiences)
+	{
+		FObservationElement CurrentObs = GetLocalObservation();
+		TacticalPolicy->StoreExperience(PreviousObservation, LastTacticalAction, Reward, CurrentObs, bTerminal);
+	}
 
 	// Reset episode if terminal
 	if (bTerminal)
@@ -475,6 +474,7 @@ FString UFollowerAgentComponent::GetStateName(EFollowerState State)
 void UFollowerAgentComponent::UpdateCommandTimer(float DeltaTime)
 {
 	TimeSinceLastCommand += DeltaTime;
+	TimeSinceLastTacticalAction += DeltaTime;
 
 	// Check for command expiration
 	if (IsCommandValid())

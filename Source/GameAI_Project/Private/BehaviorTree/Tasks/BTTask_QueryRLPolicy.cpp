@@ -7,6 +7,8 @@
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "AIController.h"
 #include "DrawDebugHelpers.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Enum.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_String.h"
 
 UBTTask_QueryRLPolicy::UBTTask_QueryRLPolicy()
 {

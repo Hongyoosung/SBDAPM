@@ -118,7 +118,7 @@ float UTacticalRepositionAction::EvaluateCurrentPosition(UStateMachine* StateMac
     }
 
     // Factor 4: Health/Shield status (lower health = lower position quality)
-    if (CurrentObs.Health < 50.0f && !CurrentObs.bHasCover)
+    if (CurrentObs.AgentHealth < 50.0f && !CurrentObs.bHasCover)
     {
         Quality -= 0.2f;  // Low health without cover is very bad
     }
@@ -142,7 +142,7 @@ FVector UTacticalRepositionAction::CalculateRepositionDestination(UStateMachine*
     FObservationElement CurrentObs = StateMachine->GetCurrentObservation();
 
     // Strategy 1: If under heavy fire (low health, many enemies), find safe position
-    if (CurrentObs.Health < 40.0f || CurrentObs.VisibleEnemyCount >= 3)
+    if (CurrentObs.AgentHealth < 40.0f || CurrentObs.VisibleEnemyCount >= 3)
     {
         return FindSafePosition(StateMachine);
     }
@@ -186,7 +186,7 @@ bool UTacticalRepositionAction::ShouldReposition(UStateMachine* StateMachine) co
     FObservationElement CurrentObs = StateMachine->GetCurrentObservation();
 
     // Force reposition if in immediate danger
-    if (CurrentObs.Health < 30.0f && !CurrentObs.bHasCover)
+    if (CurrentObs.AgentHealth < 30.0f && !CurrentObs.bHasCover)
     {
         return true;
     }
@@ -256,7 +256,7 @@ FVector UTacticalRepositionAction::FindSafePosition(UStateMachine* StateMachine)
 
     // Calculate safe position
     float RepositionDistance = FMath::Clamp(
-        (1.0f - CurrentObs.Health / 100.0f) * MaxRepositionDistance,
+        (1.0f - CurrentObs.AgentHealth / 100.0f) * MaxRepositionDistance,
         MinRepositionDistance,
         MaxRepositionDistance
     );

@@ -4,9 +4,12 @@
 #include "States/AttackState.h"
 #include "States/MoveToState.h"
 #include "Core/StateMachine.h"
+#include "Observation/TeamObservation.h"
+#include "Team/TeamTypes.h"
 
 UMCTS::UMCTS()
-    : RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0), ExplorationParameter(1.41f)
+    : RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0)
+    , MaxSimulations(500), DiscountFactor(0.95f), ExplorationParameter(1.41f)
 {
 }
 
@@ -126,14 +129,14 @@ float UMCTS::CalculateNodeScore(UMCTSNode* Node) const
 
 float UMCTS::CalculateDynamicExplorationParameter() const
 {
-    // Ʈ���� ���̿� ���� Ž�� �Ķ���� ����
+
     float DepthFactor = FMath::Max(0.5f, 1.0f - (TreeDepth / 20.0f));
 
-    // ��������� ��� ���� ���� ����
+
     float AverageReward = (RootNode->TotalReward / RootNode->VisitCount);
     float RewardFactor = FMath::Max(0.5f, 1.0f - (AverageReward / 100.0f));  // 100�� �ִ� ���� ����
 
-    // �ð��� ���� ���� (�ð��� �������� Ž�� ����)
+
     //float TimeFactor = FMath::Max(0.5f, 1.0f - (World->GetWorld()->GetTimeSeconds() / 300.0f));  // 300�� �� �ּҰ�
 
     return ExplorationParameter * DepthFactor * RewardFactor;
@@ -144,7 +147,7 @@ float UMCTS::CalculateObservationSimilarity(const FObservationElement& Obs1, con
 {
     // �� ����� ���̸� ����ϰ� ����ȭ
     float DistanceDiff = FMath::Abs(Obs1.DistanceToDestination - Obs2.DistanceToDestination) / 100.0f; // �Ÿ��� 100���� ������ ����ȭ
-    float HealthDiff = FMath::Abs(Obs1.Health - Obs2.Health) / 100.0f; // ü���� 100���� ������ ����ȭ
+    float HealthDiff = FMath::Abs(Obs1.AgentHealth - Obs2.AgentHealth) / 100.0f; // ü���� 100���� ������ ����ȭ
     float EnemiesDiff = FMath::Abs(Obs1.VisibleEnemyCount - Obs2.VisibleEnemyCount) / 10.0f; // ���� ���� 10���� ������ ����ȭ
 
     // �� ��ҿ� ����ġ ����
@@ -182,8 +185,6 @@ void UMCTS::Expand(TArray<UAction*> PossibleActions)
 
 void UMCTS::Backpropagate()
 {
-    // ���� ������ ������Ʈ
-    float DiscountFactor = 0.95f;
     int Depth = 0;
 
     while (CurrentNode != RootNode)
@@ -217,12 +218,12 @@ float UMCTS::CalculateImmediateReward(UMCTSNode* Node) const
 
     // Default reward calculation (for MoveToState, AttackState, etc.)
     float BaseDistanceReward = 100.0f - Obs.DistanceToDestination;
-    float BaseHealthReward = Obs.Health;
+    float BaseHealthReward = Obs.AgentHealth;
     float BaseEnemyPenalty = -10.0f * Obs.VisibleEnemyCount;
 
     // Detect if this is likely a flee scenario based on observation characteristics
     // Heuristic: If health is low (<40) AND enemies are numerous (>2), likely fleeing
-    bool bLikelyFleeScenario = (Obs.Health < 40.0f) && (Obs.VisibleEnemyCount > 2);
+    bool bLikelyFleeScenario = (Obs.AgentHealth < 40.0f) && (Obs.VisibleEnemyCount > 2);
 
     if (bLikelyFleeScenario)
     {
@@ -252,7 +253,7 @@ float UMCTS::CalculateImmediateReward(UMCTSNode* Node) const
         // Reward maintaining health (penalize damage taken)
         // Note: We'd need previous health to calculate this properly
         // For now, just reward higher health during flee
-        float HealthPreservationReward = Obs.Health * 0.5f; // Higher health = better
+        float HealthPreservationReward = Obs.AgentHealth * 0.5f; // Higher health = better
 
         // 4. Stamina Penalty (can't sprint effectively if low stamina)
         float StaminaPenalty = (Obs.Stamina < 20.0f) ? -30.0f : 0.0f;
@@ -361,8 +362,176 @@ FObservationElement UMCTS::GetCurrentObservation(UStateMachine* StateMachine)
     FObservationElement Observation{};
 
     Observation.DistanceToDestination = StateMachine->DistanceToDestination;
-    Observation.Health = StateMachine->AgentHealth;
+    Observation.AgentHealth = StateMachine->AgentHealth;
     Observation.VisibleEnemyCount = StateMachine->EnemiesNum;
 
     return Observation;
+}
+
+
+//==============================================================================
+// TEAM-LEVEL MCTS IMPLEMENTATION (New Architecture)
+//==============================================================================
+
+void UMCTS::InitializeTeamMCTS(int32 InMaxSimulations, float InExplorationParam)
+{
+    MaxSimulations = InMaxSimulations;
+    ExplorationParameter = InExplorationParam;
+
+    UE_LOG(LogTemp, Log, TEXT("MCTS: Initialized for team-level decisions (Simulations: %d, Exploration: %.2f)"),
+        MaxSimulations, ExplorationParameter);
+}
+
+
+TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTS(
+    const FTeamObservation& TeamObservation,
+    const TArray<AActor*>& Followers)
+{
+    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level search for %d followers"), Followers.Num());
+
+    // TODO: Implement full MCTS tree search for team-level action space
+    // Current implementation uses rule-based heuristics as placeholder
+    //
+    // Full implementation would:
+    // 1. Create root node with current team observation
+    // 2. For each simulation:
+    //    a. Selection: UCT-based node selection
+    //    b. Expansion: Generate child nodes for command combinations
+    //    c. Simulation: Evaluate team reward
+    //    d. Backpropagation: Update node statistics
+    // 3. Select best command combination based on visit counts/rewards
+
+    return GenerateStrategicCommands(TeamObservation, Followers);
+}
+
+
+float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs) const
+{
+    // Team health component (0-200 points)
+    float HealthReward = TeamObs.AverageTeamHealth * 2.0f;
+
+    // Formation coherence (0-50 points)
+    float FormationReward = TeamObs.FormationCoherence * 50.0f;
+
+    // Objective progress (0-100 points)
+    // Closer to objective = higher reward
+    float ObjectiveReward = 0.0f;
+    if (TeamObs.DistanceToObjective > 0.0f)
+    {
+        // Max reward at 0 distance, min at 10000cm (100m)
+        ObjectiveReward = FMath::Max(0.0f, 100.0f - (TeamObs.DistanceToObjective / 100.0f));
+    }
+
+    // Combat effectiveness (variable, can be negative)
+    float CombatReward = TeamObs.KillDeathRatio * 50.0f;
+
+    // Threat penalty (-100 to 0 points)
+    float ThreatPenalty = -TeamObs.ThreatLevel * 20.0f;
+
+    // Outnumbered penalty (-100 points)
+    float OutnumberedPenalty = TeamObs.bOutnumbered ? -100.0f : 0.0f;
+
+    // Flanked penalty (-50 points)
+    float FlankedPenalty = TeamObs.bFlanked ? -50.0f : 0.0f;
+
+    // Cover advantage bonus (+50 points)
+    float CoverBonus = TeamObs.bHasCoverAdvantage ? 50.0f : 0.0f;
+
+    // High ground bonus (+30 points)
+    float HighGroundBonus = TeamObs.bHasHighGround ? 30.0f : 0.0f;
+
+    float TotalReward = HealthReward + FormationReward + ObjectiveReward + CombatReward
+                      + ThreatPenalty + OutnumberedPenalty + FlankedPenalty
+                      + CoverBonus + HighGroundBonus;
+
+    UE_LOG(LogTemp, Verbose, TEXT("MCTS Team Reward: %.1f (Health=%.1f, Formation=%.1f, Objective=%.1f, Combat=%.1f, Threat=%.1f)"),
+        TotalReward, HealthReward, FormationReward, ObjectiveReward, CombatReward, ThreatPenalty);
+
+    return TotalReward;
+}
+
+
+TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
+    const FTeamObservation& TeamObs,
+    const TArray<AActor*>& Followers) const
+{
+    TMap<AActor*, FStrategicCommand> Commands;
+
+    // Rule-based command generation (placeholder for full MCTS)
+    // This implements simple tactical AI based on team situation
+
+    for (AActor* Follower : Followers)
+    {
+        if (!Follower) continue;
+
+        FStrategicCommand Command;
+
+        // Decision logic based on team observation
+        if (TeamObs.TotalVisibleEnemies > 0)
+        {
+            // COMBAT SITUATION
+            if (TeamObs.bOutnumbered && TeamObs.AverageTeamHealth < 60.0f)
+            {
+                // Outnumbered and low health - retreat
+                Command.CommandType = EStrategicCommandType::Retreat;
+                Command.Priority = 9;
+                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - RETREAT (outnumbered, low health)"), *Follower->GetName());
+            }
+            else if (TeamObs.bFlanked)
+            {
+                // Being flanked - regroup
+                Command.CommandType = EStrategicCommandType::Regroup;
+                Command.TargetLocation = TeamObs.TeamCentroid;
+                Command.Priority = 8;
+                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - REGROUP (flanked)"), *Follower->GetName());
+            }
+            else if (TeamObs.AverageTeamHealth > 70.0f && !TeamObs.bOutnumbered)
+            {
+                // Good health, not outnumbered - assault
+                Command.CommandType = EStrategicCommandType::Assault;
+                Command.Priority = 7;
+                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ASSAULT (healthy, advantage)"), *Follower->GetName());
+            }
+            else
+            {
+                // Default combat - take cover and suppress
+                Command.CommandType = EStrategicCommandType::TakeCover;
+                Command.Priority = 6;
+                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - TAKE COVER (neutral combat)"), *Follower->GetName());
+            }
+        }
+        else if (TeamObs.AverageTeamHealth < 50.0f)
+        {
+            // NO ENEMIES, LOW HEALTH - hold position and recover
+            Command.CommandType = EStrategicCommandType::HoldPosition;
+            Command.Priority = 5;
+            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - HOLD POSITION (recovering)"), *Follower->GetName());
+        }
+        else if (TeamObs.DistanceToObjective > 1000.0f)
+        {
+            // FAR FROM OBJECTIVE - advance
+            Command.CommandType = EStrategicCommandType::Advance;
+            Command.Priority = 5;
+            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ADVANCE (toward objective)"), *Follower->GetName());
+        }
+        else if (TeamObs.FormationCoherence < 0.5f)
+        {
+            // FORMATION BROKEN - regroup
+            Command.CommandType = EStrategicCommandType::Regroup;
+            Command.TargetLocation = TeamObs.TeamCentroid;
+            Command.Priority = 4;
+            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - REGROUP (formation broken)"), *Follower->GetName());
+        }
+        else
+        {
+            // DEFAULT - patrol
+            Command.CommandType = EStrategicCommandType::Patrol;
+            Command.Priority = 3;
+            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - PATROL (default)"), *Follower->GetName());
+        }
+
+        Commands.Add(Follower, Command);
+    }
+
+    return Commands;
 }

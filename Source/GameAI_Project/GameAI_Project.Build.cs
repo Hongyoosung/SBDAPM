@@ -16,7 +16,9 @@ public class GameAI_Project : ModuleRules
 			"InputCore", 
 			"EnhancedInput", 
 			"AIModule",
-			"NavigationSystem"
+			"NavigationSystem",
+			"Json",              
+			"JsonUtilities" 
 		});
 		
 		PrivateDependencyModuleNames.AddRange(new string[] 

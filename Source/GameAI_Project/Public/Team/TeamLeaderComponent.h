@@ -13,9 +13,18 @@ class UMCTS;
 /**
  * Delegate for strategic decision events
  */
+USTRUCT(BlueprintType)
+struct FStrategicCommandMap
+{
+	GENERATED_BODY()
+    
+	UPROPERTY(BlueprintReadWrite)
+	TMap<AActor*, FStrategicCommand> Commands;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnStrategicDecisionMade,
-	const TMap<AActor*, FStrategicCommand>&, Commands
+	FStrategicCommandMap, Commands
 );
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(

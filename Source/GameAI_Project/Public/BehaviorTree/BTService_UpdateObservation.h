@@ -173,6 +173,11 @@ private:
 	ERaycastHitType ClassifyHitType(const FHitResult& HitResult);
 
 	/**
+	 * Detect terrain type based on surface normal and slope angle.
+	 */
+	ETerrainType DetectTerrainType(APawn* ControlledPawn);
+
+	/**
 	 * Time accumulator for update interval timing.
 	 */
 	float TimeAccumulator = 0.0f;

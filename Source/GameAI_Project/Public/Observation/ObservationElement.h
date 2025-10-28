@@ -139,15 +139,12 @@ struct GAMEAI_PROJECT_API FObservationElement
     }
 
     /** Convert observation to normalized feature vector (71 elements) */
-    UFUNCTION(BlueprintCallable, Category = "Observation")
     TArray<float> ToFeatureVector() const;
 
     /** Get feature count */
-    UFUNCTION(BlueprintPure, Category = "Observation")
     static int32 GetFeatureCount() { return 71; }
 
     /** Reset to default values */
-    UFUNCTION(BlueprintCallable, Category = "Observation")
     void Reset();
 
     /** Initialize raycasts arrays with proper size */
@@ -158,6 +155,5 @@ struct GAMEAI_PROJECT_API FObservationElement
     }
 
     /** Calculate observation similarity (for MCTS tree reuse) */
-    UFUNCTION(BlueprintCallable, Category = "Observation")
     static float CalculateSimilarity(const FObservationElement& A, const FObservationElement& B);
 };

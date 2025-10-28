@@ -143,7 +143,7 @@ float UMoveToAllyAction::EvaluateAllyMovementPriority(UStateMachine* StateMachin
 
     // Higher priority if:
     // 1. Low health (want support from allies)
-    if (CurrentObs.Health < 50.0f)
+    if (CurrentObs.AgentHealth < 50.0f)
     {
         Priority += 0.2f;
     }

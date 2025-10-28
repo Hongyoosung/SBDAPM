@@ -86,7 +86,7 @@ void UStateMachine::GetObservation(float Health, float Distance, int32 Num)
 	this->EnemiesNum = Num;
 
 	// Sync with new observation structure
-	CurrentObservation.Health = Health;
+	CurrentObservation.AgentHealth = Health;
 	CurrentObservation.DistanceToDestination = Distance;
 	CurrentObservation.VisibleEnemyCount = Num;
 }
@@ -96,7 +96,7 @@ void UStateMachine::UpdateObservation(const FObservationElement& NewObservation)
 	CurrentObservation = NewObservation;
 
 	// Sync legacy fields for backward compatibility with existing MCTS states
-	AgentHealth = NewObservation.Health;
+	AgentHealth = NewObservation.AgentHealth;
 	DistanceToDestination = NewObservation.DistanceToDestination;
 	EnemiesNum = NewObservation.VisibleEnemyCount;
 }
@@ -106,7 +106,7 @@ void UStateMachine::UpdateAgentState(FVector Position, FVector Velocity, FRotato
 	CurrentObservation.Position = Position;
 	CurrentObservation.Velocity = Velocity;
 	CurrentObservation.Rotation = Rotation;
-	CurrentObservation.Health = Health;
+	CurrentObservation.AgentHealth = Health;
 	CurrentObservation.Stamina = Stamina;
 	CurrentObservation.Shield = Shield;
 

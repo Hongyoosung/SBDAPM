@@ -261,14 +261,28 @@ bool URLPolicyNetwork::ExportExperiencesToJSON(const FString& FilePath)
 	}
 
 	// Write to file
-	if (!FFileHelper::SaveStringToFile(OutputString, *FilePath))
+	FString SafeDirectory = FPaths::ProjectSavedDir() / TEXT("Experiences");
+	FString SafeFilePath = SafeDirectory / TEXT("experiences.json");
+
+	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Using safe path: %s"), *SafeFilePath);
+
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+	if (!PlatformFile.DirectoryExists(*SafeDirectory))
 	{
-		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to write experiences to file: %s"), *FilePath);
-		return false;
+		if (!PlatformFile.CreateDirectoryTree(*SafeDirectory))
+		{
+			UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to create directory: %s"), *SafeDirectory);
+			return false;
+		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Exported %d experiences to %s"),
-		CollectedExperiences.Num(), *FilePath);
+	// 파일 저장
+	if (!FFileHelper::SaveStringToFile(OutputString, *SafeFilePath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to write file"));
+		return false;
+	}
 
 	return true;
 }
@@ -388,7 +402,7 @@ TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElem
 	Probabilities.Init(0.1f, 16);  // Small baseline probability for all actions
 
 	// Extract key features
-	float Health = Observation.Health;
+	float Health = Observation.AgentHealth;
 	int32 VisibleEnemies = Observation.VisibleEnemyCount;
 	bool bHasCover = Observation.bHasCover;
 	float NearestCoverDistance = Observation.NearestCoverDistance;

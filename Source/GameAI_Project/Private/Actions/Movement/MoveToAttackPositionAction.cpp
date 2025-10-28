@@ -129,7 +129,7 @@ EAttackPositionStrategy UMoveToAttackPositionAction::SelectBestStrategy(UStateMa
     // Strategy selection based on observations
 
     // If low health, prioritize cover
-    if (CurrentObs.Health < 40.0f && CurrentObs.bHasCover)
+    if (CurrentObs.AgentHealth < 40.0f && CurrentObs.bHasCover)
     {
         return EAttackPositionStrategy::CoverBased;
     }
@@ -147,7 +147,7 @@ EAttackPositionStrategy UMoveToAttackPositionAction::SelectBestStrategy(UStateMa
     }
 
     // If high stamina and full health, go for high ground
-    if (CurrentObs.Health > 80.0f && CurrentObs.Stamina > 70.0f)
+    if (CurrentObs.AgentHealth > 80.0f && CurrentObs.Stamina > 70.0f)
     {
         return EAttackPositionStrategy::HighGround;
     }

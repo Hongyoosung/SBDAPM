@@ -3,8 +3,8 @@
 
 #include "States/AttackState.h"
 #include "Core/StateMachine.h"
-#include "Actions/SkillAttackAction.h"
-#include "Actions/DeafultAttackAction.h"
+#include "Actions/Combat/SkillAttackAction.h"
+#include "Actions/Combat/DeafultAttackAction.h"
 
 void UAttackState::EnterState(UStateMachine* StateMachine)
 {
