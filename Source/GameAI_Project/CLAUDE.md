@@ -161,102 +161,13 @@ Centralized strategic decision-making for a team of agents. Uses event-driven MC
 - **Follower Management:** Register/unregister followers dynamically
 
 #### Strategic Events (Triggers MCTS)
-```cpp
-enum class EStrategicEvent : uint8
-{
-    // Combat
-    EnemyEncounter, AllyKilled, EnemyEliminated, AllyUnderFire,
-
-    // Environmental
-    EnteredDangerZone, ObjectiveSpotted, AmbushDetected,
-
-    // Team Status
-    LowTeamHealth, LowTeamAmmo, FormationBroken,
-
-    // Mission
-    ObjectiveComplete, ReinforcementsArrived
-};
-```
 
 #### Strategic Commands (MCTS Output)
-```cpp
-enum class EStrategicCommandType : uint8
-{
-    // Offensive: Assault, Flank, Suppress, Charge
-    // Defensive: StayAlert, HoldPosition, TakeCover, Fortify
-    // Support: RescueAlly, ProvideSupport, Regroup, ShareAmmo
-    // Movement: Advance, Retreat, Patrol, MoveTo, Follow
-    // Special: Investigate, Distract, Stealth, Idle
-};
-```
 
 #### Team Observation Structure
-```cpp
-struct FTeamObservation
-{
-    // Team composition (6 features)
-    int32 AliveFollowers, DeadFollowers;
-    float AverageTeamHealth, MinTeamHealth;
-    float AverageTeamStamina, AverageTeamAmmo;
-
-    // Team formation (9 features)
-    FVector TeamCentroid;
-    float FormationSpread, FormationCoherence;
-    float AverageDistanceToObjective;
-    FVector TeamFacingDirection;
-
-    // Enemy intelligence (12 features)
-    int32 TotalVisibleEnemies, EnemiesEngaged;
-    float AverageEnemyHealth;
-    float NearestEnemyDistance, FarthestEnemyDistance;
-    FVector EnemyCentroid;
-    int32 EstimatedTotalEnemies;
-    float TimeSinceLastContact;
-
-    // Tactical situation (8 features)
-    bool bOutnumbered, bFlanked, bHasCoverAdvantage, bHasHighGround;
-    EEngagementRange EngagementRange;
-    float KillDeathRatio, TimeInCurrentState, ThreatLevel;
-
-    // Mission context (5 features)
-    float DistanceToObjective;
-    EObjectiveType ObjectiveType;
-    float MissionTimeRemaining;
-    EMissionPhase MissionPhase;
-    float EstimatedDifficulty;
-
-    // Individual follower observations (N × 71 features)
-    TArray<FObservationElement> FollowerObservations;
-};
-```
 
 #### MCTS Integration
-```cpp
-void UTeamLeaderComponent::ProcessStrategicEvent(
-    EStrategicEvent Event,
-    AActor* Instigator,
-    int32 Priority)
-{
-    if (ShouldTriggerMCTS(Event, Priority))
-    {
-        // Build team-level observation
-        FTeamObservation TeamObs = BuildTeamObservation();
 
-        // Run MCTS asynchronously
-        RunStrategicDecisionMakingAsync(TeamObs);
-    }
-}
-
-void UTeamLeaderComponent::OnMCTSComplete(
-    TMap<AActor*, FStrategicCommand> Commands)
-{
-    // Issue commands to each follower
-    for (auto& Pair : Commands)
-    {
-        IssueCommand(Pair.Key, Pair.Value);
-    }
-}
-```
 
 #### Performance Characteristics
 - **MCTS Simulations:** 500-1000 per decision (configurable)
@@ -281,82 +192,12 @@ Individual agent that executes strategic commands from the team leader using FSM
 - **Local Observation:** Tracks 71-feature observation for RL policy
 
 #### Follower State Machine
-```cpp
-enum class EFollowerState : uint8
-{
-    Idle,       // No orders
-    Assault,    // Offensive actions (maps to Assault/Flank/Suppress/Charge commands)
-    Defend,     // Defensive actions (maps to StayAlert/HoldPosition/TakeCover commands)
-    Support,    // Support actions (maps to RescueAlly/ProvideSupport commands)
-    Move,       // Movement actions (maps to Advance/MoveTo/Patrol commands)
-    Retreat,    // Retreat actions (maps to Retreat/Regroup commands)
-    Dead        // Terminal state
-};
-```
 
 #### RL Tactical Actions
-```cpp
-enum class ETacticalAction : uint8
-{
-    // Combat tactics (selected by RL when in Assault state)
-    AggressiveAssault, CautiousAdvance, DefensiveHold, TacticalRetreat,
-
-    // Positioning tactics
-    SeekCover, FlankLeft, FlankRight, MaintainDistance,
-
-    // Support tactics
-    SuppressiveFire, ProvideCoveringFire, Reload, UseAbility,
-
-    // Movement tactics
-    Sprint, Crouch, Patrol, Hold
-};
-```
 
 #### Command Execution Flow
-```cpp
-void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
-{
-    // 1. Store command
-    CurrentCommand = Command;
-
-    // 2. Transition FSM
-    EFollowerState NewState = MapCommandToState(Command.CommandType);
-    StrategicFSM->TransitionTo(NewState);
-
-    // 3. Query RL policy for tactical action
-    ETacticalAction TacticalAction = TacticalPolicy->SelectAction(LocalObservation);
-
-    // 4. Update Blackboard for Behavior Tree
-    GetBlackboard()->SetValueAsEnum("CurrentState", NewState);
-    GetBlackboard()->SetValueAsEnum("TacticalAction", TacticalAction);
-    GetBlackboard()->SetValueAsVector("CommandTarget", Command.TargetLocation);
-    GetBlackboard()->SetValueAsObject("CommandTargetActor", Command.TargetActor);
-
-    // 5. Behavior Tree executes based on Blackboard values
-}
-```
 
 #### RL Policy Interface
-```cpp
-class URLPolicyNetwork
-{
-    // Query policy for action
-    ETacticalAction SelectAction(const FObservationElement& Observation);
-
-    // Get action probabilities
-    TArray<float> GetActionProbabilities(const FObservationElement& Observation);
-
-    // Provide reward feedback
-    void StoreExperience(State, Action, Reward, NextState, bTerminal);
-
-    // Training
-    void TrainOnBatch(int32 BatchSize);
-
-    // Persistence
-    bool SavePolicy(const FString& FilePath);
-    bool LoadPolicy(const FString& FilePath);
-};
-```
 
 ---
 
