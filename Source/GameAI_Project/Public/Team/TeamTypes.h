@@ -44,6 +44,8 @@ enum class EStrategicEvent : uint8
 UENUM(BlueprintType)
 enum class EStrategicCommandType : uint8
 {
+	None			UMETA(DisplayName = "None"),
+	
 	// Offensive commands
 	Assault         UMETA(DisplayName = "Assault - Aggressive attack"),
 	Flank           UMETA(DisplayName = "Flank - Attack from side"),

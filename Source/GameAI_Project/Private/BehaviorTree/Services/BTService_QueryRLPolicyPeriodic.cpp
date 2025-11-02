@@ -5,8 +5,8 @@
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
 #include "Team/FollowerAgentComponent.h"
-#include "Observation/ObservationElement.h"
 #include "RL/RLTypes.h"
+#include "RL/RLPolicyNetwork.h"
 
 UBTService_QueryRLPolicyPeriodic::UBTService_QueryRLPolicyPeriodic()
 {

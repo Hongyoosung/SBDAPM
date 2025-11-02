@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTService.h"
+#include "Observation/ObservationElement.h"
 #include "BTService_QueryRLPolicyPeriodic.generated.h"
 
 /**
@@ -109,5 +110,5 @@ public:
 private:
 	// Last observation used for similarity comparison
 	// Used when bQueryOnlyWhenObservationChanged is true
-	TMap<class UFollowerAgentComponent*, struct FObservationElement> LastObservations;
+	TMap<class UFollowerAgentComponent*, FObservationElement> LastObservations;
 };

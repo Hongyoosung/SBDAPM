@@ -6,9 +6,11 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Engine/DamageEvents.h"
 #include "DrawDebugHelpers.h"
 #include "Interfaces/CombatStatsInterface.h"
 #include "Team/FollowerAgentComponent.h"
+
 
 UBTTask_FireWeapon::UBTTask_FireWeapon()
 {
@@ -53,7 +55,7 @@ EBTNodeResult::Type UBTTask_FireWeapon::ExecuteTask(UBehaviorTreeComponent& Owne
 	}
 
 	// Check if target is valid and alive
-	if (!IsValid(TargetActor) || TargetActor->IsPendingKill())
+	if (!IsValid(TargetActor))
 	{
 		if (bLogFiring)
 		{

@@ -231,6 +231,12 @@ bool UFollowerAgentComponent::IsCommandValid() const
 	return !CurrentCommand.bCompleted && CurrentCommand.CommandType != EStrategicCommandType::Idle;
 }
 
+bool UFollowerAgentComponent::HasActiveCommand() const
+{
+	// Has active command if not idle and command is valid
+	return CurrentCommand.CommandType != EStrategicCommandType::Idle && IsCommandValid();
+}
+
 void UFollowerAgentComponent::UpdateCommandProgress(float Progress)
 {
 	CurrentCommand.Progress = FMath::Clamp(Progress, 0.0f, 1.0f);

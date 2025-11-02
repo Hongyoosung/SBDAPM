@@ -238,44 +238,6 @@ class UState
 7. **DeadState:** Terminal state
 
 #### State-Command Mapping
-```cpp
-EFollowerState MapCommandToState(EStrategicCommandType Command)
-{
-    switch (Command)
-    {
-        case Assault:
-        case Flank:
-        case Suppress:
-        case Charge:
-            return EFollowerState::Assault;
-
-        case StayAlert:
-        case HoldPosition:
-        case TakeCover:
-        case Fortify:
-            return EFollowerState::Defend;
-
-        case RescueAlly:
-        case ProvideSupport:
-        case Regroup:
-        case ShareAmmo:
-            return EFollowerState::Support;
-
-        case Advance:
-        case MoveTo:
-        case Patrol:
-        case Follow:
-        case Investigate:
-            return EFollowerState::Move;
-
-        case Retreat:
-            return EFollowerState::Retreat;
-
-        default:
-            return EFollowerState::Idle;
-    }
-}
-```
 
 ---
 
@@ -310,65 +272,10 @@ Strategic planning for team-level decisions. Explores possible command combinati
 // - Follower 4: Defend → Hold position
 ```
 
-#### MCTS Algorithm (Unchanged)
-1. **Selection:** UCT formula selects promising child node
-2. **Expansion:** Create child nodes for available actions
-3. **Simulation:** Calculate immediate team reward
-4. **Backpropagation:** Update visit counts and rewards
-
-#### Team-Level Reward Function
-```cpp
-float CalculateTeamReward(const FTeamObservation& Observation)
-{
-    // Team health
-    float HealthReward = Observation.AverageTeamHealth * 2.0f;
-
-    // Formation coherence
-    float FormationReward = Observation.FormationCoherence * 50.0f;
-
-    // Objective progress
-    float ObjectiveReward = (10000.0f - Observation.DistanceToObjective) * 0.01f;
-
-    // Combat effectiveness
-    float CombatReward = Observation.KillDeathRatio * 100.0f;
-
-    // Enemy threat
-    float ThreatPenalty = -Observation.ThreatLevel * 20.0f;
-
-    // Outnumbered penalty
-    float OutnumberedPenalty = Observation.bOutnumbered ? -100.0f : 0.0f;
-
-    return HealthReward + FormationReward + ObjectiveReward
-         + CombatReward + ThreatPenalty + OutnumberedPenalty;
-}
-```
 
 #### Async Execution
-```cpp
-void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
-{
-    bMCTSRunning = true;
 
-    // Capture team observation on game thread
-    FTeamObservation TeamObs = BuildTeamObservation();
 
-    // Launch async task on background thread
-    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, TeamObs]()
-    {
-        // Run MCTS (500-1000 simulations)
-        TMap<AActor*, FStrategicCommand> Commands = StrategicMCTS->RunSearch(TeamObs);
-
-        // Return to game thread to issue commands
-        AsyncTask(ENamedThreads::GameThread, [this, Commands]()
-        {
-            OnMCTSComplete(Commands);
-            bMCTSRunning = false;
-        });
-    });
-}
-```
-
----
 
 ### 5. Reinforcement Learning (RL) Policy
 
@@ -401,27 +308,7 @@ Output Layer (16 actions, Softmax)
 - **Clipping Parameter:** 0.2
 
 #### Experience Replay
-```cpp
-struct FRLExperience
-{
-    FObservationElement State;        // Current observation (71 features)
-    ETacticalAction Action;           // Action taken
-    float Reward;                     // Immediate reward
-    FObservationElement NextState;    // Next observation
-    bool bTerminal;                   // Is episode finished?
-};
 
-class URLReplayBuffer
-{
-    // Store experience
-    void AddExperience(const FRLExperience& Experience);
-
-    // Sample random batch
-    TArray<FRLExperience> SampleBatch(int32 BatchSize);
-
-    // Buffer capacity: 100,000 experiences
-};
-```
 
 #### Reward Structure (Follower-Level)
 ```cpp
@@ -863,43 +750,3 @@ GameAI_Project.exe
 
 **Note:** MCTS runs asynchronously, does not block frame. RL and BT run on game thread.
 
----
-
-## References
-
-### Academic Papers
-1. **MCTS:** Browne et al., "A Survey of Monte Carlo Tree Search Methods" (2012)
-2. **AlphaZero:** Silver et al., "Mastering Chess and Shogi by Self-Play" (2017)
-3. **PPO:** Schulman et al., "Proximal Policy Optimization Algorithms" (2017)
-4. **Multi-Agent RL:** Lowe et al., "Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments" (2017)
-
-### Frameworks
-- [Unreal Learning Agents](https://docs.unrealengine.com/5.6/en-US/learning-agents-in-unreal-engine/)
-- [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html)
-- [OpenAI Baselines](https://github.com/openai/baselines)
-
-### Unreal Engine Resources
-- [AI Module Documentation](https://docs.unrealengine.com/5.6/en-US/artificial-intelligence-in-unreal-engine/)
-- [Behavior Trees](https://docs.unrealengine.com/5.6/en-US/behavior-trees-in-unreal-engine/)
-- [Environment Query System](https://docs.unrealengine.com/5.6/en-US/environment-query-system-in-unreal-engine/)
-
----
-
-## License
-
-This project follows standard Unreal Engine licensing. Consult Epic Games' EULA for distribution rights.
-
----
-
-## Contact & Support
-
-For questions, issues, or contributions:
-- **GitHub Issues:** [Repository Issues Page]
-- **Documentation:** See REFACTORING_PLAN.md for detailed implementation guide
-- **Unreal Engine Forums:** [AI & Navigation Section]
-
----
-
-**Last Updated:** 2025-10-27
-**Version:** 2.0 (Hierarchical Multi-Agent Architecture)
-**Maintained By:** Claude Code Assistant

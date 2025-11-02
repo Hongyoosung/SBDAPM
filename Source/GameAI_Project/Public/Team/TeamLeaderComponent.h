@@ -306,6 +306,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Team Leader|Debug")
 	int32 GetPendingEventsCount() const { return PendingEvents.Num(); }
 
+	/** Is MCTS currently running? */
+	UFUNCTION(BlueprintPure, Category = "Team Leader|Debug")
+	bool IsRunningMCTS() const { return bMCTSRunning; }
+
 private:
 	/** Async task for MCTS */
 	FGraphEventRef AsyncMCTSTask;

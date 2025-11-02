@@ -37,7 +37,6 @@ public:
     float LastVisitTime;
 
     FObservationElement Observation;
-
-    // ���� ����� ���¸� ǥ���ϴ� �Լ� (���� ������ ������Ʈ�� ���� ǥ�� ��Ŀ� ���� �޶��� �� �ֽ��ϴ�)
+    
     virtual FString GetState() const;
 };

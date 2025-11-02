@@ -1,0 +1,438 @@
+# Behavior Tree Asset Creation Guide
+
+**Quick Reference for SBDAPM Behavior Tree Setup**
+**Date:** 2025-11-02
+
+---
+
+## Quick Setup (5 Minutes)
+
+### 1. Create Blackboard Asset
+
+**Steps:**
+1. Content Browser → Right-click → AI → **Blackboard**
+2. Name: `BB_FollowerAgent`
+3. Double-click to open
+4. Add the following keys:
+
+| Key Name | Type | Default Value |
+|----------|------|---------------|
+| `CommandType` | Enum → `EStrategicCommandType` | Idle |
+| `CommandTarget` | Object → `AActor` | None |
+| `IsCommandValid` | Bool | false |
+| `TacticalAction` | Enum → `ETacticalAction` | DefensiveHold |
+| `ActionProgress` | Float | 0.0 |
+| `TargetActor` | Object → `AActor` | None |
+| `DefendLocation` | Vector | (0,0,0) |
+| `MoveDestination` | Vector | (0,0,0) |
+
+5. Save and close
+
+---
+
+### 2. Create Behavior Tree Asset
+
+**Steps:**
+1. Content Browser → Right-click → AI → **Behavior Tree**
+2. Name: `BT_FollowerAgent`
+3. Double-click to open
+4. **Properties Panel:**
+   - Blackboard Asset: `BB_FollowerAgent`
+
+---
+
+### 3. Configure Root Node (Essential Services)
+
+**Root Selector:**
+1. Right-click Root → Add Service → **SyncCommandToBlackboard**
+   - Interval: `0.5`
+   - Random Deviation: `0.1`
+   - CommandTypeKey: `CommandType`
+   - CommandTargetKey: `CommandTarget`
+   - IsCommandValidKey: `IsCommandValid`
+   - bLogSync: `false` (enable for debugging)
+
+2. Right-click Root → Add Composite → **Selector**
+
+---
+
+### 4. Add Assault Branch (Example)
+
+**Under Root Selector:**
+
+1. **Add Composite: Selector** (Assault Branch)
+
+2. **Add Decorator: CheckCommandType**
+   - AcceptedCommandTypes: `[Assault]`
+   - bUseBlackboard: `true`
+   - CommandTypeKey: `CommandType`
+   - bRequireValidCommand: `true`
+   - IsCommandValidKey: `IsCommandValid`
+   - **Flow Abort Mode:** `Lower Priority`
+
+3. **Add Service: QueryRLPolicyPeriodic**
+   - Interval: `1.0`
+   - Random Deviation: `0.2`
+   - TacticalActionKey: `TacticalAction`
+   - bEnableExploration: `true`
+   - bRequireActiveCommand: `false`
+   - bLogQueries: `false` (enable for debugging)
+
+4. **Add Child Selector** (Tactical Action Branches)
+
+5. **For Each Tactical Action:**
+
+   **Aggressive Assault:**
+   - Composite: Sequence
+   - Decorator: CheckTacticalAction
+     - AcceptedActions: `[AggressiveAssault]`
+     - TacticalActionKey: `TacticalAction`
+     - **Flow Abort Mode:** `Self`
+   - Task: **BTTask_ExecuteAssault**
+     - (Configure assault parameters as needed)
+
+   **Cautious Advance:**
+   - Composite: Sequence
+   - Decorator: CheckTacticalAction
+     - AcceptedActions: `[CautiousAdvance]`
+     - TacticalActionKey: `TacticalAction`
+     - **Flow Abort Mode:** `Self`
+   - Task: **BTTask_ExecuteAssault**
+     - (Configure for cautious approach)
+
+   **Flanking:**
+   - Composite: Sequence
+   - Decorator: CheckTacticalAction
+     - AcceptedActions: `[FlankLeft, FlankRight]`
+     - TacticalActionKey: `TacticalAction`
+     - **Flow Abort Mode:** `Self`
+   - Task: **BTTask_ExecuteAssault**
+     - (Configure for flanking maneuver)
+
+---
+
+### 5. Add Other Command Branches (Same Pattern)
+
+**Defend Branch:**
+- Decorator: CheckCommandType → `[Defend]`
+- Service: QueryRLPolicyPeriodic (Interval: 1.5s)
+- Tactical branches:
+  - DefensiveHold → BTTask_ExecuteDefend
+  - SeekCover → BTTask_ExecuteDefend
+  - SuppressiveFire → BTTask_ExecuteDefend
+
+**Support Branch:**
+- Decorator: CheckCommandType → `[Support]`
+- Service: QueryRLPolicyPeriodic (Interval: 1.0s)
+- Tactical branches:
+  - ProvideCoveringFire → BTTask_ExecuteSupport
+  - Reload → BTTask_ExecuteSupport
+  - RescueAlly → BTTask_ExecuteSupport
+
+**Move Branch:**
+- Decorator: CheckCommandType → `[Move]`
+- Service: QueryRLPolicyPeriodic (Interval: 1.5s)
+- Tactical branches:
+  - Sprint → BTTask_ExecuteMove
+  - Crouch → BTTask_ExecuteMove
+  - Patrol → BTTask_ExecuteMove
+
+**Idle Branch:**
+- Decorator: CheckCommandType → `[Idle]`
+- Task: Wait or Idle Animation
+
+---
+
+## Visual Structure
+
+```
+Root (Selector)
+├─ [Service: SyncCommandToBlackboard @ 0.5s]
+│
+├─ [CheckCommandType: Assault, FlowAbort: LowerPriority]
+│  └─ Selector
+│     ├─ [Service: QueryRLPolicyPeriodic @ 1.0s]
+│     │
+│     ├─ [CheckTacticalAction: AggressiveAssault, FlowAbort: Self]
+│     │  └─ Sequence → BTTask_ExecuteAssault (Aggressive)
+│     │
+│     ├─ [CheckTacticalAction: CautiousAdvance, FlowAbort: Self]
+│     │  └─ Sequence → BTTask_ExecuteAssault (Cautious)
+│     │
+│     ├─ [CheckTacticalAction: FlankLeft|FlankRight, FlowAbort: Self]
+│     │  └─ Sequence → BTTask_ExecuteAssault (Flanking)
+│     │
+│     └─ [Default] → BTTask_ExecuteAssault (Generic)
+│
+├─ [CheckCommandType: Defend, FlowAbort: LowerPriority]
+│  └─ Selector
+│     ├─ [Service: QueryRLPolicyPeriodic @ 1.5s]
+│     ├─ [Tactical Action Branches...]
+│     └─ BTTask_ExecuteDefend
+│
+├─ [CheckCommandType: Support, FlowAbort: LowerPriority]
+│  └─ Selector → BTTask_ExecuteSupport
+│
+├─ [CheckCommandType: Move, FlowAbort: LowerPriority]
+│  └─ Selector → BTTask_ExecuteMove
+│
+└─ [CheckCommandType: Idle, FlowAbort: LowerPriority]
+   └─ Wait Task
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Command-Based Branching
+
+```
+Selector
+├─ [CheckCommandType: CommandA] → Subtree A
+├─ [CheckCommandType: CommandB] → Subtree B
+└─ [Default] → Idle Behavior
+```
+
+**Key Settings:**
+- FlowAbortMode: `Lower Priority` (abort lower branches when command changes)
+- bUseBlackboard: `true`
+- CommandTypeKey: `CommandType`
+
+---
+
+### Pattern 2: Tactical Action Branching
+
+```
+Command Subtree (e.g., Assault)
+├─ [Service: QueryRLPolicyPeriodic]
+│
+├─ [CheckTacticalAction: ActionA] → Execute ActionA
+├─ [CheckTacticalAction: ActionB] → Execute ActionB
+└─ [Default] → Generic Execution
+```
+
+**Key Settings:**
+- FlowAbortMode: `Self` (abort self when action changes)
+- TacticalActionKey: `TacticalAction`
+- Service Interval: 1.0-1.5s
+
+---
+
+### Pattern 3: Parallel Services
+
+```
+Root Composite
+├─ [Service: SyncCommandToBlackboard]       (Syncs command data)
+│
+└─ Subtree
+   ├─ [Service: QueryRLPolicyPeriodic]     (Queries RL policy)
+   └─ [Task Execution...]
+```
+
+**Why?**
+- SyncCommandToBlackboard runs at root (affects all branches)
+- QueryRLPolicyPeriodic runs per command (only when needed)
+
+---
+
+## Flow Abort Modes Explained
+
+| Mode | When to Use | Example |
+|------|-------------|---------|
+| **None** | No reactivity needed | Idle behaviors |
+| **Self** | Abort self when condition fails | Tactical action branches |
+| **Lower Priority** | Abort lower branches when condition becomes true | Command type branches |
+| **Both** | Maximum reactivity | Critical high-priority behaviors |
+
+**Best Practices:**
+- Command branches: `Lower Priority` (switch commands immediately)
+- Tactical branches: `Self` (switch tactics when RL changes action)
+- Tasks: Usually no decorators (controlled by parent)
+
+---
+
+## Service Intervals Guide
+
+| Service | Recommended Interval | Why |
+|---------|---------------------|-----|
+| SyncCommandToBlackboard | 0.5s | Commands change infrequently, no need for faster sync |
+| QueryRLPolicyPeriodic (Assault) | 1.0s | Fast-paced combat, needs frequent updates |
+| QueryRLPolicyPeriodic (Defend) | 1.5s | Slower pace, defensive stance changes less |
+| QueryRLPolicyPeriodic (Support) | 1.0s | Needs to respond quickly to ally status |
+| QueryRLPolicyPeriodic (Move) | 1.5s | Movement is gradual, no need for fast queries |
+
+**For Large Teams (8+ agents):**
+- Increase all intervals by 50-100% (e.g., 1.0s → 1.5-2.0s)
+- Enable `bQueryOnlyWhenObservationChanged` on QueryRLPolicyPeriodic
+
+---
+
+## Debugging Tips
+
+### Enable Logging
+
+**In BT Services:**
+```
+SyncCommandToBlackboard:
+  bLogSync = true
+
+QueryRLPolicyPeriodic:
+  bLogQueries = true
+```
+
+**In BT Decorators:**
+```
+CheckTacticalAction:
+  bLogChecks = true
+```
+
+### Visual Debugging
+
+1. **Play in Editor (PIE)**
+2. **Select AI agent in World Outliner**
+3. **Gameplay Debugger:** Press `'` (apostrophe) key
+4. **BT Debug View:** Shows active nodes, blackboard values, services
+
+### Common Issues
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| BT doesn't execute | No AI Controller running BT | Check AIController::BeginPlay() calls RunBehaviorTree() |
+| Decorators always fail | Blackboard key not set | Verify service is updating the key |
+| Services don't run | Interval too long or not ticking | Check Interval > 0, service added to composite |
+| RL policy not queried | TacticalPolicy not initialized | Check FollowerAgentComponent has TacticalPolicy set |
+| Command changes ignored | Flow abort mode wrong | Use `Lower Priority` for command decorators |
+
+---
+
+## Blueprint Integration
+
+### Running BT from Blueprint
+
+**AI Controller Blueprint:**
+
+1. **Event BeginPlay**
+2. **Run Behavior Tree**
+   - Behavior Tree: `BT_FollowerAgent`
+3. **Use Blackboard**
+   - Blackboard Asset: `BB_FollowerAgent`
+
+**Pawn/Character Blueprint:**
+
+1. **Add Component:** `FollowerAgentComponent`
+2. **Set Team Leader** (in BeginPlay or via level setup)
+3. **Initialize RL Policy** (optional, can be done in C++)
+
+---
+
+## Performance Optimization
+
+### For 4 Agents (Good Performance)
+
+```
+SyncCommandToBlackboard: 0.5s interval
+QueryRLPolicyPeriodic:   1.0s interval
+No special optimization needed
+```
+
+### For 8 Agents (Adjust Intervals)
+
+```
+SyncCommandToBlackboard: 1.0s interval
+QueryRLPolicyPeriodic:   1.5-2.0s interval
+bQueryOnlyWhenObservationChanged = true
+```
+
+### For 16+ Agents (Heavy Optimization)
+
+```
+SyncCommandToBlackboard: 1.5s interval
+QueryRLPolicyPeriodic:   2.0-3.0s interval
+bQueryOnlyWhenObservationChanged = true
+ObservationSimilarityThreshold = 0.98 (stricter)
+bRequireActiveCommand = true
+Stagger query times using RandomDeviation
+```
+
+---
+
+## Example: Minimal Working BT
+
+**Blackboard Keys:**
+- `CommandType` (Enum: EStrategicCommandType)
+- `TacticalAction` (Enum: ETacticalAction)
+
+**Behavior Tree:**
+```
+Root (Selector)
+├─ [Service: SyncCommandToBlackboard]
+│  - CommandTypeKey: CommandType
+│
+├─ [CheckCommandType: Assault]
+│  └─ Sequence
+│     ├─ [Service: QueryRLPolicyPeriodic]
+│     │  - TacticalActionKey: TacticalAction
+│     └─ BTTask_ExecuteAssault
+│
+└─ [Default] Wait
+```
+
+**That's it!** This minimal BT will:
+1. Sync commands from team leader
+2. Branch when command is "Assault"
+3. Query RL policy for tactical action
+4. Execute assault with selected tactic
+
+---
+
+## Next Steps After BT Creation
+
+1. **Assign BT to AI Controller**
+   ```cpp
+   RunBehaviorTree(BT_FollowerAgent);
+   ```
+
+2. **Set Up Team Structure**
+   - Create TeamLeaderComponent
+   - Register followers
+   - Issue commands
+
+3. **Test Incrementally**
+   - Start with one command type (e.g., Assault)
+   - Add one tactical action (e.g., AggressiveAssault)
+   - Verify execution
+   - Add more branches
+
+4. **Enable Debug Logging**
+   - Set `bLogSync = true`
+   - Set `bLogQueries = true`
+   - Watch console for decision flow
+
+5. **Train RL Policy**
+   - Let agents execute commands
+   - Rewards accumulate automatically
+   - Policy improves over time
+
+---
+
+## Conclusion
+
+This guide provides a quick reference for creating Behavior Tree assets for the SBDAPM system. The key principles are:
+
+✅ **Hierarchical Branching:** Commands → Tactical Actions → Execution
+✅ **Service-Driven Updates:** Periodic sync of commands and RL queries
+✅ **Reactive Execution:** Flow abort modes for dynamic behavior
+✅ **Performance Aware:** Configurable intervals for scalability
+
+For detailed implementation information, see:
+- **WEEK_13_IMPLEMENTATION_SUMMARY.md** - Execution tasks
+- **WEEK_14_IMPLEMENTATION_SUMMARY.md** - Decorators and services
+- **CLAUDE.md** - Overall architecture
+
+**Happy building!** 🎮🤖
+
+---
+
+**Guide by:** Claude Code Assistant
+**Date:** 2025-11-02
+**Version:** 1.0

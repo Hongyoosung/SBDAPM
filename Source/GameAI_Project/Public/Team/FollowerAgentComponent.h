@@ -201,9 +201,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
 	bool IsCommandValid() const;
 
+	/** Has active command (not Idle/None)? */
+	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
+	bool HasActiveCommand() const;
+
 	/** Update command progress */
 	UFUNCTION(BlueprintCallable, Category = "Follower|Commands")
 	void UpdateCommandProgress(float Progress);
+
+	/** Get time since last command received (seconds) */
+	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
+	float GetTimeSinceLastCommand() const { return TimeSinceLastCommand; }
 
 	//--------------------------------------------------------------------------
 	// STATE MANAGEMENT
@@ -261,6 +269,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void ProvideReward(float Reward, bool bTerminal = false);
 
+	/** Accumulate reward (alias for ProvideReward for compatibility) */
+	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
+	void AccumulateReward(float Reward) { ProvideReward(Reward, false); }
+
 	/** Get accumulated reward this episode */
 	UFUNCTION(BlueprintPure, Category = "Follower|RL")
 	float GetAccumulatedReward() const { return AccumulatedReward; }
@@ -272,6 +284,14 @@ public:
 	/** Export collected experiences to JSON */
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	bool ExportExperiences(const FString& FilePath);
+
+	/** Is tactical policy ready for queries? */
+	UFUNCTION(BlueprintPure, Category = "Follower|RL")
+	bool IsTacticalPolicyReady() const { return TacticalPolicy != nullptr; }
+
+	/** Get tactical policy (nullptr if not set) */
+	UFUNCTION(BlueprintPure, Category = "Follower|RL")
+	URLPolicyNetwork* GetTacticalPolicy() const { return TacticalPolicy; }
 
 	//--------------------------------------------------------------------------
 	// UTILITY
