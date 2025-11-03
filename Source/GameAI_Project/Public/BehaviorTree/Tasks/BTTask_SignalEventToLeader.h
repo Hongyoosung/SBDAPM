@@ -10,8 +10,17 @@
 /**
  * BTTask_SignalEventToLeader
  *
+ * **FOLLOWER-ONLY TASK**
+ * Team leaders do not signal events to themselves.
+ * This task should only be used in BT_FollowerAgent.
+ *
  * Signals a strategic event from the follower to the team leader.
  * Used to trigger event-driven MCTS decision-making.
+ *
+ * Requirements:
+ *   - Actor must have UFollowerAgentComponent
+ *   - FollowerAgentComponent must have TeamLeader reference
+ *   - Use with BT_FollowerAgent behavior tree
  *
  * Usage:
  *   - Add to BT when significant events occur (enemy spotted, under attack, etc.)

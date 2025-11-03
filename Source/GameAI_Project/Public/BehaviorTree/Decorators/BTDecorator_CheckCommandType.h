@@ -10,11 +10,20 @@
 /**
  * BTDecorator_CheckCommandType
  *
+ * **FOLLOWER-ONLY DECORATOR**
+ * Team leaders issue commands but do not receive them.
+ * This decorator should only be used in BT_FollowerAgent.
+ *
  * Decorator that checks if the follower's current strategic command matches
  * the required command type(s).
  *
  * Used to branch behavior tree execution based on the command received from
  * the team leader (e.g., execute assault subtree only when command is "Assault").
+ *
+ * Requirements:
+ *   - Actor must have UFollowerAgentComponent (if not using blackboard)
+ *   - BTService_SyncCommandToBlackboard should be active (if using blackboard)
+ *   - Use with BT_FollowerAgent behavior tree
  *
  * Features:
  *   - Check single command type or multiple types
@@ -30,7 +39,7 @@
  *   └─ [CheckCommandType: Retreat] RetreatSubtree
  *
  * Configuration:
- *   - Add decorator to composite node
+ *   - Add decorator to composite node in BT_FollowerAgent
  *   - Select command types to match (can select multiple)
  *   - Set observer aborts to "Self" or "Lower Priority" for reactivity
  */

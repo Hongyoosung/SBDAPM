@@ -19,6 +19,8 @@
 |----------|------|---------------|
 | `CommandType` | Enum → `EStrategicCommandType` | Idle |
 | `CommandTarget` | Object → `AActor` | None |
+| `CommandPriority` | Int | 5 |
+| `TimeSinceCommand` | Float | 0.0 |
 | `IsCommandValid` | Bool | false |
 | `TacticalAction` | Enum → `ETacticalAction` | DefensiveHold |
 | `ActionProgress` | Float | 0.0 |
@@ -43,27 +45,41 @@
 
 ### 3. Configure Root Node (Essential Services)
 
-**Root Selector:**
-1. Right-click Root → Add Service → **SyncCommandToBlackboard**
+**IMPORTANT:** Services cannot be attached to the root node in UE5. You must attach them to a composite node.
+
+**Root Structure:**
+1. Right-click Root → Add Composite → **Selector** (main selector)
+
+2. Right-click Main Selector → Add Service → **SyncCommandToBlackboard**
    - Interval: `0.5`
    - Random Deviation: `0.1`
    - CommandTypeKey: `CommandType`
    - CommandTargetKey: `CommandTarget`
+   - CommandPriorityKey: `CommandPriority`
+   - TimeSinceCommandKey: `TimeSinceCommand`
    - IsCommandValidKey: `IsCommandValid`
+   - bClearOnNoFollowerComponent: `true`
    - bLogSync: `false` (enable for debugging)
-
-2. Right-click Root → Add Composite → **Selector**
 
 ---
 
-### 4. Add Assault Branch (Example)
+### 4. Add Command Branches
 
-**Under Root Selector:**
+**Available Strategic Command Types (TeamTypes.h:44-79):**
+- **Offensive:** Assault, Flank, Suppress, Charge
+- **Defensive:** StayAlert, HoldPosition, TakeCover, Fortify
+- **Support:** RescueAlly, ProvideSupport, Regroup, ShareAmmo
+- **Movement:** Advance, Retreat, Patrol, MoveTo, Follow
+- **Special:** Investigate, Distract, Stealth, Idle
 
-1. **Add Composite: Selector** (Assault Branch)
+**Under Main Selector:**
+
+#### Offensive Branch (Example)
+
+1. **Add Composite: Selector** (Offensive Branch)
 
 2. **Add Decorator: CheckCommandType**
-   - AcceptedCommandTypes: `[Assault]`
+   - AcceptedCommandTypes: `[Assault, Flank, Charge, Suppress]` (group offensive commands)
    - bUseBlackboard: `true`
    - CommandTypeKey: `CommandType`
    - bRequireValidCommand: `true`
@@ -113,8 +129,8 @@
 
 ### 5. Add Other Command Branches (Same Pattern)
 
-**Defend Branch:**
-- Decorator: CheckCommandType → `[Defend]`
+**Defensive Branch:**
+- Decorator: CheckCommandType → `[StayAlert, HoldPosition, TakeCover, Fortify]`
 - Service: QueryRLPolicyPeriodic (Interval: 1.5s)
 - Tactical branches:
   - DefensiveHold → BTTask_ExecuteDefend
@@ -122,62 +138,64 @@
   - SuppressiveFire → BTTask_ExecuteDefend
 
 **Support Branch:**
-- Decorator: CheckCommandType → `[Support]`
+- Decorator: CheckCommandType → `[RescueAlly, ProvideSupport, Regroup, ShareAmmo]`
 - Service: QueryRLPolicyPeriodic (Interval: 1.0s)
 - Tactical branches:
   - ProvideCoveringFire → BTTask_ExecuteSupport
   - Reload → BTTask_ExecuteSupport
   - RescueAlly → BTTask_ExecuteSupport
 
-**Move Branch:**
-- Decorator: CheckCommandType → `[Move]`
+**Movement Branch:**
+- Decorator: CheckCommandType → `[Advance, Retreat, Patrol, MoveTo, Follow]`
 - Service: QueryRLPolicyPeriodic (Interval: 1.5s)
 - Tactical branches:
   - Sprint → BTTask_ExecuteMove
   - Crouch → BTTask_ExecuteMove
   - Patrol → BTTask_ExecuteMove
 
-**Idle Branch:**
-- Decorator: CheckCommandType → `[Idle]`
+**Idle Branch (Default - REQUIRED):**
+- Decorator: CheckCommandType → `[Idle]` OR none (fallback branch)
 - Task: Wait or Idle Animation
+- **Note:** This branch handles initial state before team leader issues commands. Without it, behavior tree will fail if no command is active (IsCommandValid = false).
 
 ---
 
 ## Visual Structure
 
 ```
-Root (Selector)
-├─ [Service: SyncCommandToBlackboard @ 0.5s]
-│
-├─ [CheckCommandType: Assault, FlowAbort: LowerPriority]
-│  └─ Selector
-│     ├─ [Service: QueryRLPolicyPeriodic @ 1.0s]
-│     │
-│     ├─ [CheckTacticalAction: AggressiveAssault, FlowAbort: Self]
-│     │  └─ Sequence → BTTask_ExecuteAssault (Aggressive)
-│     │
-│     ├─ [CheckTacticalAction: CautiousAdvance, FlowAbort: Self]
-│     │  └─ Sequence → BTTask_ExecuteAssault (Cautious)
-│     │
-│     ├─ [CheckTacticalAction: FlankLeft|FlankRight, FlowAbort: Self]
-│     │  └─ Sequence → BTTask_ExecuteAssault (Flanking)
-│     │
-│     └─ [Default] → BTTask_ExecuteAssault (Generic)
-│
-├─ [CheckCommandType: Defend, FlowAbort: LowerPriority]
-│  └─ Selector
-│     ├─ [Service: QueryRLPolicyPeriodic @ 1.5s]
-│     ├─ [Tactical Action Branches...]
-│     └─ BTTask_ExecuteDefend
-│
-├─ [CheckCommandType: Support, FlowAbort: LowerPriority]
-│  └─ Selector → BTTask_ExecuteSupport
-│
-├─ [CheckCommandType: Move, FlowAbort: LowerPriority]
-│  └─ Selector → BTTask_ExecuteMove
-│
-└─ [CheckCommandType: Idle, FlowAbort: LowerPriority]
-   └─ Wait Task
+Root
+└─ Main Selector
+   ├─ [Service: SyncCommandToBlackboard @ 0.5s]
+   │
+   ├─ [CheckCommandType: Assault|Flank|Charge|Suppress, FlowAbort: LowerPriority]
+   │  └─ Selector (Offensive Subtree)
+   │     ├─ [Service: QueryRLPolicyPeriodic @ 1.0s]
+   │     │
+   │     ├─ [CheckTacticalAction: AggressiveAssault, FlowAbort: Self]
+   │     │  └─ Sequence → BTTask_ExecuteAssault (Aggressive)
+   │     │
+   │     ├─ [CheckTacticalAction: CautiousAdvance, FlowAbort: Self]
+   │     │  └─ Sequence → BTTask_ExecuteAssault (Cautious)
+   │     │
+   │     ├─ [CheckTacticalAction: FlankLeft|FlankRight, FlowAbort: Self]
+   │     │  └─ Sequence → BTTask_ExecuteAssault (Flanking)
+   │     │
+   │     └─ [Default] → BTTask_ExecuteAssault (Generic)
+   │
+   ├─ [CheckCommandType: StayAlert|HoldPosition|TakeCover|Fortify, FlowAbort: LowerPriority]
+   │  └─ Selector (Defensive Subtree)
+   │     ├─ [Service: QueryRLPolicyPeriodic @ 1.5s]
+   │     ├─ [Tactical Action Branches...]
+   │     └─ BTTask_ExecuteDefend
+   │
+   ├─ [CheckCommandType: RescueAlly|ProvideSupport|Regroup|ShareAmmo, FlowAbort: LowerPriority]
+   │  └─ Selector (Support Subtree) → BTTask_ExecuteSupport
+   │
+   ├─ [CheckCommandType: Advance|Retreat|Patrol|MoveTo|Follow, FlowAbort: LowerPriority]
+   │  └─ Selector (Movement Subtree) → BTTask_ExecuteMove
+   │
+   └─ [CheckCommandType: Idle OR No Decorator - Fallback]
+      └─ Wait Task (handles initial state & no active commands)
 ```
 
 ---
@@ -299,9 +317,12 @@ CheckTacticalAction:
 |-------|-------|-----|
 | BT doesn't execute | No AI Controller running BT | Check AIController::BeginPlay() calls RunBehaviorTree() |
 | Decorators always fail | Blackboard key not set | Verify service is updating the key |
+| **Service returns false, blocking subtree** | **No active command from team leader** | **Add Idle fallback branch at bottom of selector. IsCommandValid=false when CommandType=Idle or no command received yet (FollowerAgentComponent.cpp:237)** |
 | Services don't run | Interval too long or not ticking | Check Interval > 0, service added to composite |
 | RL policy not queried | TacticalPolicy not initialized | Check FollowerAgentComponent has TacticalPolicy set |
 | Command changes ignored | Flow abort mode wrong | Use `Lower Priority` for command decorators |
+| Service cannot be placed on root | UE5 limitation | Attach service to first composite node (Selector/Sequence) under root |
+| Missing CommandPriority/TimeSinceCommand keys | Guide was incomplete | Add Int key `CommandPriority` (default: 5) and Float key `TimeSinceCommand` (default: 0.0) to blackboard |
 
 ---
 
@@ -358,30 +379,35 @@ Stagger query times using RandomDeviation
 
 ## Example: Minimal Working BT
 
-**Blackboard Keys:**
-- `CommandType` (Enum: EStrategicCommandType)
+**Required Blackboard Keys (Minimum):**
+- `CommandType` (Enum: EStrategicCommandType, default: Idle)
+- `IsCommandValid` (Bool, default: false)
 - `TacticalAction` (Enum: ETacticalAction)
 
 **Behavior Tree:**
 ```
-Root (Selector)
-├─ [Service: SyncCommandToBlackboard]
-│  - CommandTypeKey: CommandType
-│
-├─ [CheckCommandType: Assault]
-│  └─ Sequence
-│     ├─ [Service: QueryRLPolicyPeriodic]
-│     │  - TacticalActionKey: TacticalAction
-│     └─ BTTask_ExecuteAssault
-│
-└─ [Default] Wait
+Root
+└─ Main Selector
+   ├─ [Service: SyncCommandToBlackboard @ 0.5s]
+   │  - CommandTypeKey: CommandType
+   │  - IsCommandValidKey: IsCommandValid
+   │
+   ├─ [CheckCommandType: Assault, FlowAbort: LowerPriority]
+   │  └─ Sequence (Offensive Subtree)
+   │     ├─ [Service: QueryRLPolicyPeriodic @ 1.0s]
+   │     │  - TacticalActionKey: TacticalAction
+   │     └─ BTTask_ExecuteAssault
+   │
+   └─ [No Decorator - Fallback]
+      └─ Wait Task (handles Idle state)
 ```
 
 **That's it!** This minimal BT will:
-1. Sync commands from team leader
-2. Branch when command is "Assault"
+1. Sync commands from team leader via service
+2. Branch when command is "Assault" AND valid
 3. Query RL policy for tactical action
 4. Execute assault with selected tactic
+5. Wait in Idle branch if no active command (initial state)
 
 ---
 

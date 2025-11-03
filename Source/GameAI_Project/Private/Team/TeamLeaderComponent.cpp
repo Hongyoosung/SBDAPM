@@ -34,6 +34,7 @@ void UTeamLeaderComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	// Process pending events
 	ProcessPendingEvents();
 
+
 	// Update team observation (for next decision)
 	if (Followers.Num() > 0)
 	{
@@ -281,6 +282,9 @@ void UTeamLeaderComponent::ProcessPendingEvents()
 	if (PendingEvents.Num() == 0) return;
 	if (bMCTSRunning) return;
 	if (IsMCTSOnCooldown()) return;
+
+	UE_LOG(LogTemp, Warning, TEXT("TeamLeaderComponent: Tick - Processing strategic decisions for team '%s'"), *TeamName);
+
 
 	// Sort by priority (highest first)
 	PendingEvents.Sort([](const FStrategicEventContext& A, const FStrategicEventContext& B) {

@@ -6,6 +6,7 @@
 #include "AIController.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 UFollowerAgentComponent::UFollowerAgentComponent()
 {
@@ -29,6 +30,54 @@ void UFollowerAgentComponent::BeginPlay()
 		TacticalPolicy->bCollectExperiences = bCollectExperiences;
 
 		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Created RL policy"), *GetOwner()->GetName());
+	}
+
+	// Find team leader component
+	if (!TeamLeader)
+	{
+		// Option 1: Get from TeamLeaderActor if specified
+		if (TeamLeaderActor)
+		{
+			TeamLeader = TeamLeaderActor->FindComponentByClass<UTeamLeaderComponent>();
+			if (TeamLeader)
+			{
+				UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Found TeamLeader on specified actor '%s'"),
+					*GetOwner()->GetName(), *TeamLeaderActor->GetName());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': TeamLeaderActor '%s' has no TeamLeaderComponent!"),
+					*GetOwner()->GetName(), *TeamLeaderActor->GetName());
+			}
+		}
+		// Option 2: Auto-find by tag
+		else if (TeamLeaderTag != NAME_None)
+		{
+			TArray<AActor*> FoundActors;
+			UGameplayStatics::GetAllActorsWithTag(GetWorld(), TeamLeaderTag, FoundActors);
+
+			if (FoundActors.Num() > 0)
+			{
+				TeamLeaderActor = FoundActors[0];
+				TeamLeader = TeamLeaderActor->FindComponentByClass<UTeamLeaderComponent>();
+
+				if (TeamLeader)
+				{
+					UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Auto-found TeamLeader on actor '%s' by tag '%s'"),
+						*GetOwner()->GetName(), *TeamLeaderActor->GetName(), *TeamLeaderTag.ToString());
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Found actor with tag '%s' but no TeamLeaderComponent"),
+						*GetOwner()->GetName(), *TeamLeaderTag.ToString());
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': No actor found with tag '%s'"),
+					*GetOwner()->GetName(), *TeamLeaderTag.ToString());
+			}
+		}
 	}
 
 	// Auto-register with team leader

@@ -68,13 +68,21 @@ public:
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
-	/** Team leader reference */
+	/** Team leader actor (will find TeamLeaderComponent on this actor) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
+	AActor* TeamLeaderActor = nullptr;
+
+	/** Team leader component reference (auto-set from TeamLeaderActor) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|Config")
 	UTeamLeaderComponent* TeamLeader = nullptr;
 
 	/** Automatically register with team leader on BeginPlay */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
 	bool bAutoRegisterWithLeader = true;
+
+	/** Auto-find team leader by tag (if TeamLeaderActor not set) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
+	FName TeamLeaderTag = TEXT("TeamLeader");
 
 	/** State machine reference (existing FSM system) */
 	UPROPERTY(BlueprintReadWrite, Category = "Follower|Components")

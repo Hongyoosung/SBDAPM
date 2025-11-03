@@ -10,19 +10,24 @@
 /**
  * Behavior Tree Task: Query RL Policy
  *
+ * **FOLLOWER-ONLY TASK**
+ * Team leaders use MCTS for strategic decisions, not RL policies.
+ * This task should only be used in BT_FollowerAgent.
+ *
  * Queries the follower's RL policy for the next tactical action
  * and updates the Blackboard with the selected action.
  *
  * Requirements:
  * - Actor must have UFollowerAgentComponent
  * - FollowerAgentComponent must have TacticalPolicy initialized
+ * - Use with BT_FollowerAgent behavior tree
  *
  * Blackboard Keys:
  * - Output: "TacticalAction" (Enum) - Selected tactical action
  * - Output: "TacticalActionName" (String) - Human-readable action name
  *
  * Usage:
- * 1. Add this task to your Behavior Tree
+ * 1. Add this task to BT_FollowerAgent
  * 2. Configure Blackboard keys
  * 3. Task will query RL policy and update Blackboard
  * 4. Subsequent BT tasks can use TacticalAction to execute behavior

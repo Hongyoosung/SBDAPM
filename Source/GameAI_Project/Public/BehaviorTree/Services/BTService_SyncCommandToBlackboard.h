@@ -9,6 +9,10 @@
 /**
  * BTService_SyncCommandToBlackboard
  *
+ * **FOLLOWER-ONLY SERVICE**
+ * This service is ONLY for follower agents. Team leaders do not receive commands,
+ * so they should NOT use this service or the associated behavior tree.
+ *
  * Periodically syncs the follower's current strategic command from
  * FollowerAgentComponent to the Blackboard.
  *
@@ -21,6 +25,10 @@
  *   - CommandPriority (int32)
  *   - TimeSinceCommand (float)
  *   - IsCommandValid (bool)
+ *
+ * Requirements:
+ *   - Actor must have UFollowerAgentComponent
+ *   - Use with BT_FollowerAgent behavior tree
  *
  * Usage:
  *   - Add to root composite node or high-level selector
