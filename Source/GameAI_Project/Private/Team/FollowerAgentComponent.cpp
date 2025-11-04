@@ -245,7 +245,7 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 	// Map command to follower state
 	EFollowerState NewState = MapCommandToState(Command.CommandType);
 
-	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Executing command %s → State %s"),
+	UE_LOG(LogTemp, Warning, TEXT("🟢 FollowerAgent '%s': Executing command %s → State %s"),
 		*GetOwner()->GetName(),
 		*UEnum::GetValueAsString(Command.CommandType),
 		*GetStateName(NewState));
@@ -254,9 +254,21 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 	TransitionToState(NewState);
 
 	// Update Blackboard (if available)
-	if (AAIController* AIController = Cast<AAIController>(GetOwner()->GetInstigatorController()))
+	AAIController* AIController = Cast<AAIController>(GetOwner()->GetInstigatorController());
+	if (!AIController)
 	{
-		if (UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
+		UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': No AIController found! Cannot update blackboard"),
+			*GetOwner()->GetName());
+	}
+	else
+	{
+		UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent();
+		if (!Blackboard)
+		{
+			UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': No Blackboard found! Cannot update command values"),
+				*GetOwner()->GetName());
+		}
+		else
 		{
 			// Set command-related Blackboard values
 			Blackboard->SetValueAsEnum("CurrentFollowerState", static_cast<uint8>(NewState));
@@ -265,8 +277,10 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 			Blackboard->SetValueAsObject("CommandTargetActor", Command.TargetActor);
 			Blackboard->SetValueAsInt("CommandPriority", Command.Priority);
 
-			UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Updated Blackboard values"),
-				*GetOwner()->GetName());
+			UE_LOG(LogTemp, Warning, TEXT("✅ FollowerAgent '%s': Updated Blackboard - CommandType=%s, State=%s"),
+				*GetOwner()->GetName(),
+				*UEnum::GetValueAsString(Command.CommandType),
+				*GetStateName(NewState));
 		}
 	}
 

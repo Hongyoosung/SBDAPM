@@ -43,34 +43,53 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - Reward: +10 kill, +5 damage, -5 take damage, -10 die
 
 ### 5. Behavior Trees (`BehaviorTree/*`)
-- Custom tasks: `UBTTask_QueryRLPolicy`, `UBTTask_SignalEventToLeader`, etc.
-- Custom services: `UBTService_UpdateObservation`, etc.
-- Custom decorators: `UBTDecorator_CheckCommandType`, etc.
+- **Tasks:** `BTTask_QueryRLPolicy`, `BTTask_ExecuteDefend`, `BTTask_ExecuteAssault`, `BTTask_ExecuteSupport`, `BTTask_ExecuteMove`, `BTTask_FindCoverLocation`, `BTTask_SignalEventToLeader`
+- **Services:** `BTService_QueryRLPolicyPeriodic`, `BTService_SyncCommandToBlackboard`, `BTService_UpdateObservation`
+- **Decorators:** `BTDecorator_CheckCommandType`, `BTDecorator_CheckTacticalAction`
+- **Status:** ✅ Core tasks implemented for Defend/Assault/Support/Move states
 
-### 6. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
+### 6. EQS Cover System (`EQS/*`)
+- **Generator:** `EnvQueryGenerator_CoverPoints` - Grid/tag-based cover candidate generation
+- **Test:** `EnvQueryTest_CoverQuality` - Multi-factor cover scoring (enemy distance, LOS, navigability)
+- **Context:** `EnvQueryContext_CoverEnemies` - Auto-fetches enemies from Team Leader
+- **BT Integration:** `BTTask_FindCoverLocation` (EQS) + `BTTask_ExecuteDefend::FindNearestCover()` (tag-based)
+- **Status:** ✅ Implemented, tag-based active, EQS available
+
+### 7. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
 - **Status:** ✅ Fully updated (71 individual + 40 team features)
 
-### 7. Communication (`Team/TeamCommunicationManager.h/cpp`)
+### 8. Communication (`Team/TeamCommunicationManager.h/cpp`)
 - Leader ↔ Follower message passing
 - Event priority system (triggers MCTS at priority ≥5)
+
+### 9. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
+- Team registration and management
+- Enemy relationship tracking (mutual enemies, free-for-all)
+- Actor-to-team mapping (O(1) lookup)
+- **Status:** ✅ Implemented
 
 ## Current Status
 
 **✅ Implemented:**
 - Enhanced observation system (71+40 features)
-- Team architecture foundations
-- RL policy network structure
+- Team architecture (Leader, Follower, Communication)
+- RL policy network structure (128→128→64)
 - FSM refactored (command-driven, no per-agent MCTS)
+- Behavior Tree core components (Tasks, Services, Decorators)
+- EQS cover system (Generator, Test, Context, BT tasks)
+- Simulation Manager GameMode (team registration, enemy tracking)
+- Execute tasks for Defend/Assault/Support/Move states
 
 **🔄 In Progress:**
-- Behavior Tree custom components
-- RL training infrastructure
-- Complete state implementations
+- RL training infrastructure (experience collection, PPO updates)
+- Weapon/damage system integration
+- Perception system integration with Team Leader
 
 **📋 Planned:**
-- Distributed training (Ray RLlib)
-- Model persistence
-- Multi-team support (Red vs Blue)
+- Distributed training (Ray RLlib integration)
+- Model persistence and loading
+- Full multi-team scenarios (Red vs Blue vs Green)
+- Performance profiling and optimization
 
 ## Work Instructions
 
@@ -101,12 +120,25 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 
 ```
 Source/GameAI_Project/
-├── MCTS/              # Team leader strategic planning
-├── RL/                # Follower tactical policies
-├── StateMachine/      # Command-driven FSM
-├── BehaviorTree/      # Custom BT components
+├── MCTS/              # Team leader strategic planning (event-driven)
+├── RL/                # Follower tactical policies (PPO network)
+├── StateMachine/      # Command-driven FSM (no per-agent MCTS)
+├── BehaviorTree/      # Custom BT tasks, services, decorators
+│   ├── Tasks/         # ExecuteDefend, ExecuteAssault, QueryRLPolicy, etc.
+│   ├── Services/      # QueryRLPolicyPeriodic, SyncCommandToBlackboard
+│   └── Decorators/    # CheckCommandType, CheckTacticalAction
+├── EQS/               # Environment Query System (cover finding)
+│   ├── Generator      # CoverPoints (grid + tag-based)
+│   ├── Test           # CoverQuality (multi-factor scoring)
+│   └── Context        # CoverEnemies (Team Leader integration)
 ├── Team/              # Leader, Follower, Communication
-└── Observation/       # 71+40 feature observation system
+├── Observation/       # 71+40 feature observation system
+└── Core/              # SimulationManagerGameMode (team management)
 ```
 
-**See REFACTORING_PLAN.md for detailed roadmap**
+**Key Files:**
+- `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
+- `Team/FollowerAgentComponent.cpp` - RL policy queries, FSM state transitions
+- `BehaviorTree/Tasks/BTTask_ExecuteDefend.cpp:290-346` - Cover finding (tag-based)
+- `BehaviorTree/BTTask_FindCoverLocation.cpp` - Cover finding (EQS-based)
+- `EQS_SETUP_GUIDE.md` - EQS integration and setup instructions

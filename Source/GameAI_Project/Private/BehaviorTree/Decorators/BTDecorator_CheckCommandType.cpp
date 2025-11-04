@@ -36,12 +36,27 @@ bool UBTDecorator_CheckCommandType::CalculateRawConditionValue(UBehaviorTreeComp
 		bool bIsValid = IsCommandValid(OwnerComp);
 		if (!bIsValid)
 		{
+			UE_LOG(LogTemp, Verbose, TEXT("BTDecorator_CheckCommandType: Command invalid, returning %s"),
+				bInvertCondition ? TEXT("true") : TEXT("false"));
 			return bInvertCondition; // Return inverted result if command invalid
 		}
 	}
 
 	// Check if current command matches any accepted types
 	bool bMatches = AcceptedCommandTypes.Contains(CurrentCommandType);
+
+	// Log decorator evaluation
+	FString AcceptedTypesStr;
+	for (const EStrategicCommandType& Type : AcceptedCommandTypes)
+	{
+		AcceptedTypesStr += UEnum::GetValueAsString(Type) + TEXT(", ");
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("🔍 BTDecorator_CheckCommandType: Current=%s, Accepted=[%s], Match=%s, Result=%s"),
+		*UEnum::GetValueAsString(CurrentCommandType),
+		*AcceptedTypesStr,
+		bMatches ? TEXT("Yes") : TEXT("No"),
+		(bInvertCondition ? !bMatches : bMatches) ? TEXT("true") : TEXT("false"));
 
 	// Apply inversion if needed
 	return bInvertCondition ? !bMatches : bMatches;

@@ -5,11 +5,14 @@
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "EnvironmentQuery/EnvQueryManager.h"
+#include "EnvironmentQuery/EnvQuery.h"
 
 UBTTask_FindCoverLocation::UBTTask_FindCoverLocation()
 {
-	NodeName = "Find Cover Location";
-	bNotifyTick = false; // This is a one-shot task, doesn't need tick
+	NodeName = "Find Cover Location (EQS)";
+	bNotifyTick = false;
+	bNotifyTaskFinished = true;
 }
 
 EBTNodeResult::Type UBTTask_FindCoverLocation::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
@@ -17,43 +20,118 @@ EBTNodeResult::Type UBTTask_FindCoverLocation::ExecuteTask(UBehaviorTreeComponen
 	AAIController* AIController = OwnerComp.GetAIOwner();
 	if (!AIController)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BTTask_FindCoverLocation: No AI Controller found"));
+		UE_LOG(LogTemp, Error, TEXT("BTTask_FindCoverLocation: No AI Controller"));
 		return EBTNodeResult::Failed;
 	}
 
 	APawn* ControlledPawn = AIController->GetPawn();
 	if (!ControlledPawn)
 	{
-		UE_LOG(LogTemp, Error, TEXT("BTTask_FindCoverLocation: No controlled pawn found"));
+		UE_LOG(LogTemp, Error, TEXT("BTTask_FindCoverLocation: No pawn"));
 		return EBTNodeResult::Failed;
 	}
 
-	FVector CoverLocation;
-	if (FindBestCover(ControlledPawn, CoverLocation))
+	// Try EQS first if query is set
+	if (CoverQuery)
 	{
-		// Write cover location to Blackboard
-		UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
-		if (BlackboardComp)
+		UEnvQueryManager* QueryManager = UEnvQueryManager::GetCurrent(ControlledPawn->GetWorld());
+		if (QueryManager)
 		{
-			BlackboardComp->SetValueAsVector(CoverLocationKey, CoverLocation);
-			UE_LOG(LogTemp, Log, TEXT("BTTask_FindCoverLocation: Found cover at %s"), *CoverLocation.ToString());
+			FEnvQueryRequest QueryRequest(CoverQuery, ControlledPawn);
+			QueryRequestID = QueryRequest.Execute(
+				EEnvQueryRunMode::SingleResult,
+				this,
+				&UBTTask_FindCoverLocation::OnQueryFinished);
 
-			if (bDrawDebug)
+			if (QueryRequestID != INDEX_NONE)
 			{
-				// Draw a bright green sphere at the selected cover location
-				DrawDebugSphere(ControlledPawn->GetWorld(), CoverLocation, 150.0f, 16, FColor::Green, false, 5.0f, 0, 5.0f);
-
-				// Draw a line from the agent to the cover
-				DrawDebugLine(ControlledPawn->GetWorld(), ControlledPawn->GetActorLocation(), CoverLocation,
-					FColor::Cyan, false, 5.0f, 0, 3.0f);
+				CachedBehaviorTreeComp = &OwnerComp;
+				return EBTNodeResult::InProgress;
 			}
+		}
 
-			return EBTNodeResult::Succeeded;
+		UE_LOG(LogTemp, Warning, TEXT("BTTask_FindCoverLocation: EQS query failed to start"));
+	}
+
+	// Fallback to legacy search
+	if (bUseLegacySearch)
+	{
+		FVector CoverLocation;
+		if (FindBestCover(ControlledPawn, CoverLocation))
+		{
+			UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
+			if (BlackboardComp)
+			{
+				BlackboardComp->SetValueAsVector(CoverLocationKey, CoverLocation);
+				UE_LOG(LogTemp, Log, TEXT("BTTask_FindCoverLocation: Found cover (legacy) at %s"), *CoverLocation.ToString());
+
+				if (bDrawDebug)
+				{
+					DrawDebugSphere(ControlledPawn->GetWorld(), CoverLocation, 150.0f, 16, FColor::Green, false, 5.0f);
+					DrawDebugLine(ControlledPawn->GetWorld(), ControlledPawn->GetActorLocation(), CoverLocation,
+						FColor::Cyan, false, 5.0f, 0, 3.0f);
+				}
+
+				return EBTNodeResult::Succeeded;
+			}
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("BTTask_FindCoverLocation: No cover found within radius %.1f"), SearchRadius);
+	UE_LOG(LogTemp, Warning, TEXT("BTTask_FindCoverLocation: No cover found"));
 	return EBTNodeResult::Failed;
+}
+
+EBTNodeResult::Type UBTTask_FindCoverLocation::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
+{
+	if (QueryRequestID != INDEX_NONE)
+	{
+		UEnvQueryManager* QueryManager = UEnvQueryManager::GetCurrent(OwnerComp.GetWorld());
+		if (QueryManager)
+		{
+			QueryManager->AbortQuery(QueryRequestID);
+		}
+		QueryRequestID = INDEX_NONE;
+	}
+
+	return EBTNodeResult::Aborted;
+}
+
+void UBTTask_FindCoverLocation::OnQueryFinished(TSharedPtr<FEnvQueryResult> Result)
+{
+	QueryRequestID = INDEX_NONE;
+
+	if (!CachedBehaviorTreeComp.IsValid())
+	{
+		return;
+	}
+
+	UBehaviorTreeComponent* OwnerComp = CachedBehaviorTreeComp.Get();
+	UBlackboardComponent* BlackboardComp = OwnerComp->GetBlackboardComponent();
+
+	if (Result->IsSuccessful() && BlackboardComp)
+	{
+		FVector CoverLocation = Result->GetItemAsLocation(0);
+		BlackboardComp->SetValueAsVector(CoverLocationKey, CoverLocation);
+
+		if (bDrawDebug && OwnerComp->GetAIOwner())
+		{
+			APawn* Pawn = OwnerComp->GetAIOwner()->GetPawn();
+			if (Pawn)
+			{
+				DrawDebugSphere(Pawn->GetWorld(), CoverLocation, 150.0f, 16, FColor::Green, false, 5.0f);
+				DrawDebugLine(Pawn->GetWorld(), Pawn->GetActorLocation(), CoverLocation,
+					FColor::Cyan, false, 5.0f, 0, 3.0f);
+			}
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("BTTask_FindCoverLocation: EQS found cover at %s"), *CoverLocation.ToString());
+		FinishLatentTask(*OwnerComp, EBTNodeResult::Succeeded);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BTTask_FindCoverLocation: EQS query failed"));
+		FinishLatentTask(*OwnerComp, EBTNodeResult::Failed);
+	}
 }
 
 bool UBTTask_FindCoverLocation::FindBestCover(APawn* ControlledPawn, FVector& OutCoverLocation)

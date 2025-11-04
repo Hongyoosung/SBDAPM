@@ -4,20 +4,24 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTTaskNode.h"
+#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "BTTask_FindCoverLocation.generated.h"
 
+class UEnvQuery;
+
 /**
- * BTTask_FindCoverLocation - Finds a suitable cover location and writes it to the Blackboard.
+ * BTTask_FindCoverLocation - Finds a suitable cover location using EQS and writes it to the Blackboard.
  *
- * This task searches for cover within a specified radius and evaluates
- * positions based on:
+ * This task uses Environment Query System (EQS) to search for cover within a specified radius
+ * and evaluates positions based on:
  * - Distance from enemies (further = safer)
  * - Availability of line-of-sight blocking
  * - Distance from agent (closer = faster to reach)
+ * - Navigability (must be reachable)
  *
  * Usage:
  * - Add this task to the Flee behavior subtree
- * - Configure SearchRadius and CoverTag in the Behavior Tree editor
+ * - Assign an EQS query asset (e.g., EQS_FindCover)
  * - The task will write the best cover location to the Blackboard
  * - Use with a MoveTo task to navigate the agent to cover
  *
@@ -34,53 +38,46 @@ public:
 	UBTTask_FindCoverLocation();
 
 protected:
-	/**
-	 * Called when this task is executed.
-	 * Searches for cover and writes the location to Blackboard.
-	 */
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+	virtual EBTNodeResult::Type AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
-	/**
-	 * Returns a description of this task for the Behavior Tree editor.
-	 */
 	virtual FString GetStaticDescription() const override;
 
-public:
-	/**
-	 * Maximum search radius for cover (in cm)
-	 * Default: 1500 cm (15 meters)
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cover", meta = (ClampMin = "100.0", ClampMax = "5000.0"))
-	float SearchRadius = 1500.0f;
+	/** Called when EQS query finishes */
+	void OnQueryFinished(TSharedPtr<FEnvQueryResult> Result);
 
-	/**
-	 * Blackboard key to write the cover location to
-	 * This should be a Vector key in your Blackboard asset
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blackboard")
+public:
+	/** EQS query to run for finding cover */
+	UPROPERTY(EditAnywhere, Category = "EQS")
+	UEnvQuery* CoverQuery = nullptr;
+
+	/** Blackboard key to write the cover location to */
+	UPROPERTY(EditAnywhere, Category = "Blackboard")
 	FName CoverLocationKey = FName("CoverLocation");
 
-	/**
-	 * Tag used to identify cover objects in the world
-	 * Cover objects should be tagged with this name in the editor
-	 * Default: "Cover"
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cover")
-	FName CoverTag = FName("Cover");
-
-	/**
-	 * Whether to draw debug visualization
-	 * Shows cover candidates and the selected cover location
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	/** Whether to draw debug visualization */
+	UPROPERTY(EditAnywhere, Category = "Debug")
 	bool bDrawDebug = false;
 
+	/** Use legacy tag-based search if EQS query is not set */
+	UPROPERTY(EditAnywhere, Category = "Cover|Legacy")
+	bool bUseLegacySearch = true;
+
+	/** [Legacy] Maximum search radius for cover (in cm) */
+	UPROPERTY(EditAnywhere, Category = "Cover|Legacy", meta = (ClampMin = "100.0", ClampMax = "5000.0", EditCondition = "bUseLegacySearch"))
+	float SearchRadius = 1500.0f;
+
+	/** [Legacy] Tag used to identify cover objects */
+	UPROPERTY(EditAnywhere, Category = "Cover|Legacy", meta = (EditCondition = "bUseLegacySearch"))
+	FName CoverTag = FName("Cover");
+
 private:
-	/**
-	 * Find the best cover location based on distance and safety
-	 * @param ControlledPawn - The pawn seeking cover
-	 * @param OutCoverLocation - Output: The best cover location found
-	 * @return true if cover was found, false otherwise
-	 */
+	/** EQS query request ID */
+	int32 QueryRequestID = INDEX_NONE;
+
+	/** Cached behavior tree component */
+	TWeakObjectPtr<UBehaviorTreeComponent> CachedBehaviorTreeComp;
+
+	/** Legacy cover finding (fallback) */
 	bool FindBestCover(APawn* ControlledPawn, FVector& OutCoverLocation);
 };

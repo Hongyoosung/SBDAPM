@@ -459,11 +459,17 @@ void UTeamLeaderComponent::IssueCommand(AActor* Follower, const FStrategicComman
 	{
 		CommunicationManager->SendCommandToFollower(this, Follower, Command);
 	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("TeamLeader '%s': No CommunicationManager! Cannot send command to %s"),
+			*TeamName, *Follower->GetName());
+	}
 
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Issued command '%s' to %s"),
+	UE_LOG(LogTemp, Warning, TEXT("🔴 TeamLeader '%s': Issued command '%s' to %s (Priority: %d)"),
 		*TeamName,
 		*UEnum::GetValueAsString(Command.CommandType),
-		*Follower->GetName());
+		*Follower->GetName(),
+		Command.Priority);
 }
 
 void UTeamLeaderComponent::IssueCommands(const TMap<AActor*, FStrategicCommand>& Commands)

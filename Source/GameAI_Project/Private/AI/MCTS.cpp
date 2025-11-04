@@ -457,6 +457,14 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
 {
     TMap<AActor*, FStrategicCommand> Commands;
 
+    UE_LOG(LogTemp, Warning, TEXT("📊 MCTS: Generating commands for %d followers"), Followers.Num());
+    UE_LOG(LogTemp, Warning, TEXT("  Team State: Enemies=%d, Health=%.1f%%, Outnumbered=%s, Flanked=%s, DistToObj=%.1f"),
+        TeamObs.TotalVisibleEnemies,
+        TeamObs.AverageTeamHealth,
+        TeamObs.bOutnumbered ? TEXT("Yes") : TEXT("No"),
+        TeamObs.bFlanked ? TEXT("Yes") : TEXT("No"),
+        TeamObs.DistanceToObjective);
+
     // Rule-based command generation (placeholder for full MCTS)
     // This implements simple tactical AI based on team situation
 
