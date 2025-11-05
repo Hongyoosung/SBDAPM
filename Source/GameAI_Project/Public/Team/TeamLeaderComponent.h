@@ -250,6 +250,12 @@ public:
 	/** Callback when async MCTS completes */
 	void OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCommands);
 
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
+	bool IsMCTSRunning() const { return bMCTSRunning; }
+
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
+	float GetLastMCTSDecisionTime() const { return LastMCTSTime; }
+
 	//--------------------------------------------------------------------------
 	// COMMAND ISSUANCE
 	//--------------------------------------------------------------------------

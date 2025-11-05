@@ -8,8 +8,9 @@
 #include "Team/TeamTypes.h"
 
 UMCTS::UMCTS()
-    : RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0)
-    , MaxSimulations(500), DiscountFactor(0.95f), ExplorationParameter(1.41f)
+    : MaxSimulations(500)
+    , DiscountFactor(0.95f), ExplorationParameter(1.41f)
+    , RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0)
 {
 }
 

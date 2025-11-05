@@ -45,37 +45,30 @@ UENUM(BlueprintType)
 enum class EStrategicCommandType : uint8
 {
 	None			UMETA(DisplayName = "None"),
+
+	// Idle command
+	Idle            UMETA(DisplayName = "Idle - Hold position"),
 	
 	// Offensive commands
 	Assault         UMETA(DisplayName = "Assault - Aggressive attack"),
-	Flank           UMETA(DisplayName = "Flank - Attack from side"),
-	Suppress        UMETA(DisplayName = "Suppress - Suppressive fire"),
-	Charge          UMETA(DisplayName = "Charge - Rush enemy"),
+	
 
 	// Defensive commands
-	StayAlert       UMETA(DisplayName = "Stay Alert - Defensive posture"),
-	HoldPosition    UMETA(DisplayName = "Hold Position - Defend location"),
-	TakeCover       UMETA(DisplayName = "Take Cover - Find cover"),
-	Fortify         UMETA(DisplayName = "Fortify - Strengthen position"),
+	Defend			UMETA(DisplayName = "Stay Alert - Defensive posture"),
+	HoldPosition    UMETA(DisplayName = "Hold Position - Defend area"),
 
 	// Support commands
-	RescueAlly      UMETA(DisplayName = "Rescue - Save ally"),
-	ProvideSupport  UMETA(DisplayName = "Support - Help teammate"),
-	Regroup         UMETA(DisplayName = "Regroup - Return to formation"),
-	ShareAmmo       UMETA(DisplayName = "Share Ammo - Resupply teammate"),
-
+	Support			UMETA(DisplayName = "Support - Help teammate"),
+	
 	// Movement commands
-	Advance         UMETA(DisplayName = "Advance - Move forward"),
 	Retreat         UMETA(DisplayName = "Retreat - Fall back"),
-	Patrol          UMETA(DisplayName = "Patrol - Guard area"),
 	MoveTo          UMETA(DisplayName = "Move To - Navigate to position"),
-	Follow          UMETA(DisplayName = "Follow - Follow target"),
+	Patrol			UMETA(DisplayName = "Patrol - Move between waypoints"),
+	Advance         UMETA(DisplayName = "Advance - Move forward"),
 
 	// Special commands
-	Investigate     UMETA(DisplayName = "Investigate - Check area"),
-	Distract        UMETA(DisplayName = "Distract - Draw attention"),
-	Stealth         UMETA(DisplayName = "Stealth - Move quietly"),
-	Idle            UMETA(DisplayName = "Idle - No orders")
+	Regroup         UMETA(DisplayName = "Regroup - Assemble at location"),
+	TakeCover       UMETA(DisplayName = "Take Cover - Find nearest cover"),
 };
 
 /**

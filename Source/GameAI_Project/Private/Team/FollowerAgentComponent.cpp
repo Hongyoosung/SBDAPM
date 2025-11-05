@@ -316,43 +316,28 @@ EFollowerState UFollowerAgentComponent::MapCommandToState(EStrategicCommandType 
 {
 	switch (CommandType)
 	{
-		// Offensive → Assault
+		// Offensive
 		case EStrategicCommandType::Assault:
-		case EStrategicCommandType::Flank:
-		case EStrategicCommandType::Suppress:
-		case EStrategicCommandType::Charge:
 			return EFollowerState::Assault;
 
-		// Defensive → Defend
-		case EStrategicCommandType::StayAlert:
-		case EStrategicCommandType::HoldPosition:
-		case EStrategicCommandType::TakeCover:
-		case EStrategicCommandType::Fortify:
+		// Defensive
+		case EStrategicCommandType::Defend:
 			return EFollowerState::Defend;
 
-		// Support → Support
-		case EStrategicCommandType::RescueAlly:
-		case EStrategicCommandType::ProvideSupport:
-		case EStrategicCommandType::Regroup:
-		case EStrategicCommandType::ShareAmmo:
+		// Support
+		case EStrategicCommandType::Support:
 			return EFollowerState::Support;
 
-		// Movement → Move
-		case EStrategicCommandType::Advance:
+		// Movement
 		case EStrategicCommandType::MoveTo:
-		case EStrategicCommandType::Patrol:
-		case EStrategicCommandType::Follow:
-		case EStrategicCommandType::Investigate:
-		case EStrategicCommandType::Stealth:
 			return EFollowerState::Move;
 
-		// Retreat → Retreat
+		// Retreat
 		case EStrategicCommandType::Retreat:
 			return EFollowerState::Retreat;
 
-		// Idle / Default
+		// Idle
 		case EStrategicCommandType::Idle:
-		case EStrategicCommandType::Distract:
 		default:
 			return EFollowerState::Idle;
 	}

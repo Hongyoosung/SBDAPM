@@ -18,7 +18,10 @@ public class GameAI_Project : ModuleRules
 			"AIModule",
 			"NavigationSystem",
 			"Json",              
-			"JsonUtilities" 
+			"JsonUtilities", 
+			"GameplayStateTreeModule", 
+			"StateTreeModule",
+			"StructUtils"
 		});
 		
 		PrivateDependencyModuleNames.AddRange(new string[] 
