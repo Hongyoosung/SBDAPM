@@ -3,6 +3,7 @@
 #include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
 #include "RL/RLPolicyNetwork.h"
+#include "StateTreeExecutionContext.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
 
@@ -58,6 +59,20 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetRequiredStateTreeS
 	return UFollowerStateTreeSchema::StaticClass();
 }
 
+bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& ExecutionContext, bool bLogErrors)
+{
+	if (!Super::SetContextRequirements(ExecutionContext, bLogErrors))
+	{
+		return false;
+	}
+
+	ExecutionContext.SetCollectExternalDataCallback(
+		FOnCollectStateTreeExternalData::CreateUObject(this, &UFollowerStateTreeComponent::CollectExternalData)
+	);
+
+	return ExecutionContext.AreContextDataViewsValid();
+}
+
 void UFollowerStateTreeComponent::InitializeContext()
 {
 	if (!FollowerComponent)
@@ -66,11 +81,30 @@ void UFollowerStateTreeComponent::InitializeContext()
 		return;
 	}
 
+	if (!Context.FollowerComponent && bAutoFindFollowerComponent)
+	{
+		Context.FollowerComponent = GetOwner() ? GetOwner()->FindComponentByClass<UFollowerAgentComponent>() : nullptr;
+	}
+    
+	// Auto-find AIController
+	if (!Context.AIController)
+	{
+		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+		{
+			Context.AIController = Cast<AAIController>(OwnerPawn->GetController());
+		}
+	}
+
 	// Set component references
-	Context.FollowerComponent = FollowerComponent;
-	Context.AIController = Cast<AAIController>(FollowerComponent->GetOwner()->GetInstigatorController());
-	Context.TeamLeader = FollowerComponent->GetTeamLeader();
-	Context.TacticalPolicy = FollowerComponent->GetTacticalPolicy();
+	if (!Context.TeamLeader && Context.FollowerComponent)
+	{
+		Context.TeamLeader = Context.FollowerComponent->GetTeamLeader();
+	}
+    
+	if (!Context.TacticalPolicy && Context.FollowerComponent)
+	{
+		Context.TacticalPolicy = Context.FollowerComponent->GetTacticalPolicy();
+	}
 
 	// Initialize state flags
 	Context.bIsAlive = FollowerComponent->bIsAlive;
@@ -118,6 +152,38 @@ FString UFollowerStateTreeComponent::GetCurrentStateName() const
 	// Get active state name from State Tree
 	// (UE State Tree API may vary - this is a placeholder)
 	return TEXT("Active"); // TODO: Get actual state name from State Tree API
+}
+
+bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionContext& InContext,
+	const UStateTree* StateTree, TArrayView<const FStateTreeExternalDataDesc> ExternalDataDescs,
+	TArrayView<FStateTreeDataView> OutDataViews)
+{
+	for (int32 Index = 0; Index < ExternalDataDescs.Num(); Index++)
+	{
+		const FStateTreeExternalDataDesc& Desc = ExternalDataDescs[Index];
+
+		// Provide individual components as external data
+		if (Desc.Struct == UFollowerAgentComponent::StaticClass())
+		{
+			OutDataViews[Index] = FStateTreeDataView(Context.FollowerComponent);
+		}
+		else if (Desc.Struct == AAIController::StaticClass())
+		{
+			OutDataViews[Index] = FStateTreeDataView(Context.AIController);
+		}
+		else if (Desc.Struct == FFollowerStateTreeContext::StaticStruct())
+		{
+			// Provide the entire context struct
+			OutDataViews[Index] = FStateTreeDataView(FStructView::Make(Context));
+		}
+		else
+		{
+			// Unknown external data type
+			OutDataViews[Index] = FStateTreeDataView(); // Invalid/empty view
+		}
+	}
+
+	return true;
 }
 
 UFollowerAgentComponent* UFollowerStateTreeComponent::FindFollowerComponent()

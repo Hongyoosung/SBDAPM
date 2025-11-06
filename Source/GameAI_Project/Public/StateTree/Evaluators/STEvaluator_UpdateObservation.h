@@ -101,7 +101,7 @@ struct GAMEAI_PROJECT_API FSTEvaluator_UpdateObservationInstanceData
 	float TimeAccumulator = 0.0f;
 };
 
-USTRUCT(meta = (DisplayName = "Update Observation"))
+USTRUCT(meta = (DisplayName = "Update Observation", BlueprintType))
 struct GAMEAI_PROJECT_API FSTEvaluator_UpdateObservation : public FStateTreeEvaluatorBase
 {
 	GENERATED_BODY()

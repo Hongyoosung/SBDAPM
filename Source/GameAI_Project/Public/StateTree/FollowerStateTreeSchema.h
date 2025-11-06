@@ -37,7 +37,7 @@ public:
 	virtual bool IsExternalItemAllowed(const UStruct& InStruct) const override;
 	virtual TConstArrayView<FStateTreeExternalDataDesc> GetContextDataDescs() const override;
 
-	// Store the context descriptors as a static array
-	static TArray<FStateTreeExternalDataDesc> ContextDataDescs;
-	// ~UStateTreeSchema interface
+	UPROPERTY()
+	TArray<FStateTreeExternalDataDesc> ContextDataDescs;
+
 };

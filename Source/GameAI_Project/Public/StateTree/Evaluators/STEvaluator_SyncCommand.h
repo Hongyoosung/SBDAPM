@@ -50,7 +50,7 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommandInstanceData
 	EStrategicCommandType LastCommandType = EStrategicCommandType::None;
 };
 
-USTRUCT(meta = (DisplayName = "Sync Command"))
+USTRUCT(meta = (DisplayName = "Sync Command", BlueprintType))
 struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommand : public FStateTreeEvaluatorBase
 {
 	GENERATED_BODY()

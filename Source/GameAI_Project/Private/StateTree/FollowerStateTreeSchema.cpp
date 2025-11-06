@@ -6,14 +6,38 @@
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
+#include "StateTree/Conditions/STCondition_IsAlive.h"
+#include "StateTree/Conditions/STCondition_CheckCommandType.h"
+#include "StateTree/Conditions/STCondition_CheckTacticalAction.h"
+#include "StateTree/Tasks/STTask_ExecuteAssault.h"
+#include "StateTree/Tasks/STTask_ExecuteDefend.h"
+#include "StateTree/Tasks/STTask_ExecuteSupport.h"
+#include "StateTree/Tasks/STTask_QueryRLPolicy.h"
+#include "StateTree/Evaluators/STEvaluator_SyncCommand.h"
+#include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
 
-TArray<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::ContextDataDescs;
 
 UFollowerStateTreeSchema::UFollowerStateTreeSchema()
 {
-	// Bind the FFollowerStateTreeContext as the context data for this schema
+	// Register individual components as bindable external data
+	// This allows tasks/evaluators/conditions to bind directly to these components
 	ContextDataDescs.Reset();
 
+	// 1. FollowerAgentComponent - Primary component for agent logic
+	FStateTreeExternalDataDesc& FollowerDesc = ContextDataDescs.AddDefaulted_GetRef();
+	FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
+	FollowerDesc.Name = FName(TEXT("FollowerComponent"));
+	FollowerDesc.ID = FGuid::NewGuid();
+	FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+
+	// 2. AIController - For movement/perception/navigation
+	FStateTreeExternalDataDesc& AIControllerDesc = ContextDataDescs.AddDefaulted_GetRef();
+	AIControllerDesc.Struct = AAIController::StaticClass();
+	AIControllerDesc.Name = FName(TEXT("AIController"));
+	AIControllerDesc.ID = FGuid::NewGuid();
+	AIControllerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+
+	// 3. StateTree Context - Contains shared state data
 	FStateTreeExternalDataDesc& ContextDesc = ContextDataDescs.AddDefaulted_GetRef();
 	ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
 	ContextDesc.Name = FName(TEXT("FollowerContext"));
@@ -32,6 +56,20 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 	// Allow project-specific structs
 	if (InScriptStruct)
 	{
+		// Allow all StateTree base types
+		if (InScriptStruct->IsChildOf(FSTEvaluator_SyncCommand::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTEvaluator_UpdateObservation::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTCondition_IsAlive::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTCondition_CheckCommandType::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTCondition_CheckTacticalAction::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteAssault::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteDefend::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteSupport::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_QueryRLPolicy::StaticStruct()))
+		{
+			return true;
+		}
+		
 		// Allow observation structs
 		if (InScriptStruct->GetFName() == FName(TEXT("ObservationElement")))
 		{

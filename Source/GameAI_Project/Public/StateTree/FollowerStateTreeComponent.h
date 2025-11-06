@@ -57,7 +57,10 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-	
+
+	// Provide context data to State Tree execution
+	virtual bool SetContextRequirements(FStateTreeExecutionContext& Context, bool bLogErrors = false) override;
+
 	UFUNCTION(BlueprintPure, Category = "State Tree")
     virtual TSubclassOf<UStateTreeSchema> GetRequiredStateTreeSchema() const;
 
@@ -116,6 +119,14 @@ public:
 	/** Get current command (from context) */
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FStrategicCommand GetCurrentCommand() const { return Context.CurrentCommand; }
+
+	// External data collection delegate
+	bool CollectExternalData(
+		const FStateTreeExecutionContext& InContext,
+		const UStateTree* StateTree,
+		TArrayView<const FStateTreeExternalDataDesc> ExternalDataDescs,
+		TArrayView<FStateTreeDataView> OutDataViews
+	);
 
 protected:
 	/** Find FollowerAgentComponent on actor */
