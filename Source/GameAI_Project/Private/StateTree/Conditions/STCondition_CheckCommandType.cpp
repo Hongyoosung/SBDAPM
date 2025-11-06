@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/Conditions/STCondition_CheckCommandType.h"
-#include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTree/FollowerStateTreeContext.h"
 
 bool FSTCondition_CheckCommandType::TestCondition(FStateTreeExecutionContext& Context) const
 {

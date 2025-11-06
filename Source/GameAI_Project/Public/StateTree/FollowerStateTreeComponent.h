@@ -45,7 +45,7 @@ class UFollowerAgentComponent;
  * - UpdateObservation (runs every tick, gathers 71-feature observation)
  * - SyncCommand (syncs command from FollowerAgentComponent)
  */
-UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup = "StateTree", meta = (BlueprintSpawnableComponent, DisplayName = "Follower StateTree Component"))
 class GAMEAI_PROJECT_API UFollowerStateTreeComponent : public UStateTreeComponent
 {
 	GENERATED_BODY()
@@ -57,6 +57,9 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
+	UFUNCTION(BlueprintPure, Category = "State Tree")
+    virtual TSubclassOf<UStateTreeSchema> GetRequiredStateTreeSchema() const;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION

@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/Tasks/STTask_QueryRLPolicy.h"
-#include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTree/FollowerStateTreeContext.h"
 #include "RL/RLPolicyNetwork.h"
 #include "Team/FollowerAgentComponent.h"
 #include "AIController.h"

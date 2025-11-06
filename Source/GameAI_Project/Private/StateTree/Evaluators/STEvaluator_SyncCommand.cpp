@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/Evaluators/STEvaluator_SyncCommand.h"
-#include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
 
 void FSTEvaluator_SyncCommand::TreeStart(FStateTreeExecutionContext& Context) const

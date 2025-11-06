@@ -53,6 +53,11 @@ void UFollowerStateTreeComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 	Super::EndPlay(EndPlayReason);
 }
 
+TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetRequiredStateTreeSchema() const
+{
+	return UFollowerStateTreeSchema::StaticClass();
+}
+
 void UFollowerStateTreeComponent::InitializeContext()
 {
 	if (!FollowerComponent)

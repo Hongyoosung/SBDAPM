@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
-#include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
