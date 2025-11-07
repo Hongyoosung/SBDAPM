@@ -16,6 +16,11 @@ UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 
 void UFollowerStateTreeComponent::BeginPlay()
 {
+	if (FollowerStateTree)
+	{
+		SetStateTree(FollowerStateTree);
+	}
+
 	Super::BeginPlay();
 
 	// Find FollowerAgentComponent if not set
@@ -30,6 +35,8 @@ void UFollowerStateTreeComponent::BeginPlay()
 			*GetOwner()->GetName());
 		return;
 	}
+
+	
 
 	// Initialize context
 	InitializeContext();

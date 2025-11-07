@@ -121,6 +121,10 @@ protected:
 
 
 public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree",
+		meta = (Schema = "FollowerStateTreeSchema"))
+	TObjectPtr<UStateTree> FollowerStateTree;
+
 	//--------------------------------------------------------------------------
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
