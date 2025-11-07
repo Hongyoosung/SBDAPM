@@ -297,10 +297,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Simulation|Stats")
 	FSimulationStats GetSimulationStats() const;
 
+
+private:
+	/** Update statistics */
+	void UpdateStatistics();
+
+	/** Draw debug information */
+	void DrawDebugInformation();
+
+
+public:
 	//--------------------------------------------------------------------------
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
-
 	/** Auto-start simulation on BeginPlay */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Config")
 	bool bAutoStartSimulation = true;
@@ -312,6 +321,7 @@ public:
 	/** Debug draw update interval */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Debug")
 	float DebugDrawInterval = 1.0f;
+
 
 private:
 	/** Registered teams */
@@ -330,10 +340,4 @@ private:
 
 	/** Last debug draw time */
 	float LastDebugDrawTime = 0.0f;
-
-	/** Update statistics */
-	void UpdateStatistics();
-
-	/** Draw debug information */
-	void DrawDebugInformation();
 };

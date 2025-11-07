@@ -74,110 +74,7 @@ public:
 		FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	//--------------------------------------------------------------------------
-	// CONFIGURATION
-	//--------------------------------------------------------------------------
-
-	/** Maximum number of followers this leader can command */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
-	int32 MaxFollowers = 4;
-
-	/** MCTS simulations per strategic decision */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
-	int32 MCTSSimulations = 500;
-
-	/** Run MCTS asynchronously (recommended) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
-	bool bAsyncMCTS = true;
-
-	/** Minimum time between MCTS runs (seconds, prevents spam) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
-	float MCTSCooldown = 2.0f;
-
-	/** Event priority threshold to trigger MCTS (0-10) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
-	int32 EventPriorityThreshold = 5;
-
-	/** Team name/ID */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
-	FString TeamName = TEXT("Alpha Team");
-
-	/** Team color (for visualization) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
-	FLinearColor TeamColor = FLinearColor::Blue;
-
-	/** Enable debug visualization */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Debug")
-	bool bEnableDebugDrawing = false;
-
-	/** Objective actor for the team */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
-	AActor* ObjectiveActor = nullptr;
-
-	//--------------------------------------------------------------------------
-	// STATE
-	//--------------------------------------------------------------------------
-
-	/** Registered followers */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	TArray<AActor*> Followers;
-
-	/** Current commands for each follower */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	TMap<AActor*, FStrategicCommand> CurrentCommands;
-
-	/** Is MCTS currently running? */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	bool bMCTSRunning = false;
-
-	/** Time of last MCTS execution */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	float LastMCTSTime = 0.0f;
-
-	/** Pending events (queued for processing) */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	TArray<FStrategicEventContext> PendingEvents;
-
-	/** Current team observation */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	FTeamObservation CurrentTeamObservation;
-
-	/** Known enemy actors */
-	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	TSet<AActor*> KnownEnemies;
-
-	//--------------------------------------------------------------------------
-	// COMPONENTS
-	//--------------------------------------------------------------------------
-
-	/** MCTS decision engine */
-	UPROPERTY()
-	UMCTS* StrategicMCTS;
-
-	/** Communication manager (can be shared across teams) */
-	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
-	UTeamCommunicationManager* CommunicationManager;
-
-	//--------------------------------------------------------------------------
-	// EVENTS
-	//--------------------------------------------------------------------------
-
-	/** Fired when strategic decision is made */
-	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
-	FOnStrategicDecisionMade OnStrategicDecisionMade;
-
-	/** Fired when event is processed */
-	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
-	FOnEventProcessed OnEventProcessed;
-
-	/** Fired when follower is registered */
-	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
-	FOnFollowerRegistered OnFollowerRegistered;
-
-	/** Fired when follower is unregistered */
-	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
-	FOnFollowerUnregistered OnFollowerUnregistered;
-
+	
 	//--------------------------------------------------------------------------
 	// FOLLOWER MANAGEMENT
 	//--------------------------------------------------------------------------
@@ -316,10 +213,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Team Leader|Debug")
 	bool IsRunningMCTS() const { return bMCTSRunning; }
 
-private:
-	/** Async task for MCTS */
-	FGraphEventRef AsyncMCTSTask;
 
+private:
 	/** Process pending events */
 	void ProcessPendingEvents();
 
@@ -328,6 +223,117 @@ private:
 
 	/** Initialize MCTS engine */
 	void InitializeMCTS();
+
+
+public:
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
+
+	/** Maximum number of followers this leader can command */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	int32 MaxFollowers = 4;
+
+	/** MCTS simulations per strategic decision */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
+	int32 MCTSSimulations = 500;
+
+	/** Run MCTS asynchronously (recommended) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
+	bool bAsyncMCTS = true;
+
+	/** Minimum time between MCTS runs (seconds, prevents spam) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|MCTS")
+	float MCTSCooldown = 2.0f;
+
+	/** Event priority threshold to trigger MCTS (0-10) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	int32 EventPriorityThreshold = 5;
+
+	/** Team name/ID */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	FString TeamName = TEXT("Alpha Team");
+
+	/** Team color (for visualization) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	FLinearColor TeamColor = FLinearColor::Blue;
+
+	/** Enable debug visualization */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Debug")
+	bool bEnableDebugDrawing = false;
+
+	/** Objective actor for the team */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	AActor* ObjectiveActor = nullptr;
+
+	//--------------------------------------------------------------------------
+	// STATE
+	//--------------------------------------------------------------------------
+
+	/** Registered followers */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	TArray<AActor*> Followers;
+
+	/** Current commands for each follower */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	TMap<AActor*, FStrategicCommand> CurrentCommands;
+
+	/** Is MCTS currently running? */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	bool bMCTSRunning = false;
+
+	/** Time of last MCTS execution */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	float LastMCTSTime = 0.0f;
+
+	/** Pending events (queued for processing) */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	TArray<FStrategicEventContext> PendingEvents;
+
+	/** Current team observation */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	FTeamObservation CurrentTeamObservation;
+
+	/** Known enemy actors */
+	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
+	TSet<AActor*> KnownEnemies;
+
+	//--------------------------------------------------------------------------
+	// COMPONENTS
+	//--------------------------------------------------------------------------
+
+	/** MCTS decision engine */
+	UPROPERTY()
+	UMCTS* StrategicMCTS;
+
+	/** Communication manager (can be shared across teams) */
+	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
+	UTeamCommunicationManager* CommunicationManager;
+
+	//--------------------------------------------------------------------------
+	// EVENTS
+	//--------------------------------------------------------------------------
+
+	/** Fired when strategic decision is made */
+	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
+	FOnStrategicDecisionMade OnStrategicDecisionMade;
+
+	/** Fired when event is processed */
+	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
+	FOnEventProcessed OnEventProcessed;
+
+	/** Fired when follower is registered */
+	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
+	FOnFollowerRegistered OnFollowerRegistered;
+
+	/** Fired when follower is unregistered */
+	UPROPERTY(BlueprintAssignable, Category = "Team Leader|Events")
+	FOnFollowerUnregistered OnFollowerUnregistered;
+
+
+private:
+	/** Async task for MCTS */
+	FGraphEventRef AsyncMCTSTask;
 
 	/** Statistics tracking */
 	int32 TotalCommandsIssued = 0;

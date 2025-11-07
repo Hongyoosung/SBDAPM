@@ -1,11 +1,8 @@
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
-#include "Core/StateMachine.h"
 #include "RL/RLPolicyNetwork.h"
 #include "DrawDebugHelpers.h"
 #include "AIController.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 UFollowerAgentComponent::UFollowerAgentComponent()
@@ -17,9 +14,6 @@ UFollowerAgentComponent::UFollowerAgentComponent()
 void UFollowerAgentComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Initialize state machine
-	InitializeStateMachine();
 
 	// Initialize RL policy if not set
 	if (!TacticalPolicy && bUseRLPolicy)
@@ -116,25 +110,6 @@ void UFollowerAgentComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // INITIALIZATION
 //------------------------------------------------------------------------------
 
-void UFollowerAgentComponent::InitializeStateMachine()
-{
-	// Get existing state machine if available
-	if (GetOwner())
-	{
-		StrategicFSM = GetOwner()->FindComponentByClass<UStateMachine>();
-
-		if (StrategicFSM)
-		{
-			UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Found existing StateMachine"),
-				*GetOwner()->GetName());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': No StateMachine found, command execution may be limited"),
-				*GetOwner()->GetName());
-		}
-	}
-}
 
 //------------------------------------------------------------------------------
 // TEAM LEADER COMMUNICATION
@@ -252,37 +227,6 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 
 	// Transition FSM
 	TransitionToState(NewState);
-
-	// Update Blackboard (if available)
-	AAIController* AIController = Cast<AAIController>(GetOwner()->GetInstigatorController());
-	if (!AIController)
-	{
-		UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': No AIController found! Cannot update blackboard"),
-			*GetOwner()->GetName());
-	}
-	else
-	{
-		UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent();
-		if (!Blackboard)
-		{
-			UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': No Blackboard found! Cannot update command values"),
-				*GetOwner()->GetName());
-		}
-		else
-		{
-			// Set command-related Blackboard values
-			Blackboard->SetValueAsEnum("CurrentFollowerState", static_cast<uint8>(NewState));
-			Blackboard->SetValueAsEnum("CurrentCommandType", static_cast<uint8>(Command.CommandType));
-			Blackboard->SetValueAsVector("CommandTargetLocation", Command.TargetLocation);
-			Blackboard->SetValueAsObject("CommandTargetActor", Command.TargetActor);
-			Blackboard->SetValueAsInt("CommandPriority", Command.Priority);
-
-			UE_LOG(LogTemp, Warning, TEXT("✅ FollowerAgent '%s': Updated Blackboard - CommandType=%s, State=%s"),
-				*GetOwner()->GetName(),
-				*UEnum::GetValueAsString(Command.CommandType),
-				*GetStateName(NewState));
-		}
-	}
 
 	// Broadcast event
 	OnCommandReceived.Broadcast(Command, NewState);

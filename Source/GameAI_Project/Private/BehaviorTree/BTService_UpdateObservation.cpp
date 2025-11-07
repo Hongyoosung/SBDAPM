@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BehaviorTree/BTService_UpdateObservation.h"
-#include "Core/StateMachine.h"
 #include "Observation/ObservationElement.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Interfaces/CombatStatsInterface.h"
@@ -76,25 +75,6 @@ void UBTService_UpdateObservation::TickNode(UBehaviorTreeComponent& OwnerComp, u
 					NewObservation.AgentHealth, NewObservation.VisibleEnemyCount, NewObservation.LastActionType);
 			}
 		}
-
-		// Get the StateMachine component (legacy support)
-		UStateMachine* StateMachine = ControlledPawn->FindComponentByClass<UStateMachine>();
-		if (StateMachine)
-		{
-			// Update the StateMachine's observation
-			StateMachine->UpdateObservation(NewObservation);
-		}
-		else if (bEnableDebugLog && !FollowerComp)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("BTService_UpdateObservation: No FollowerAgentComponent or StateMachine found on pawn"));
-		}
-
-		// Sync to Blackboard
-		UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
-		if (BlackboardComp)
-		{
-			SyncToBlackboard(BlackboardComp, NewObservation);
-		}
 	}
 }
 
@@ -153,8 +133,6 @@ void UBTService_UpdateObservation::UpdateAgentState(FObservationElement& Observa
 	{
 		// Get health, stamina, shield from interface
 		Observation.AgentHealth = CombatStats->Execute_GetHealthPercentage(ControlledPawn);
-		Observation.Stamina = CombatStats->Execute_GetStaminaPercentage(ControlledPawn);
-		Observation.Shield = CombatStats->Execute_GetShieldPercentage(ControlledPawn);
 	}
 	else
 	{
@@ -376,8 +354,6 @@ void UBTService_UpdateObservation::UpdateCombatState(FObservationElement& Observ
 	{
 		// Get weapon/combat stats from interface
 		Observation.WeaponCooldown = CombatStats->Execute_GetWeaponCooldown(ControlledPawn);
-		Observation.Ammunition = CombatStats->Execute_GetAmmunition(ControlledPawn);
-		Observation.CurrentWeaponType = CombatStats->Execute_GetWeaponType(ControlledPawn);
 	}
 	else
 	{

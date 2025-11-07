@@ -30,30 +30,7 @@ class GAMEAI_PROJECT_API URLReplayBuffer : public UObject
 public:
 	URLReplayBuffer();
 
-	// ========================================
-	// Configuration
-	// ========================================
-
-	// Maximum buffer capacity (default: 100,000)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	int32 MaxCapacity;
-
-	// Enable prioritized experience replay
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	bool bUsePrioritizedReplay;
-
-	// Priority exponent (alpha) for PER
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	float PriorityAlpha;
-
-	// Importance sampling exponent (beta) for PER
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	float ImportanceSamplingBeta;
-
-	// Small constant to avoid zero priorities
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	float PriorityEpsilon;
-
+	
 	// ========================================
 	// Buffer Management
 	// ========================================
@@ -186,32 +163,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RL")
 	TArray<int32> GetActionDistribution() const;
 
+
 private:
-	// ========================================
-	// Internal Storage
-	// ========================================
-
-	// Experience buffer (circular)
-	UPROPERTY()
-	TArray<FRLExperience> Experiences;
-
-	// Priority values for each experience (for PER)
-	TArray<float> Priorities;
-
-	// Sum tree for efficient priority sampling (for PER)
-	TArray<float> SumTree;
-
-	// Current write position (for circular buffer)
-	int32 WritePosition;
-
 	// ========================================
 	// Helper Functions
 	// ========================================
 
 	/**
-	 * Calculate priority for a new experience
-	 * Uses max priority to ensure new experiences are sampled
-	 */
+	* Calculate priority for a new experience
+	* Uses max priority to ensure new experiences are sampled
+	*/
 	float CalculateInitialPriority() const;
 
 	/**
@@ -233,4 +194,49 @@ private:
 	 * Calculate importance sampling weight (for PER)
 	 */
 	float CalculateImportanceWeight(int32 Index, float TotalPriority) const;
+
+
+public:
+	// ========================================
+	// Configuration
+	// ========================================
+
+	// Maximum buffer capacity (default: 100,000)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	int32 MaxCapacity;
+
+	// Enable prioritized experience replay
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	bool bUsePrioritizedReplay;
+
+	// Priority exponent (alpha) for PER
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	float PriorityAlpha;
+
+	// Importance sampling exponent (beta) for PER
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	float ImportanceSamplingBeta;
+
+	// Small constant to avoid zero priorities
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	float PriorityEpsilon;
+
+
+private:
+	// ========================================
+	// Internal Storage
+	// ========================================
+
+	// Experience buffer (circular)
+	UPROPERTY()
+	TArray<FRLExperience> Experiences;
+
+	// Priority values for each experience (for PER)
+	TArray<float> Priorities;
+
+	// Sum tree for efficient priority sampling (for PER)
+	TArray<float> SumTree;
+
+	// Current write position (for circular buffer)
+	int32 WritePosition;
 };

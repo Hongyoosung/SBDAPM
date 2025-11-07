@@ -115,53 +115,6 @@ class GAMEAI_PROJECT_API UTeamCommunicationManager : public UObject
 public:
 	UTeamCommunicationManager();
 
-	//--------------------------------------------------------------------------
-	// CONFIGURATION
-	//--------------------------------------------------------------------------
-
-	/** Enable message queueing (if false, deliver immediately) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
-	bool bEnableMessageQueue = false;
-
-	/** Maximum messages in queue */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
-	int32 MaxQueueSize = 100;
-
-	/** Enable peer-to-peer messaging */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
-	bool bEnablePeerToPeer = true;
-
-	/** Enable message logging */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
-	bool bEnableMessageLogging = true;
-
-	//--------------------------------------------------------------------------
-	// STATE
-	//--------------------------------------------------------------------------
-
-	/** Message queue (priority-ordered) */
-	UPROPERTY(BlueprintReadOnly, Category = "Communication|State")
-	TArray<FTeamMessage> MessageQueue;
-
-	/** Total messages sent */
-	UPROPERTY(BlueprintReadOnly, Category = "Communication|Stats")
-	int32 TotalMessagesSent = 0;
-
-	/** Total messages received */
-	UPROPERTY(BlueprintReadOnly, Category = "Communication|Stats")
-	int32 TotalMessagesReceived = 0;
-
-	//--------------------------------------------------------------------------
-	// EVENTS
-	//--------------------------------------------------------------------------
-
-	/** Fired when message is sent */
-	UPROPERTY(BlueprintAssignable, Category = "Communication|Events")
-	FOnMessageSent OnMessageSent;
-
-	/** Fired when message is received */
-	UPROPERTY(BlueprintAssignable, Category = "Communication|Events")
-	FOnMessageReceived OnMessageReceived;
 
 	//--------------------------------------------------------------------------
 	// LEADER → FOLLOWER MESSAGING
@@ -300,10 +253,61 @@ public:
 		TotalMessagesReceived = 0;
 	}
 
+
 private:
 	/** Deliver message immediately */
 	void DeliverMessage(const FTeamMessage& Message);
 
 	/** Log message (if logging enabled) */
 	void LogMessage(const FTeamMessage& Message, bool bSending);
+
+
+public:
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
+
+	/** Enable message queueing (if false, deliver immediately) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
+	bool bEnableMessageQueue = false;
+
+	/** Maximum messages in queue */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
+	int32 MaxQueueSize = 100;
+
+	/** Enable peer-to-peer messaging */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
+	bool bEnablePeerToPeer = true;
+
+	/** Enable message logging */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Communication|Config")
+	bool bEnableMessageLogging = true;
+
+	//--------------------------------------------------------------------------
+	// STATE
+	//--------------------------------------------------------------------------
+
+	/** Message queue (priority-ordered) */
+	UPROPERTY(BlueprintReadOnly, Category = "Communication|State")
+	TArray<FTeamMessage> MessageQueue;
+
+	/** Total messages sent */
+	UPROPERTY(BlueprintReadOnly, Category = "Communication|Stats")
+	int32 TotalMessagesSent = 0;
+
+	/** Total messages received */
+	UPROPERTY(BlueprintReadOnly, Category = "Communication|Stats")
+	int32 TotalMessagesReceived = 0;
+
+	//--------------------------------------------------------------------------
+	// EVENTS
+	//--------------------------------------------------------------------------
+
+	/** Fired when message is sent */
+	UPROPERTY(BlueprintAssignable, Category = "Communication|Events")
+	FOnMessageSent OnMessageSent;
+
+	/** Fired when message is received */
+	UPROPERTY(BlueprintAssignable, Category = "Communication|Events")
+	FOnMessageReceived OnMessageReceived;
 };

@@ -198,9 +198,6 @@ protected:
 	/** Get support location from blackboard */
 	FVector GetSupportLocation(UBehaviorTreeComponent& OwnerComp) const;
 
-	/** Check if current ammunition is low */
-	bool IsAmmunitionLow(UBehaviorTreeComponent& OwnerComp) const;
-
 	/** Get ally health percentage */
 	float GetAllyHealthPercentage(AActor* Ally) const;
 

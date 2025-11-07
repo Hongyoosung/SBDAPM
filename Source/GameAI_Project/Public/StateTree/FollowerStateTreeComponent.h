@@ -64,29 +64,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State Tree")
     virtual TSubclassOf<UStateTreeSchema> GetRequiredStateTreeSchema() const;
 
-	//--------------------------------------------------------------------------
-	// CONFIGURATION
-	//--------------------------------------------------------------------------
-
-	/** Follower agent component reference (auto-found if nullptr) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	UFollowerAgentComponent* FollowerComponent = nullptr;
-
-	/** Auto-find FollowerAgentComponent on same actor */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	bool bAutoFindFollowerComponent = true;
-
-	/** Auto-start State Tree on BeginPlay */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	bool bAutoStartStateTree = true;
-
-	//--------------------------------------------------------------------------
-	// STATE TREE CONTEXT
-	//--------------------------------------------------------------------------
-
-	/** Shared context for State Tree (accessed by all tasks/evaluators/conditions) */
-	UPROPERTY(BlueprintReadOnly, Category = "State Tree")
-	FFollowerStateTreeContext Context;
 
 	//--------------------------------------------------------------------------
 	// API
@@ -141,4 +118,30 @@ protected:
 
 	/** Handle follower death */
 	void OnFollowerDied();
+
+
+public:
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
+
+	/** Follower agent component reference (auto-found if nullptr) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
+	UFollowerAgentComponent* FollowerComponent = nullptr;
+
+	/** Auto-find FollowerAgentComponent on same actor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
+	bool bAutoFindFollowerComponent = true;
+
+	/** Auto-start State Tree on BeginPlay */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
+	bool bAutoStartStateTree = true;
+
+	//--------------------------------------------------------------------------
+	// STATE TREE CONTEXT
+	//--------------------------------------------------------------------------
+
+	/** Shared context for State Tree (accessed by all tasks/evaluators/conditions) */
+	UPROPERTY(BlueprintReadOnly, Category = "State Tree")
+	FFollowerStateTreeContext Context;
 };

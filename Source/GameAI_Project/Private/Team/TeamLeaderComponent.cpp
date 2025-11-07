@@ -1,6 +1,6 @@
 #include "Team/TeamLeaderComponent.h"
 #include "Team/TeamCommunicationManager.h"
-#include "AI/MCTS.h"
+#include "AI/MCTS/MCTS.h"
 #include "DrawDebugHelpers.h"
 #include "Async/Async.h"
 

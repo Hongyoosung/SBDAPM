@@ -7,7 +7,6 @@
 #include "Observation/ObservationElement.h"
 #include "BTService_UpdateObservation.generated.h"
 
-class UStateMachine;
 class AAIController;
 
 /**

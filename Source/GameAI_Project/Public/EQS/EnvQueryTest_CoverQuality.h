@@ -24,6 +24,21 @@ public:
 	virtual FText GetDescriptionTitle() const override;
 	virtual FText GetDescriptionDetails() const override;
 
+
+private:
+	/** Calculate cover score for a location */
+	float CalculateCoverScore(
+		const FVector& CoverLocation,
+		const FVector& QuerierLocation,
+		const TArray<FVector>& EnemyLocations,
+		UWorld* World
+	) const;
+
+	/** Check if there's line of sight between two points */
+	bool HasLineOfSight(const FVector& From, const FVector& To, UWorld* World) const;
+
+
+public:
 	/** Weight for enemy distance scoring (0-1) */
 	UPROPERTY(EditDefaultsOnly, Category = "Cover Quality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float EnemyDistanceWeight = 0.5f;
@@ -55,16 +70,4 @@ public:
 	/** Context providing enemy locations for cover evaluation */
 	UPROPERTY(EditDefaultsOnly, Category = "Cover Quality")
 	TSubclassOf<UEnvQueryContext> EnemyContext;
-
-private:
-	/** Calculate cover score for a location */
-	float CalculateCoverScore(
-		const FVector& CoverLocation,
-		const FVector& QuerierLocation,
-		const TArray<FVector>& EnemyLocations,
-		UWorld* World
-	) const;
-
-	/** Check if there's line of sight between two points */
-	bool HasLineOfSight(const FVector& From, const FVector& To, UWorld* World) const;
 };

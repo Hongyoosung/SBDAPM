@@ -32,28 +32,6 @@ class GAMEAI_PROJECT_API URLPolicyNetwork : public UObject
 public:
 	URLPolicyNetwork();
 
-	// ========================================
-	// Configuration
-	// ========================================
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	FRLPolicyConfig Config;
-
-	// Enable epsilon-greedy exploration
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	bool bEnableExploration;
-
-	// Use ONNX model for inference (if false, uses rule-based fallback)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	bool bUseONNXModel;
-
-	// Enable experience collection for offline training
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	bool bCollectExperiences;
-
-	// Maximum experiences to store before export
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	int32 MaxExperienceBufferSize;
 
 	// ========================================
 	// Initialization
@@ -190,26 +168,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RL")
 	static FString GetActionName(ETacticalAction Action);
 
+
 private:
-	// ========================================
-	// Internal State
-	// ========================================
-
-	// Is the policy initialized?
-	bool bIsInitialized;
-
-	// Collected experiences for offline training
-	TArray<FRLExperience> CollectedExperiences;
-
-	// Training statistics
-	FRLTrainingStats TrainingStats;
-
-	// Current episode reward accumulator
-	float CurrentEpisodeReward;
-
-	// Current episode step count
-	int32 CurrentEpisodeSteps;
-
 	// ========================================
 	// Neural Network Inference (ONNX)
 	// ========================================
@@ -269,4 +229,49 @@ private:
 	 * Convert integer index to ETacticalAction
 	 */
 	static ETacticalAction IndexToAction(int32 Index);
+
+public:
+	// ========================================
+	// Configuration
+	// ========================================
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	FRLPolicyConfig Config;
+
+	// Enable epsilon-greedy exploration
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	bool bEnableExploration;
+
+	// Use ONNX model for inference (if false, uses rule-based fallback)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	bool bUseONNXModel;
+
+	// Enable experience collection for offline training
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	bool bCollectExperiences;
+
+	// Maximum experiences to store before export
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
+	int32 MaxExperienceBufferSize;
+
+
+private:
+	// ========================================
+	// Internal State
+	// ========================================
+
+	// Is the policy initialized?
+	bool bIsInitialized;
+
+	// Collected experiences for offline training
+	TArray<FRLExperience> CollectedExperiences;
+
+	// Training statistics
+	FRLTrainingStats TrainingStats;
+
+	// Current episode reward accumulator
+	float CurrentEpisodeReward;
+
+	// Current episode step count
+	int32 CurrentEpisodeSteps;
 };

@@ -9,8 +9,6 @@
 
 // Forward declarations
 class UTeamLeaderComponent;
-class UStateMachine;
-class UBehaviorTree;
 class URLPolicyNetwork;
 
 /**
@@ -64,105 +62,6 @@ public:
 		FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	//--------------------------------------------------------------------------
-	// CONFIGURATION
-	//--------------------------------------------------------------------------
-
-	/** Team leader actor (will find TeamLeaderComponent on this actor) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
-	AActor* TeamLeaderActor = nullptr;
-
-	/** Team leader component reference (auto-set from TeamLeaderActor) */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|Config")
-	UTeamLeaderComponent* TeamLeader = nullptr;
-
-	/** Automatically register with team leader on BeginPlay */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
-	bool bAutoRegisterWithLeader = true;
-
-	/** Auto-find team leader by tag (if TeamLeaderActor not set) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
-	FName TeamLeaderTag = TEXT("TeamLeader");
-
-	/** State machine reference (existing FSM system) */
-	UPROPERTY(BlueprintReadWrite, Category = "Follower|Components")
-	UStateMachine* StrategicFSM = nullptr;
-
-	/** Behavior tree to run (for command execution) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Components")
-	UBehaviorTree* BehaviorTreeAsset = nullptr;
-
-	/** RL policy for tactical action selection */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Components")
-	URLPolicyNetwork* TacticalPolicy = nullptr;
-
-	/** Enable RL policy (if false, uses rule-based fallback) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|RL")
-	bool bUseRLPolicy = true;
-
-	/** Collect experiences for offline training */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|RL")
-	bool bCollectExperiences = true;
-
-	/** Enable debug visualization */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Debug")
-	bool bEnableDebugDrawing = false;
-
-	//--------------------------------------------------------------------------
-	// STATE
-	//--------------------------------------------------------------------------
-
-	/** Current follower state */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	EFollowerState CurrentFollowerState = EFollowerState::Idle;
-
-	/** Current command from leader */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	FStrategicCommand CurrentCommand;
-
-	/** Local observation (71 features) */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	FObservationElement LocalObservation;
-
-	/** Is follower alive? */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	bool bIsAlive = true;
-
-	/** Time since last command received */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	float TimeSinceLastCommand = 0.0f;
-
-	/** Last tactical action selected by RL policy */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
-	ETacticalAction LastTacticalAction = ETacticalAction::DefensiveHold;
-
-	/** Time since last tactical action was taken (seconds) */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
-	float TimeSinceLastTacticalAction = 0.0f;
-
-	/** Previous observation (for experience collection) */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
-	FObservationElement PreviousObservation;
-
-	/** Accumulated reward this episode */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
-	float AccumulatedReward = 0.0f;
-
-	//--------------------------------------------------------------------------
-	// EVENTS
-	//--------------------------------------------------------------------------
-
-	/** Fired when command is received from leader */
-	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
-	FOnCommandReceived OnCommandReceived;
-
-	/** Fired when event is signaled to leader */
-	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
-	FOnEventSignaled OnEventSignaled;
-
-	/** Fired when follower state changes */
-	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
-	FOnStateChanged OnStateChanged;
 
 	//--------------------------------------------------------------------------
 	// TEAM LEADER COMMUNICATION
@@ -321,13 +220,108 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Follower|State")
 	static FString GetStateName(EFollowerState State);
 
-private:
-	/** Initialize state machine */
-	void InitializeStateMachine();
 
+private:
 	/** Update command timer */
 	void UpdateCommandTimer(float DeltaTime);
 
+
+public:
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
+
+	/** Team leader actor (will find TeamLeaderComponent on this actor) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
+	AActor* TeamLeaderActor = nullptr;
+
+	/** Team leader component reference (auto-set from TeamLeaderActor) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|Config")
+	UTeamLeaderComponent* TeamLeader = nullptr;
+
+	/** Automatically register with team leader on BeginPlay */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
+	bool bAutoRegisterWithLeader = true;
+
+	/** Auto-find team leader by tag (if TeamLeaderActor not set) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Config")
+	FName TeamLeaderTag = TEXT("TeamLeader");
+
+	/** RL policy for tactical action selection */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Components")
+	URLPolicyNetwork* TacticalPolicy = nullptr;
+
+	/** Enable RL policy (if false, uses rule-based fallback) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|RL")
+	bool bUseRLPolicy = true;
+
+	/** Collect experiences for offline training */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|RL")
+	bool bCollectExperiences = true;
+
+	/** Enable debug visualization */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Debug")
+	bool bEnableDebugDrawing = false;
+
+	//--------------------------------------------------------------------------
+	// STATE
+	//--------------------------------------------------------------------------
+
+	/** Current follower state */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
+	EFollowerState CurrentFollowerState = EFollowerState::Idle;
+
+	/** Current command from leader */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
+	FStrategicCommand CurrentCommand;
+
+	/** Local observation (71 features) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
+	FObservationElement LocalObservation;
+
+	/** Is follower alive? */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
+	bool bIsAlive = true;
+
+	/** Time since last command received */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
+	float TimeSinceLastCommand = 0.0f;
+
+	/** Last tactical action selected by RL policy */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	ETacticalAction LastTacticalAction = ETacticalAction::DefensiveHold;
+
+	/** Time since last tactical action was taken (seconds) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	float TimeSinceLastTacticalAction = 0.0f;
+
+	/** Previous observation (for experience collection) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	FObservationElement PreviousObservation;
+
+	/** Accumulated reward this episode */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	float AccumulatedReward = 0.0f;
+
+	//--------------------------------------------------------------------------
+	// EVENTS
+	//--------------------------------------------------------------------------
+
+	/** Fired when command is received from leader */
+	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
+	FOnCommandReceived OnCommandReceived;
+
+	/** Fired when event is signaled to leader */
+	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
+	FOnEventSignaled OnEventSignaled;
+
+	/** Fired when follower state changes */
+	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
+	FOnStateChanged OnStateChanged;
+
+
+
+private:
 	/** Previous state (for state change detection) */
 	EFollowerState PreviousFollowerState = EFollowerState::Idle;
 };

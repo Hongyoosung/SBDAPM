@@ -527,24 +527,6 @@ FVector UBTTask_ExecuteSupport::GetSupportLocation(UBehaviorTreeComponent& Owner
 	return FVector::ZeroVector;
 }
 
-bool UBTTask_ExecuteSupport::IsAmmunitionLow(UBehaviorTreeComponent& OwnerComp) const
-{
-	APawn* ControlledPawn = OwnerComp.GetAIOwner()->GetPawn();
-	if (!ControlledPawn)
-	{
-		return false;
-	}
-
-	// Check via CombatStatsInterface
-	ICombatStatsInterface* CombatStats = Cast<ICombatStatsInterface>(ControlledPawn);
-	if (CombatStats)
-	{
-		float Ammo = CombatStats->Execute_GetAmmunition(ControlledPawn);
-		return Ammo < ReloadThreshold * 100.0f;
-	}
-
-	return false;
-}
 
 float UBTTask_ExecuteSupport::GetAllyHealthPercentage(AActor* Ally) const
 {
