@@ -5,7 +5,13 @@
 *.vsconfig
 
 # gitarrtibutes
-*.gitarrtibutes
+*.gitattributes
+
+*.GameAI_Project.sin.DotSettings.user
+
+*CODE_REORGANIZATION_PLAN.md
+
+*GameAI_Project.sln.DotSettings.user
 
 # md files
 *.md
