@@ -1,6 +1,15 @@
 # Visual Studio 2015 user specific files
 .vs/
 
+# vs config
+*.vsconfig
+
+# gitarrtibutes
+*.gitarrtibutes
+
+# md files
+*.md
+
 # Compiled Object files
 *.slo
 *.lo
