@@ -212,17 +212,39 @@ void UTeamLeaderComponent::ProcessStrategicEvent(
 void UTeamLeaderComponent::ProcessStrategicEventWithContext(
 	const FStrategicEventContext& Context)
 {
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Processing event %d (Priority: %d)"),
-		*TeamName, static_cast<int32>(Context.EventType), Context.Priority);
+	FString EventName = UEnum::GetValueAsString(Context.EventType);
+	FString InstigatorName = Context.Instigator ? Context.Instigator->GetName() : TEXT("None");
+
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [TEAM LEADER] '%s': Received event %s from %s (Priority: %d, Location: %s)"),
+		*TeamName,
+		*EventName,
+		*InstigatorName,
+		Context.Priority,
+		*Context.Location.ToString());
 
 	// Add to pending queue
 	PendingEvents.Add(Context);
+	UE_LOG(LogTemp, Display, TEXT("🟡 [TEAM LEADER] '%s': Event queued (%d pending events)"),
+		*TeamName,
+		PendingEvents.Num());
 
 	// Check if we should trigger MCTS immediately
 	bool bShouldTrigger = ShouldTriggerMCTS(Context);
 
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [TEAM LEADER] '%s': MCTS trigger check: %s (bMCTSRunning=%s, IsCooldown=%s, Priority=%d >= Threshold=%d)"),
+		*TeamName,
+		bShouldTrigger ? TEXT("YES") : TEXT("NO"),
+		bMCTSRunning ? TEXT("true") : TEXT("false"),
+		IsMCTSOnCooldown() ? TEXT("true") : TEXT("false"),
+		Context.Priority,
+		EventPriorityThreshold);
+
 	if (bShouldTrigger)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [TEAM LEADER] '%s': 🚀 TRIGGERING MCTS (Mode: %s)"),
+			*TeamName,
+			bAsyncMCTS ? TEXT("ASYNC") : TEXT("SYNC"));
+
 		if (bAsyncMCTS)
 		{
 			RunStrategicDecisionMakingAsync();
@@ -231,6 +253,11 @@ void UTeamLeaderComponent::ProcessStrategicEventWithContext(
 		{
 			RunStrategicDecisionMaking();
 		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Display, TEXT("🟡 [TEAM LEADER] '%s': MCTS not triggered, event will be processed later"),
+			*TeamName);
 	}
 
 	OnEventProcessed.Broadcast(Context.EventType, bShouldTrigger);
@@ -351,19 +378,37 @@ void UTeamLeaderComponent::RunStrategicDecisionMaking()
 	}
 
 	bMCTSRunning = true;
-	LastMCTSTime = FPlatformTime::Seconds();
+	float StartTime = FPlatformTime::Seconds();
+	LastMCTSTime = StartTime;
 
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Running MCTS (sync) for %d followers"),
-		*TeamName, GetAliveFollowers().Num());
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS] '%s': ⏱️ MCTS STARTED (SYNC) - %d followers, %d enemies"),
+		*TeamName,
+		GetAliveFollowers().Num(),
+		KnownEnemies.Num());
 
 	// Build observation
 	CurrentTeamObservation = BuildTeamObservation();
 
+	UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS] '%s': Observation built (TeamHealth: %.1f%%, TeamCentroid: %s)"),
+		*TeamName,
+		CurrentTeamObservation.AverageTeamHealth,
+		*CurrentTeamObservation.TeamCentroid.ToString());
+
 	// Run MCTS to generate strategic commands
+	UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS] '%s': Running MCTS with %d simulations..."),
+		*TeamName,
+		MCTSSimulations);
+
 	TMap<AActor*, FStrategicCommand> NewCommands = StrategicMCTS->RunTeamMCTS(
 		CurrentTeamObservation,
 		GetAliveFollowers()
 	);
+
+	float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // ms
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS] '%s': ✅ MCTS COMPLETED in %.2fms - Generated %d commands"),
+		*TeamName,
+		ExecutionTime,
+		NewCommands.Num());
 
 	// Issue commands
 	OnMCTSComplete(NewCommands);
@@ -384,13 +429,19 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 	}
 
 	bMCTSRunning = true;
-	LastMCTSTime = FPlatformTime::Seconds();
+	float StartTime = FPlatformTime::Seconds();
+	LastMCTSTime = StartTime;
 
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Running MCTS (async) for %d followers"),
-		*TeamName, GetAliveFollowers().Num());
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS] '%s': ⏱️ MCTS STARTED (ASYNC) - %d followers, %d enemies"),
+		*TeamName,
+		GetAliveFollowers().Num(),
+		KnownEnemies.Num());
 
 	// Build observation (on game thread)
 	CurrentTeamObservation = BuildTeamObservation();
+
+	UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS] '%s': Observation built, launching async task..."),
+		*TeamName);
 
 	// Capture necessary data for async task
 	FTeamObservation TeamObsCopy = CurrentTeamObservation;
@@ -401,17 +452,28 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 	UMCTS* MCTSPtr = StrategicMCTS;
 
 	// Launch async task
-	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, MCTSPtr, TeamObsCopy, FollowersCopy]()
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, MCTSPtr, TeamObsCopy, FollowersCopy, StartTime]()
 	{
+		UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS] '%s': 🧵 Background thread executing MCTS..."),
+			*TeamName);
+
 		// Run MCTS on background thread
 		TMap<AActor*, FStrategicCommand> NewCommands = MCTSPtr->RunTeamMCTS(
 			TeamObsCopy,
 			FollowersCopy
 		);
 
+		float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // ms
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS] '%s': ✅ MCTS COMPLETED in %.2fms - Generated %d commands"),
+			*TeamName,
+			ExecutionTime,
+			NewCommands.Num());
+
 		// Return to game thread to issue commands
 		AsyncTask(ENamedThreads::GameThread, [this, NewCommands]()
 		{
+			UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS] '%s': 🔄 Returning to game thread to issue commands"),
+				*TeamName);
 			OnMCTSComplete(NewCommands);
 		});
 	});
@@ -419,8 +481,25 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 
 void UTeamLeaderComponent::OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCommands)
 {
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': MCTS complete, issuing %d commands"),
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS COMPLETE] '%s': ✅ MCTS complete, issuing %d commands"),
 		*TeamName, NewCommands.Num());
+
+	// Log command summary
+	TMap<EStrategicCommandType, int32> CommandCounts;
+	for (const auto& Pair : NewCommands)
+	{
+		EStrategicCommandType CmdType = Pair.Value.CommandType;
+		CommandCounts.FindOrAdd(CmdType, 0)++;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("🟡 [MCTS COMPLETE] '%s': Command breakdown:"),
+		*TeamName);
+	for (const auto& CountPair : CommandCounts)
+	{
+		UE_LOG(LogTemp, Display, TEXT("   - %s: %d followers"),
+			*UEnum::GetValueAsString(CountPair.Key),
+			CountPair.Value);
+	}
 
 	// Issue commands to followers
 	IssueCommands(NewCommands);
@@ -433,6 +512,8 @@ void UTeamLeaderComponent::OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCo
 	OnStrategicDecisionMade.Broadcast(CommandMap);
 
 	bMCTSRunning = false;
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [MCTS COMPLETE] '%s': All commands issued, MCTS cycle complete"),
+		*TeamName);
 }
 
 //------------------------------------------------------------------------------
@@ -518,7 +599,7 @@ void UTeamLeaderComponent::RegisterEnemy(AActor* Enemy)
 	if (!KnownEnemies.Contains(Enemy))
 	{
 		KnownEnemies.Add(Enemy);
-		UE_LOG(LogTemp, Verbose, TEXT("TeamLeader '%s': Registered enemy %s (Total: %d)"),
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [TEAM LEADER] '%s': 🎯 Registered NEW enemy: %s (Total enemies: %d)"),
 			*TeamName, *Enemy->GetName(), KnownEnemies.Num());
 	}
 }

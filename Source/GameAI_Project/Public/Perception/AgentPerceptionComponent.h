@@ -7,6 +7,7 @@
 
 class ASimulationManagerGameMode;
 class UFollowerAgentComponent;
+class UAISenseConfig_Sight;
 
 /**
  * Perception result for a single detected actor
@@ -236,4 +237,7 @@ private:
 	/** Previously reported enemies (to avoid spam) */
 	UPROPERTY()
 	TSet<AActor*> ReportedEnemies;
+
+	/*UPROPERTY()
+	UAISenseConfig_Sight* SightConfig;*/
 };

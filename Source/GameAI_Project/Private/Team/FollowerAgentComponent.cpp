@@ -161,7 +161,7 @@ void UFollowerAgentComponent::SignalEventToLeader(
 {
 	if (!TeamLeader)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Cannot signal event, no TeamLeader"),
+		UE_LOG(LogTemp, Error, TEXT("🟢 [FOLLOWER] '%s': ❌ Cannot signal event, no TeamLeader!"),
 			*GetOwner()->GetName());
 		return;
 	}
@@ -172,10 +172,20 @@ void UFollowerAgentComponent::SignalEventToLeader(
 		Location = GetOwner()->GetActorLocation();
 	}
 
+	FString EventName = UEnum::GetValueAsString(Event);
+	FString InstigatorName = Instigator ? Instigator->GetName() : TEXT("None");
+
+	UE_LOG(LogTemp, Warning, TEXT("🟢 [FOLLOWER] '%s': 📡 Signaling event '%s' to Team Leader '%s' (Instigator: %s, Priority: %d)"),
+		*GetOwner()->GetName(),
+		*EventName,
+		*TeamLeader->TeamName,
+		*InstigatorName,
+		Priority);
+
 	TeamLeader->ProcessStrategicEvent(Event, Instigator, Location, Priority);
 
-	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Signaled event %d to TeamLeader (Priority: %d)"),
-		*GetOwner()->GetName(), static_cast<int32>(Event), Priority);
+	UE_LOG(LogTemp, Display, TEXT("🟢 [FOLLOWER] '%s': ✅ Event signaled successfully"),
+		*GetOwner()->GetName());
 
 	// Broadcast event
 	OnEventSignaled.Broadcast(Event, Instigator, Priority);
@@ -221,13 +231,28 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 	// Map command to follower state
 	EFollowerState NewState = MapCommandToState(Command.CommandType);
 
-	UE_LOG(LogTemp, Warning, TEXT("🟢 FollowerAgent '%s': Executing command %s → State %s"),
+	FString TargetInfo = Command.TargetActor ?
+		FString::Printf(TEXT("Target: %s"), *Command.TargetActor->GetName()) :
+		(!Command.TargetLocation.IsZero() ?
+			FString::Printf(TEXT("Location: %s"), *Command.TargetLocation.ToCompactString()) :
+			TEXT("No target"));
+
+	UE_LOG(LogTemp, Warning, TEXT("🟢 [COMMAND RECEIVED] '%s': 📥 Executing command '%s' → State '%s'"),
 		*GetOwner()->GetName(),
 		*UEnum::GetValueAsString(Command.CommandType),
 		*GetStateName(NewState));
 
+	UE_LOG(LogTemp, Display, TEXT("🟢 [COMMAND RECEIVED] '%s':    Priority: %d, %s, Duration: %.1fs"),
+		*GetOwner()->GetName(),
+		Command.Priority,
+		*TargetInfo,
+		Command.ExpectedDuration);
+
 	// Transition FSM
 	TransitionToState(NewState);
+
+	UE_LOG(LogTemp, Warning, TEXT("🟢 [COMMAND RECEIVED] '%s': ✅ Command execution initiated"),
+		*GetOwner()->GetName());
 
 	// Broadcast event
 	OnCommandReceived.Broadcast(Command, NewState);

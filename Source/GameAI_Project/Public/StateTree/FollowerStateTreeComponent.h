@@ -121,13 +121,11 @@ protected:
 
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree",
-		meta = (Schema = "FollowerStateTreeSchema"))
-	TObjectPtr<UStateTree> FollowerStateTree;
-
 	//--------------------------------------------------------------------------
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
+	// Note: StateTree asset is set on the base UStateTreeComponent's "StateTree" property
+	// in the editor. It will automatically use FollowerStateTreeSchema due to GetRequiredStateTreeSchema()
 
 	/** Follower agent component reference (auto-found if nullptr) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")

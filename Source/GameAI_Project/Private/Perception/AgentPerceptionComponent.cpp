@@ -12,13 +12,15 @@ UAgentPerceptionComponent::UAgentPerceptionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickInterval = 0.1f; // Update 10 times per second
+	
+	InitializePerception();
 }
 
 void UAgentPerceptionComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	InitializePerception();
+	
 
 	// Bind perception callbacks
 	OnPerceptionUpdated.AddDynamic(this, &UAgentPerceptionComponent::OnPerceptionUpdatedCallback);
@@ -85,8 +87,9 @@ void UAgentPerceptionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 void UAgentPerceptionComponent::InitializePerception()
 {
-	// Configure sight sense
+
 	UAISenseConfig_Sight* SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+	// Configure sight sense
 	if (SightConfig)
 	{
 		SightConfig->SightRadius = SightRadius;
@@ -118,9 +121,19 @@ void UAgentPerceptionComponent::OnTargetPerceivedCallback(AActor* Actor, FAIStim
 		// Successfully sensed enemy
 		if (Stimulus.WasSuccessfullySensed())
 		{
+			UE_LOG(LogTemp, Display, TEXT("🔵 [PERCEPTION] %s detected enemy: %s (Distance: %.0f, Age: %.2fs)"),
+				*GetOwner()->GetName(),
+				*Actor->GetName(),
+				FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation()),
+				Stimulus.GetAge());
+
 			// Report to team leader if enabled and not already reported
 			if (bAutoReportToLeader && !ReportedEnemies.Contains(Actor))
 			{
+				UE_LOG(LogTemp, Warning, TEXT("🔵 [PERCEPTION] %s reporting NEW enemy %s to Team Leader (Priority: 7)"),
+					*GetOwner()->GetName(),
+					*Actor->GetName());
+
 				SignalEnemySpotted(Actor);
 				ReportedEnemies.Add(Actor);
 			}
@@ -128,6 +141,10 @@ void UAgentPerceptionComponent::OnTargetPerceivedCallback(AActor* Actor, FAIStim
 		else
 		{
 			// Lost sight of enemy
+			UE_LOG(LogTemp, Display, TEXT("🔵 [PERCEPTION] %s lost sight of enemy: %s"),
+				*GetOwner()->GetName(),
+				*Actor->GetName());
+
 			ReportedEnemies.Remove(Actor);
 		}
 	}
@@ -270,7 +287,22 @@ TArray<FPerceptionResult> UAgentPerceptionComponent::GetAllPerceptionResults() c
 		if (Info)
 		{
 			Result.bSuccessfullySensed = Info->HasAnyCurrentStimulus();
-			Result.LastSenseTime = Info->GetLastStimulusTime();
+          
+			// LastSensedStimuli 배열에서 가장 최근 stimulus의 시간 가져오기
+			if (Info->LastSensedStimuli.Num() > 0)
+			{
+				float LatestTime = 0.f;
+				for (const FAIStimulus& Stimulus : Info->LastSensedStimuli)
+				{
+					if (Stimulus.WasSuccessfullySensed())
+					{
+						const float StimulusAge = Stimulus.GetAge();
+						const float StimulusTime = GetWorld()->GetTimeSeconds() - StimulusAge;
+						LatestTime = FMath::Max(LatestTime, StimulusTime);
+					}
+				}
+				Result.LastSenseTime = LatestTime;
+			}
 		}
 
 		Results.Add(Result);
@@ -370,10 +402,21 @@ void UAgentPerceptionComponent::SignalEnemySpotted(AActor* Enemy)
 	if (!Enemy || !CachedFollowerComponent) return;
 
 	UTeamLeaderComponent* Leader = CachedFollowerComponent->GetTeamLeader();
-	if (!Leader) return;
+	if (!Leader)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔵 [PERCEPTION] %s: No Team Leader found, cannot report enemy %s"),
+			*GetOwner()->GetName(),
+			*Enemy->GetName());
+		return;
+	}
 
 	// Register enemy with leader
 	Leader->RegisterEnemy(Enemy);
+
+	UE_LOG(LogTemp, Warning, TEXT("🔵 [PERCEPTION] %s signaling EnemySpotted event to Team Leader '%s' for enemy %s"),
+		*GetOwner()->GetName(),
+		*Leader->TeamName,
+		*Enemy->GetName());
 
 	// Signal event to leader (high priority)
 	CachedFollowerComponent->SignalEventToLeader(
@@ -382,6 +425,9 @@ void UAgentPerceptionComponent::SignalEnemySpotted(AActor* Enemy)
 		Enemy->GetActorLocation(),
 		7 // High priority to trigger MCTS
 	);
+
+	UE_LOG(LogTemp, Warning, TEXT("🔵 [PERCEPTION] %s → Event signaled successfully"),
+		*GetOwner()->GetName());
 }
 
 ASimulationManagerGameMode* UAgentPerceptionComponent::GetSimulationManager() const
