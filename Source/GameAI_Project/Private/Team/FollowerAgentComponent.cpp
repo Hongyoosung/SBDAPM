@@ -1,6 +1,7 @@
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
+#include "Perception/AgentPerceptionComponent.h"
 #include "DrawDebugHelpers.h"
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
@@ -347,16 +348,58 @@ FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 {
 	FObservationElement Observation;
 
-	if (GetOwner())
-	{
-		// Basic agent state
-		Observation.Position = GetOwner()->GetActorLocation();
-		Observation.Velocity = GetOwner()->GetVelocity();
-		Observation.Rotation = GetOwner()->GetActorRotation();
+	AActor* Owner = GetOwner();
+	if (!Owner) return Observation;
 
-		// TODO: Gather combat state, perception, enemies, etc.
-		// This should be implemented in BTService_UpdateObservation
+	// Basic agent state
+	Observation.Position = Owner->GetActorLocation();
+	Observation.Velocity = Owner->GetVelocity();
+	Observation.Rotation = Owner->GetActorRotation();
+
+	// Get perception component
+	UAgentPerceptionComponent* PerceptionComp = Owner->FindComponentByClass<UAgentPerceptionComponent>();
+	if (PerceptionComp)
+	{
+		// Update enemy information from perception
+		PerceptionComp->UpdateObservationWithEnemies(Observation);
+
+		// Build raycast hit types (16 rays at 5000cm range)
+		Observation.RaycastHitTypes = PerceptionComp->BuildRaycastHitTypes(16, 5000.0f);
+
+		// Calculate raycast distances (normalized)
+		const FVector OwnerLocation = Owner->GetActorLocation();
+		Observation.RaycastDistances.Init(1.0f, 16);
+
+		FCollisionQueryParams QueryParams;
+		QueryParams.AddIgnoredActor(Owner);
+
+		const float MaxRayDistance = 5000.0f;
+		const float AngleStep = 360.0f / 16;
+
+		for (int32 i = 0; i < 16; ++i)
+		{
+			const float Angle = i * AngleStep;
+			const FRotator RayRotation = Observation.Rotation + FRotator(0, Angle, 0);
+			const FVector RayDirection = RayRotation.Vector();
+			const FVector EndLocation = OwnerLocation + (RayDirection * MaxRayDistance);
+
+			FHitResult HitResult;
+			if (GetWorld()->LineTraceSingleByChannel(HitResult, OwnerLocation, EndLocation,
+				ECC_Visibility, QueryParams))
+			{
+				// Normalized distance (0-1)
+				Observation.RaycastDistances[i] = FMath::Clamp(HitResult.Distance / MaxRayDistance, 0.0f, 1.0f);
+			}
+		}
 	}
+	else
+	{
+		// Initialize empty if no perception component
+		Observation.InitializeRaycasts(16);
+	}
+
+	// TODO: Gather combat state (weapon, ammo, health, etc.)
+	// This should be implemented based on your combat system
 
 	return Observation;
 }

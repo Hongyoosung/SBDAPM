@@ -62,7 +62,15 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - Leader ↔ Follower message passing
 - Event priority system (triggers MCTS at priority ≥5)
 
-### 9. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
+### 9. Perception System (`Perception/AgentPerceptionComponent.h/cpp`)
+- UE5 AI Perception integration (sight-based detection)
+- Team-based enemy filtering via SimulationManager
+- Auto-updates RL observations with enemy data
+- 360° raycasting for environmental awareness
+- Auto-reports enemies to Team Leader (triggers MCTS)
+- **Status:** ✅ Implemented
+
+### 10. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
 - Team registration and management
 - Enemy relationship tracking (mutual enemies, free-for-all)
 - Actor-to-team mapping (O(1) lookup)
@@ -79,11 +87,11 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - EQS cover system (Generator, Test, Context, BT tasks)
 - Simulation Manager GameMode (team registration, enemy tracking)
 - Execute tasks for Defend/Assault/Support/Move states
+- Perception system (enemy detection, observation integration)
 
 **🔄 In Progress:**
 - RL training infrastructure (experience collection, PPO updates)
 - Weapon/damage system integration
-- Perception system integration with Team Leader
 
 **📋 Planned:**
 - Distributed training (Ray RLlib integration)
@@ -131,6 +139,7 @@ Source/GameAI_Project/
 │   ├── Generator      # CoverPoints (grid + tag-based)
 │   ├── Test           # CoverQuality (multi-factor scoring)
 │   └── Context        # CoverEnemies (Team Leader integration)
+├── Perception/        # AgentPerceptionComponent (enemy detection)
 ├── Team/              # Leader, Follower, Communication
 ├── Observation/       # 71+40 feature observation system
 └── Core/              # SimulationManagerGameMode (team management)
@@ -138,7 +147,9 @@ Source/GameAI_Project/
 
 **Key Files:**
 - `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
-- `Team/FollowerAgentComponent.cpp` - RL policy queries, FSM state transitions
+- `Team/FollowerAgentComponent.cpp:347` - RL observation building with perception
+- `Perception/AgentPerceptionComponent.cpp` - Enemy detection and tracking
 - `BehaviorTree/Tasks/BTTask_ExecuteDefend.cpp:290-346` - Cover finding (tag-based)
 - `BehaviorTree/BTTask_FindCoverLocation.cpp` - Cover finding (EQS-based)
 - `EQS_SETUP_GUIDE.md` - EQS integration and setup instructions
+- `PERCEPTION_SETUP.md` - Perception system setup guide

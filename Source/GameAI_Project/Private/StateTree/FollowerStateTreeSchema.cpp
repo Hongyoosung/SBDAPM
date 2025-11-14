@@ -12,6 +12,8 @@
 #include "StateTree/Tasks/STTask_ExecuteAssault.h"
 #include "StateTree/Tasks/STTask_ExecuteDefend.h"
 #include "StateTree/Tasks/STTask_ExecuteSupport.h"
+#include "StateTree/Tasks/STTask_ExecuteMove.h"
+#include "StateTree/Tasks/STTask_ExecuteRetreat.h"
 #include "StateTree/Tasks/STTask_QueryRLPolicy.h"
 #include "StateTree/Evaluators/STEvaluator_SyncCommand.h"
 #include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
@@ -65,7 +67,9 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 			InScriptStruct->IsChildOf(FSTTask_ExecuteAssault::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTTask_ExecuteDefend::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTTask_ExecuteSupport::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_QueryRLPolicy::StaticStruct()))
+			InScriptStruct->IsChildOf(FSTTask_QueryRLPolicy::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteMove::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteRetreat::StaticStruct()))
 		{
 			return true;
 		}
