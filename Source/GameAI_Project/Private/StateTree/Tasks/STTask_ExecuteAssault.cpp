@@ -3,6 +3,7 @@
 #include "StateTree/Tasks/STTask_ExecuteAssault.h"
 #include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Combat/WeaponComponent.h"
 #include "AIController.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Pawn.h"
@@ -128,6 +129,15 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
 		}
 
+		// Fire weapon at target if available
+		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		{
+			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+			{
+				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			}
+		}
+
 		InstanceData.Context.bIsMoving = true;
 		InstanceData.Context.MovementDestination = TargetLocation;
 	}
@@ -184,6 +194,16 @@ void FSTTask_ExecuteAssault::ExecuteCautiousAdvance(FStateTreeExecutionContext& 
 			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
 		}
 
+		// Fire weapon at target if in cover or has LOS
+		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		{
+			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS &&
+				(InstanceData.Context.bInCover || !InstanceData.Context.bIsMoving))
+			{
+				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			}
+		}
+
 		InstanceData.Context.bIsMoving = true;
 	}
 }
@@ -213,6 +233,15 @@ void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Co
 	{
 		InstanceData.Context.AIController->MoveToLocation(FlankDestination, 100.0f);
 		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+	}
+
+	// Fire while flanking if has LOS
+	if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+	{
+		if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+		{
+			WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+		}
 	}
 
 	InstanceData.Context.bIsMoving = true;
@@ -269,6 +298,15 @@ void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext&
 		}
 
 		InstanceData.Context.bIsMoving = false;
+	}
+
+	// Fire weapon at target (prioritize firing at optimal range)
+	if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+	{
+		if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+		{
+			WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+		}
 	}
 }
 
