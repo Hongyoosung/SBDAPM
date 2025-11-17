@@ -107,7 +107,7 @@ bool AFollowerAIController::StartStateTree()
 	}
 
 	// Initialize context
-	StateTreeComp->InitializeContext();
+	//StateTreeComp->InitializeContext();
 
 	// Start State Tree
 	if (!StateTreeComp->IsStateTreeRunning())

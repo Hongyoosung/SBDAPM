@@ -2,6 +2,8 @@
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
 #include "Perception/AgentPerceptionComponent.h"
+#include "Combat/HealthComponent.h"
+#include "Combat/WeaponComponent.h"
 #include "DrawDebugHelpers.h"
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
@@ -79,6 +81,24 @@ void UFollowerAgentComponent::BeginPlay()
 	if (bAutoRegisterWithLeader && TeamLeader)
 	{
 		RegisterWithTeamLeader();
+	}
+
+	// Bind to HealthComponent events for RL reward integration
+	UHealthComponent* HealthComp = GetOwner()->FindComponentByClass<UHealthComponent>();
+	if (HealthComp)
+	{
+		HealthComp->OnDamageTaken.AddDynamic(this, &UFollowerAgentComponent::OnDamageTakenEvent);
+		HealthComp->OnDamageDealt.AddDynamic(this, &UFollowerAgentComponent::OnDamageDealtEvent);
+		HealthComp->OnKillConfirmed.AddDynamic(this, &UFollowerAgentComponent::OnKillEvent);
+		HealthComp->OnDeath.AddDynamic(this, &UFollowerAgentComponent::OnDeathEvent);
+
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Bound to HealthComponent events for RL rewards"),
+			*GetOwner()->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': No HealthComponent found, RL combat rewards disabled"),
+			*GetOwner()->GetName());
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgentComponent: Initialized on %s"), *GetOwner()->GetName());
@@ -161,7 +181,7 @@ void UFollowerAgentComponent::SignalEventToLeader(
 {
 	if (!TeamLeader)
 	{
-		UE_LOG(LogTemp, Error, TEXT("🟢 [FOLLOWER] '%s': ❌ Cannot signal event, no TeamLeader!"),
+		UE_LOG(LogTemp, Error, TEXT("[FOLLOWER] '%s': ❌ Cannot signal event, no TeamLeader!"),
 			*GetOwner()->GetName());
 		return;
 	}
@@ -175,7 +195,7 @@ void UFollowerAgentComponent::SignalEventToLeader(
 	FString EventName = UEnum::GetValueAsString(Event);
 	FString InstigatorName = Instigator ? Instigator->GetName() : TEXT("None");
 
-	UE_LOG(LogTemp, Warning, TEXT("🟢 [FOLLOWER] '%s': 📡 Signaling event '%s' to Team Leader '%s' (Instigator: %s, Priority: %d)"),
+	UE_LOG(LogTemp, Warning, TEXT("[FOLLOWER] '%s': 📡 Signaling event '%s' to Team Leader '%s' (Instigator: %s, Priority: %d)"),
 		*GetOwner()->GetName(),
 		*EventName,
 		*TeamLeader->TeamName,
@@ -184,7 +204,7 @@ void UFollowerAgentComponent::SignalEventToLeader(
 
 	TeamLeader->ProcessStrategicEvent(Event, Instigator, Location, Priority);
 
-	UE_LOG(LogTemp, Display, TEXT("🟢 [FOLLOWER] '%s': ✅ Event signaled successfully"),
+	UE_LOG(LogTemp, Display, TEXT("[FOLLOWER] '%s': ✅ Event signaled successfully"),
 		*GetOwner()->GetName());
 
 	// Broadcast event
@@ -237,12 +257,12 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 			FString::Printf(TEXT("Location: %s"), *Command.TargetLocation.ToCompactString()) :
 			TEXT("No target"));
 
-	UE_LOG(LogTemp, Warning, TEXT("🟢 [COMMAND RECEIVED] '%s': 📥 Executing command '%s' → State '%s'"),
+	UE_LOG(LogTemp, Warning, TEXT("[COMMAND RECEIVED] '%s': 📥 Executing command '%s' → State '%s'"),
 		*GetOwner()->GetName(),
 		*UEnum::GetValueAsString(Command.CommandType),
 		*GetStateName(NewState));
 
-	UE_LOG(LogTemp, Display, TEXT("🟢 [COMMAND RECEIVED] '%s':    Priority: %d, %s, Duration: %.1fs"),
+	UE_LOG(LogTemp, Display, TEXT("[COMMAND RECEIVED] '%s':    Priority: %d, %s, Duration: %.1fs"),
 		*GetOwner()->GetName(),
 		Command.Priority,
 		*TargetInfo,
@@ -251,7 +271,7 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 	// Transition FSM
 	TransitionToState(NewState);
 
-	UE_LOG(LogTemp, Warning, TEXT("🟢 [COMMAND RECEIVED] '%s': ✅ Command execution initiated"),
+	UE_LOG(LogTemp, Warning, TEXT("[COMMAND RECEIVED] '%s': ✅ Command execution initiated"),
 		*GetOwner()->GetName());
 
 	// Broadcast event
@@ -423,8 +443,21 @@ FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 		Observation.InitializeRaycasts(16);
 	}
 
-	// TODO: Gather combat state (weapon, ammo, health, etc.)
-	// This should be implemented based on your combat system
+	// Gather combat state from components
+	UHealthComponent* HealthComp = Owner->FindComponentByClass<UHealthComponent>();
+	if (HealthComp)
+	{
+		Observation.AgentHealth = HealthComp->GetHealthPercentage() * 100.0f;
+		Observation.Shield = HealthComp->GetArmor(); // Map armor to shield
+	}
+
+	UWeaponComponent* WeaponComp = Owner->FindComponentByClass<UWeaponComponent>();
+	if (WeaponComp)
+	{
+		Observation.WeaponCooldown = WeaponComp->GetRemainingCooldown();
+		Observation.Ammunition = WeaponComp->HasAmmo() ?
+			(float)WeaponComp->GetCurrentAmmo() / FMath::Max(WeaponComp->GetMaxAmmo(), 1) * 100.0f : 0.0f;
+	}
 
 	return Observation;
 }
@@ -591,5 +624,76 @@ void UFollowerAgentComponent::DrawDebugInfo()
 	{
 		FVector LeaderPos = TeamLeader->GetOwner()->GetActorLocation();
 		DrawDebugLine(World, FollowerPos, LeaderPos, TeamLeader->TeamColor.ToFColor(true), false, 0.1f, 0, 1.0f);
+	}
+}
+
+//------------------------------------------------------------------------------
+// COMBAT EVENT HANDLERS (RL REWARD INTEGRATION)
+//------------------------------------------------------------------------------
+
+void UFollowerAgentComponent::OnDamageTakenEvent(const FDamageEventData& DamageEvent, float CurrentHealth)
+{
+	// Provide negative reward for taking damage
+	ProvideReward(FTacticalRewards::TAKE_DAMAGE, false);
+
+	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Took %.1f damage from %s (Reward: %.1f)"),
+		*GetOwner()->GetName(),
+		DamageEvent.DamageAmount,
+		DamageEvent.Instigator ? *DamageEvent.Instigator->GetName() : TEXT("Unknown"),
+		FTacticalRewards::TAKE_DAMAGE);
+
+	// Signal event to team leader if damage is significant
+	if (TeamLeader && DamageEvent.DamageAmount >= 10.0f)
+	{
+		SignalEventToLeader(EStrategicEvent::UnderFire, DamageEvent.Instigator, GetOwner()->GetActorLocation(), 6);
+	}
+}
+
+void UFollowerAgentComponent::OnDamageDealtEvent(AActor* Victim, float DamageAmount)
+{
+	// Provide positive reward for dealing damage
+	ProvideReward(FTacticalRewards::DAMAGE_ENEMY, false);
+
+	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Dealt %.1f damage to %s (Reward: %.1f)"),
+		*GetOwner()->GetName(),
+		DamageAmount,
+		Victim ? *Victim->GetName() : TEXT("Unknown"),
+		FTacticalRewards::DAMAGE_ENEMY);
+}
+
+void UFollowerAgentComponent::OnKillEvent(AActor* Victim, float TotalDamage)
+{
+	// Provide large positive reward for kill
+	ProvideReward(FTacticalRewards::KILL_ENEMY, false);
+
+	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': KILL confirmed on %s (Reward: %.1f)"),
+		*GetOwner()->GetName(),
+		Victim ? *Victim->GetName() : TEXT("Unknown"),
+		FTacticalRewards::KILL_ENEMY);
+
+	// Signal kill to team leader
+	if (TeamLeader)
+	{
+		SignalEventToLeader(EStrategicEvent::EnemyKilled, Victim, GetOwner()->GetActorLocation(), 7);
+	}
+}
+
+void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
+{
+	// Provide large negative reward for death (terminal state)
+	ProvideReward(FTacticalRewards::DIE, true);
+
+	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': DIED (Killed by %s, Reward: %.1f)"),
+		*GetOwner()->GetName(),
+		DeathEvent.Killer ? *DeathEvent.Killer->GetName() : TEXT("Unknown"),
+		FTacticalRewards::DIE);
+
+	// Mark as dead
+	MarkAsDead();
+
+	// Signal death to team leader
+	if (TeamLeader)
+	{
+		SignalEventToLeader(EStrategicEvent::AllyKilled, DeathEvent.Killer, GetOwner()->GetActorLocation(), 10);
 	}
 }

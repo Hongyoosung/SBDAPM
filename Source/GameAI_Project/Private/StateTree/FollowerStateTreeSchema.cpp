@@ -2,6 +2,7 @@
 
 #include "StateTree/FollowerStateTreeSchema.h"
 #include "StateTreeExecutionContext.h"
+#include "Components/StateTreeComponent.h"
 #include "AIController.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
@@ -21,30 +22,8 @@
 
 UFollowerStateTreeSchema::UFollowerStateTreeSchema()
 {
-	// Register individual components as bindable external data
-	// This allows tasks/evaluators/conditions to bind directly to these components
-	ContextDataDescs.Reset();
-
-	// 1. FollowerAgentComponent - Primary component for agent logic
-	FStateTreeExternalDataDesc& FollowerDesc = ContextDataDescs.AddDefaulted_GetRef();
-	FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
-	FollowerDesc.Name = FName(TEXT("FollowerComponent"));
-	FollowerDesc.ID = FGuid::NewGuid();
-	FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-
-	// 2. AIController - For movement/perception/navigation
-	FStateTreeExternalDataDesc& AIControllerDesc = ContextDataDescs.AddDefaulted_GetRef();
-	AIControllerDesc.Struct = AAIController::StaticClass();
-	AIControllerDesc.Name = FName(TEXT("AIController"));
-	AIControllerDesc.ID = FGuid::NewGuid();
-	AIControllerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-
-	// 3. StateTree Context - Contains shared state data
-	FStateTreeExternalDataDesc& ContextDesc = ContextDataDescs.AddDefaulted_GetRef();
-	ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
-	ContextDesc.Name = FName(TEXT("FollowerContext"));
-	ContextDesc.ID = FGuid::NewGuid();
-	ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+	AIControllerClass = AAIController::StaticClass();
+	PawnClass = APawn::StaticClass();
 }
 
 bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStruct) const
@@ -58,7 +37,7 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 	// Allow project-specific structs
 	if (InScriptStruct)
 	{
-		// Allow all StateTree base types
+		// Allow all StateTree node types
 		if (InScriptStruct->IsChildOf(FSTEvaluator_SyncCommand::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTEvaluator_UpdateObservation::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTCondition_IsAlive::StaticStruct()) ||
@@ -73,7 +52,7 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 		{
 			return true;
 		}
-		
+
 		// Allow observation structs
 		if (InScriptStruct->GetFName() == FName(TEXT("ObservationElement")))
 		{
@@ -90,6 +69,12 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 		// Allow team types
 		if (InScriptStruct->GetFName() == FName(TEXT("TeamID")) ||
 			InScriptStruct->GetFName() == FName(TEXT("TeamMessage")))
+		{
+			return true;
+		}
+
+		// Allow context struct
+		if (InScriptStruct == FFollowerStateTreeContext::StaticStruct())
 		{
 			return true;
 		}
@@ -110,6 +95,7 @@ bool UFollowerStateTreeSchema::IsClassAllowed(const UClass* InClass) const
 	if (InClass)
 	{
 		if (InClass->IsChildOf(AAIController::StaticClass()) ||
+			InClass->IsChildOf(APawn::StaticClass()) ||
 			InClass->IsChildOf(UFollowerAgentComponent::StaticClass()) ||
 			InClass->IsChildOf(UTeamLeaderComponent::StaticClass()) ||
 			InClass->IsChildOf(URLPolicyNetwork::StaticClass()))
@@ -117,7 +103,7 @@ bool UFollowerStateTreeSchema::IsClassAllowed(const UClass* InClass) const
 			return true;
 		}
 
-		// Allow Actor and APawn for target tracking
+		// Allow Actor for target tracking
 		if (InClass->IsChildOf(AActor::StaticClass()))
 		{
 			return true;
@@ -146,5 +132,46 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 
 TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
 {
-	return ContextDataDescs;
+	// �θ��� Context ��������
+	TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
+
+	static TArray<FStateTreeExternalDataDesc> _ContextDataDescs;
+
+	if (_ContextDataDescs.IsEmpty())
+	{
+		// Parent context descriptors
+		_ContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
+
+		// UE 5.6: Each FStateTreeExternalDataDesc needs a unique ID
+		// Primary context struct (contains all shared state data)
+		FStateTreeExternalDataDesc ContextDesc;
+		ContextDesc.Name = FName(TEXT("FollowerContext"));
+		ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
+		ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+		ContextDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		_ContextDataDescs.Add(ContextDesc);
+
+		FStateTreeExternalDataDesc FollowerDesc;
+		FollowerDesc.Name = FName(TEXT("FollowerComponent"));
+		FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
+		FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+		FollowerDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		_ContextDataDescs.Add(FollowerDesc);
+
+		FStateTreeExternalDataDesc TeamLeaderDesc;
+		TeamLeaderDesc.Name = FName(TEXT("TeamLeader"));
+		TeamLeaderDesc.Struct = UTeamLeaderComponent::StaticClass();
+		TeamLeaderDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		TeamLeaderDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		_ContextDataDescs.Add(TeamLeaderDesc);
+
+		FStateTreeExternalDataDesc TacticalPolicyDesc;
+		TacticalPolicyDesc.Name = FName(TEXT("TacticalPolicy"));
+		TacticalPolicyDesc.Struct = URLPolicyNetwork::StaticClass();
+		TacticalPolicyDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		TacticalPolicyDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		_ContextDataDescs.Add(TacticalPolicyDesc);
+	}
+
+	return _ContextDataDescs;
 }

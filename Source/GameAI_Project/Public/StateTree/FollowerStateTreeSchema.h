@@ -3,9 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "StateTreeSchema.h"
+#include "Components\StateTreeComponentSchema.h"
 #include "FollowerStateTreeContext.h"
 #include "FollowerStateTreeSchema.generated.h"
+
+class AAIController;
 
 /**
  * State Tree Schema for Follower Agents
@@ -22,8 +24,8 @@
  * 2. Select "Follower State Tree Schema" as the schema type
  * 3. The FFollowerStateTreeContext will be available to all nodes
  */
-UCLASS(BlueprintType, EditInlineNew, CollapseCategories, meta = (DisplayName = "Follower State Tree Schema"))
-class GAMEAI_PROJECT_API UFollowerStateTreeSchema : public UStateTreeSchema
+UCLASS(BlueprintType, meta = (DisplayName = "Follower State Tree Schema", ToolTip = "Schema for follower agent State Trees with RL policy integration", CommonSchema))
+class GAMEAI_PROJECT_API UFollowerStateTreeSchema : public UStateTreeComponentSchema
 {
 	GENERATED_BODY()
 
@@ -35,9 +37,14 @@ public:
 	virtual bool IsStructAllowed(const UScriptStruct* InScriptStruct) const override;
 	virtual bool IsClassAllowed(const UClass* InClass) const override;
 	virtual bool IsExternalItemAllowed(const UStruct& InStruct) const override;
+
 	virtual TConstArrayView<FStateTreeExternalDataDesc> GetContextDataDescs() const override;
 
-	UPROPERTY()
-	TArray<FStateTreeExternalDataDesc> ContextDataDescs;
+	/** AIController class for this schema */
+	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear)
+	TSubclassOf<AAIController> AIControllerClass;
 
+	/** Pawn class (UE 5.6 - allows access to Pawn components) */
+	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear, meta = (DisplayName = "Pawn Class"))
+	TSubclassOf<APawn> PawnClass;
 };

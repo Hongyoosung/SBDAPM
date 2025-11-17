@@ -57,12 +57,16 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-
-	// Provide context data to State Tree execution
-	virtual bool SetContextRequirements(FStateTreeExecutionContext& Context, bool bLogErrors = false) override;
+	virtual TValueOrError<void, FString> HasValidStateTreeReference() const override;
+	virtual void ValidateStateTreeReference() override;
 
 	UFUNCTION(BlueprintPure, Category = "State Tree")
-    virtual TSubclassOf<UStateTreeSchema> GetRequiredStateTreeSchema() const;
+    virtual TSubclassOf<UStateTreeSchema> GetSchema() const override;
+
+	// Override to provide external data to StateTree
+	virtual bool SetContextRequirements(FStateTreeExecutionContext& Context, bool bLogErrors = false) override;
+
+	
 
 
 	//--------------------------------------------------------------------------

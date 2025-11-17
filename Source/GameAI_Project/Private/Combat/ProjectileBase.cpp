@@ -249,7 +249,7 @@ void AProjectileBase::OnLifetimeExpired()
 		return;
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("⏱️ Projectile lifetime expired (%.1fs, %.0fcm traveled)"),
+	UE_LOG(LogTemp, Verbose, TEXT("Projectile lifetime expired (%.1fs, %.0fcm traveled)"),
 		Lifetime, DistanceTraveled);
 
 	OnProjectileExpired_Delegate.Broadcast();

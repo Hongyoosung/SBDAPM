@@ -16,6 +16,8 @@ enum class EStrategicEvent : uint8
 	AllyRescueSignal    UMETA(DisplayName = "Ally Rescue Signal"),
 	AllyUnderFire       UMETA(DisplayName = "Ally Under Heavy Fire"),
 	EnemySpotted		UMETA(DisplayName = "Enemy Spotted"),
+	UnderFire			UMETA(DisplayName = "Under Heavy Fire"),
+	EnemyKilled			UMETA(DisplayName = "Enemy Killed"),
 
 	// Environmental events
 	EnteredDangerZone   UMETA(DisplayName = "Entered Suspected Enemy Zone"),

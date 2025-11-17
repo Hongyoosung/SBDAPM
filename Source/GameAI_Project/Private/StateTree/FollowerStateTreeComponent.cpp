@@ -2,6 +2,7 @@
 
 #include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
 #include "StateTreeExecutionContext.h"
 #include "AIController.h"
@@ -16,9 +17,16 @@ UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 
 void UFollowerStateTreeComponent::BeginPlay()
 {
-	Super::BeginPlay();
+	// Validate State Tree asset is set (required by base UStateTreeComponent)
+	const UStateTree* StateTree = StateTreeRef.GetStateTree();
+	if (!StateTree)
+	{
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: State Tree asset not set on '%s'!"), *GetOwner()->GetName());
+		Super::BeginPlay(); // Still call Super even on error
+		return;
+	}
 
-	// Find FollowerAgentComponent if not set
+	// Find FollowerAgentComponent BEFORE calling Super::BeginPlay
 	if (!FollowerComponent && bAutoFindFollowerComponent)
 	{
 		FollowerComponent = FindFollowerComponent();
@@ -26,23 +34,53 @@ void UFollowerStateTreeComponent::BeginPlay()
 
 	if (!FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: FollowerComponent not found on '%s'! State Tree will not function."),
-			*GetOwner()->GetName());
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: FollowerComponent not found on '%s'!"), *GetOwner()->GetName());
+		Super::BeginPlay(); // Still call Super even on error
 		return;
 	}
 
-	
-
-	// Initialize context
+	// Initialize context BEFORE Super::BeginPlay (which may call SetContextRequirements/CollectExternalData)
 	InitializeContext();
 
 	// Bind to follower events
 	BindToFollowerEvents();
+
+	// NOW call base class initialization (StateTree will use already-initialized context)
+	Super::BeginPlay();
+
+	// Auto-start State Tree if enabled
+	if (bAutoStartStateTree)
+	{
+		StartLogic();
+	}
 }
 
 void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// Deferred initialization if BeginPlay failed to find FollowerComponent
+	if (!FollowerComponent && bAutoFindFollowerComponent)
+	{
+		FollowerComponent = FindFollowerComponent();
+		if (FollowerComponent)
+		{
+			UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: FollowerComponent found on deferred initialization for '%s'"), *GetOwner()->GetName());
+			InitializeContext();
+			BindToFollowerEvents();
+		}
+		else
+		{
+			// Only log error once per 2 seconds to avoid spam
+			static float LastErrorTime = 0.0f;
+			if (GetWorld()->GetTimeSeconds() - LastErrorTime > 2.0f)
+			{
+				UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: FollowerComponent still not found on '%s'. Ensure UFollowerAgentComponent is added to the same actor!"), *GetOwner()->GetName());
+				LastErrorTime = GetWorld()->GetTimeSeconds();
+			}
+		}
+		return; // Skip update until initialized
+	}
 
 	// Update context from follower component every tick
 	if (FollowerComponent)
@@ -56,37 +94,73 @@ void UFollowerStateTreeComponent::EndPlay(const EEndPlayReason::Type EndPlayReas
 	Super::EndPlay(EndPlayReason);
 }
 
-TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetRequiredStateTreeSchema() const
+TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 {
 	return UFollowerStateTreeSchema::StaticClass();
 }
 
-bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& ExecutionContext, bool bLogErrors)
+bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
-	if (!Super::SetContextRequirements(ExecutionContext, bLogErrors))
+	if (!Super::SetContextRequirements(InContext, bLogErrors))
 	{
 		return false;
 	}
 
-	ExecutionContext.SetCollectExternalDataCallback(
-		FOnCollectStateTreeExternalData::CreateUObject(this, &UFollowerStateTreeComponent::CollectExternalData)
-	);
+	return true;
+}
 
-	return ExecutionContext.AreContextDataViewsValid();
+TValueOrError<void, FString> UFollowerStateTreeComponent::HasValidStateTreeReference() const
+{
+	if (!StateTreeRef.IsValid())
+	{
+		return MakeError(TEXT("The State Tree asset is not set."));
+	}
+
+	const UStateTree* StateTree = StateTreeRef.GetStateTree();
+	if (!StateTree)
+	{
+		return MakeError(TEXT("The State Tree reference is invalid."));
+	}
+
+	const UStateTreeSchema* Schema = StateTree->GetSchema();
+	if (!Schema)
+	{
+		return MakeError(TEXT("The State Tree schema is not set."));
+	}
+
+	if (!Schema->GetClass()->IsChildOf(UFollowerStateTreeSchema::StaticClass()))
+	{
+		return MakeError(FString::Printf(
+			TEXT("The State Tree schema is not compatible. Expected FollowerStateTreeSchema or child class, but got %s."),
+			*Schema->GetClass()->GetName()
+		));
+	}
+
+	return MakeValue();
+
+}
+
+void UFollowerStateTreeComponent::ValidateStateTreeReference()
+{
+	const TValueOrError<void, FString> Result = HasValidStateTreeReference();
+	if (Result.HasError())
+	{
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent::ValidateStateTreeReference: %s Cannot initialize."),
+			*Result.GetError());
+	}
 }
 
 void UFollowerStateTreeComponent::InitializeContext()
 {
 	if (!FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent::InitializeContext: FollowerComponent is null!"));
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent::InitializeContext: FollowerComponent not found on '%s'!"),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
 		return;
 	}
 
-	if (!Context.FollowerComponent && bAutoFindFollowerComponent)
-	{
-		Context.FollowerComponent = GetOwner() ? GetOwner()->FindComponentByClass<UFollowerAgentComponent>() : nullptr;
-	}
+	// Set context component reference
+	Context.FollowerComponent = FollowerComponent;
     
 	// Auto-find AIController
 	if (!Context.AIController)
@@ -164,24 +238,29 @@ bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionC
 	{
 		const FStateTreeExternalDataDesc& Desc = ExternalDataDescs[Index];
 
-		// Provide individual components as external data
-		if (Desc.Struct == UFollowerAgentComponent::StaticClass())
+		// Provide the FollowerContext struct
+		if (Desc.Name == FName(TEXT("FollowerContext")))
 		{
-			OutDataViews[Index] = FStateTreeDataView(Context.FollowerComponent);
+			OutDataViews[Index] = FStateTreeDataView(FFollowerStateTreeContext::StaticStruct(), reinterpret_cast<uint8*>(&Context));
 		}
-		else if (Desc.Struct == AAIController::StaticClass())
+		// Provide FollowerAgentComponent
+		else if (Desc.Name == FName(TEXT("FollowerComponent")))
 		{
-			OutDataViews[Index] = FStateTreeDataView(Context.AIController);
+			OutDataViews[Index] = FStateTreeDataView(FollowerComponent);
 		}
-		else if (Desc.Struct == FFollowerStateTreeContext::StaticStruct())
+		// Provide TeamLeaderComponent
+		else if (Desc.Name == FName(TEXT("TeamLeader")))
 		{
-			// Provide the entire context struct
-			OutDataViews[Index] = FStateTreeDataView(FStructView::Make(Context));
+			OutDataViews[Index] = FStateTreeDataView(Context.TeamLeader);
+		}
+		// Provide TacticalPolicy
+		else if (Desc.Name == FName(TEXT("TacticalPolicy")))
+		{
+			OutDataViews[Index] = FStateTreeDataView(Context.TacticalPolicy);
 		}
 		else
 		{
-			// Unknown external data type
-			OutDataViews[Index] = FStateTreeDataView(); // Invalid/empty view
+			OutDataViews[Index] = FStateTreeDataView();
 		}
 	}
 
@@ -196,7 +275,20 @@ UFollowerAgentComponent* UFollowerStateTreeComponent::FindFollowerComponent()
 		return nullptr;
 	}
 
-	return Owner->FindComponentByClass<UFollowerAgentComponent>();
+
+	UFollowerAgentComponent* OwnerFollowerComp = Owner->FindComponentByClass<UFollowerAgentComponent>();
+
+	for (UActorComponent* Comp : Owner->GetComponents())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Found component '%s' on '%s'"), *Comp->GetName(), *Owner->GetName());
+	}
+
+	if (!OwnerFollowerComp)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: No FollowerAgentComponent found on '%s'"), *Owner->GetName());
+	}
+
+	return OwnerFollowerComp;
 }
 
 void UFollowerStateTreeComponent::BindToFollowerEvents()

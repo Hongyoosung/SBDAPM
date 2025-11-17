@@ -131,7 +131,7 @@ void UHealthComponent::NotifyDamageDealt(AActor* Victim, float DamageAmount)
 	if (UFollowerAgentComponent* FollowerComp = GetOwner()->FindComponentByClass<UFollowerAgentComponent>())
 	{
 		FollowerComp->AccumulateReward(FTacticalRewards::DAMAGE_ENEMY);
-		UE_LOG(LogTemp, Log, TEXT("🟢 %s dealt %.1f damage to %s → RL Reward: %.1f"),
+		UE_LOG(LogTemp, Log, TEXT("%s dealt %.1f damage to %s → RL Reward: %.1f"),
 			*GetOwner()->GetName(), DamageAmount, *Victim->GetName(), FTacticalRewards::DAMAGE_ENEMY);
 	}
 

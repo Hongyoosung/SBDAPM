@@ -10,6 +10,8 @@
 // Forward declarations
 class UTeamLeaderComponent;
 class URLPolicyNetwork;
+struct FDamageEventData;
+struct FDeathEventData;
 
 /**
  * Delegate for follower events
@@ -224,6 +226,19 @@ public:
 private:
 	/** Update command timer */
 	void UpdateCommandTimer(float DeltaTime);
+
+	/** Combat event handlers */
+	UFUNCTION()
+	void OnDamageTakenEvent(const FDamageEventData& DamageEvent, float CurrentHealth);
+
+	UFUNCTION()
+	void OnDamageDealtEvent(AActor* Victim, float DamageAmount);
+
+	UFUNCTION()
+	void OnKillEvent(AActor* Victim, float TotalDamage);
+
+	UFUNCTION()
+	void OnDeathEvent(const FDeathEventData& DeathEvent);
 
 
 public:
