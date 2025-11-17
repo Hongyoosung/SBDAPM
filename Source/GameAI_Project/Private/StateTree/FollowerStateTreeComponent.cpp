@@ -7,6 +7,11 @@
 #include "StateTreeExecutionContext.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
+#include "StateTreeModule\Public\StateTree.h"
+
+#if WITH_EDITOR
+#include "StateTreeDelegates.h" 
+#endif
 
 UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 {
@@ -17,46 +22,121 @@ UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 
 void UFollowerStateTreeComponent::BeginPlay()
 {
+	UE_LOG(LogTemp, Warning, TEXT("🔵 UFollowerStateTreeComponent::BeginPlay CALLED for '%s'"),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL_OWNER"));
+
 	// Validate State Tree asset is set (required by base UStateTreeComponent)
-	const UStateTree* StateTree = StateTreeRef.GetStateTree();
+	UStateTree* StateTree = const_cast<UStateTree*>(StateTreeRef.GetStateTree());
 	if (!StateTree)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: State Tree asset not set on '%s'!"), *GetOwner()->GetName());
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ State Tree asset not set on '%s'!"), *GetOwner()->GetName());
 		Super::BeginPlay(); // Still call Super even on error
 		return;
 	}
+
+	if (StateTree && !StateTree->IsReadyToRun())
+	{
+#if WITH_EDITOR
+		// 강제로 컴파일 해시를 무효화
+		StateTree->LastCompiledEditorDataHash = 0;
+
+		// 재컴파일 시도
+		if (UE::StateTree::Delegates::OnRequestCompile.IsBound())
+		{
+			StateTree->CompileIfChanged();
+			UE_LOG(LogTemp, Warning, TEXT("Forced StateTree recompilation: %s"), *StateTree->GetName());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Cannot recompile StateTree - delegates not bound yet!"));
+		}
+#else
+		UE_LOG(LogTemp, Error, TEXT("StateTree not ready in packaged build! Must fix in editor."));
+#endif
+	}
+
+
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ State Tree asset found: '%s'"), *StateTree->GetName());
 
 	// Find FollowerAgentComponent BEFORE calling Super::BeginPlay
 	if (!FollowerComponent && bAutoFindFollowerComponent)
 	{
 		FollowerComponent = FindFollowerComponent();
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Auto-find FollowerComponent = %s"),
+			FollowerComponent ? TEXT("✅ Found") : TEXT("❌ Not Found"));
 	}
 
 	if (!FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: FollowerComponent not found on '%s'!"), *GetOwner()->GetName());
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ FollowerComponent not found on '%s'!"), *GetOwner()->GetName());
 		Super::BeginPlay(); // Still call Super even on error
 		return;
 	}
 
 	// Initialize context BEFORE Super::BeginPlay (which may call SetContextRequirements/CollectExternalData)
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Initializing context..."));
 	InitializeContext();
 
 	// Bind to follower events
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Binding to follower events..."));
 	BindToFollowerEvents();
 
 	// NOW call base class initialization (StateTree will use already-initialized context)
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Calling Super::BeginPlay()..."));
 	Super::BeginPlay();
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ Super::BeginPlay() completed"));
 
 	// Auto-start State Tree if enabled
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: bAutoStartStateTree = %s"), bAutoStartStateTree ? TEXT("true") : TEXT("false"));
 	if (bAutoStartStateTree)
 	{
-		StartLogic();
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Calling StartLogic()..."));
+
+		// Check if StateTree is valid and compiled
+		if (!StateTree->IsReadyToRun())
+		{
+			UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ StateTree '%s' is NOT ready to run! Check for compilation errors in the asset."),
+				*StateTree->GetName());
+		}
+
+
+		EStateTreeRunStatus Status = GetStateTreeRunStatus();
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: StartLogic() returned - Status = %s"),
+			*UEnum::GetValueAsString(Status));
+
+		if (Status != EStateTreeRunStatus::Running)
+		{
+			UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌❌ STATETREE FAILED TO START! Status = %s"),
+				*UEnum::GetValueAsString(Status));
+			UE_LOG(LogTemp, Error, TEXT("Possible causes:"));
+			UE_LOG(LogTemp, Error, TEXT("  1. StateTree asset '%s' has compilation errors (open in editor and check for errors)"), *StateTree->GetName());
+			UE_LOG(LogTemp, Error, TEXT("  2. Root state is missing or invalid"));
+			UE_LOG(LogTemp, Error, TEXT("  3. Context bindings are incorrect"));
+			UE_LOG(LogTemp, Error, TEXT("  4. Required external data not provided"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ StateTree successfully started and running!"));
+		}
 	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ⚠️ Auto-start disabled, StateTree NOT started"));
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅✅✅ BeginPlay COMPLETE for '%s'"), *GetOwner()->GetName());
 }
 
 void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
+	// Log FIRST before anything else
+	static int32 TickCount = 0;
+	if (TickCount++ % 60 == 0) // Log every 60 ticks (~1 second at 60fps)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🔄 UFollowerStateTreeComponent::TickComponent for '%s' (Tick #%d)"),
+			*GetOwner()->GetName(), TickCount);
+	}
+
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// Deferred initialization if BeginPlay failed to find FollowerComponent
@@ -86,6 +166,21 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	if (FollowerComponent)
 	{
 		UpdateContextFromFollower();
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("UFollowerStateTreeComponent: TickComponent for '%s'"), *GetOwner()->GetName());
+
+	// DEBUG: Log StateTree status periodically
+	static float LastDebugLogTime = 0.0f;
+	if (GetWorld()->GetTimeSeconds() - LastDebugLogTime > 2.0f)
+	{
+		EStateTreeRunStatus Status = GetStateTreeRunStatus();
+		UE_LOG(LogTemp, Display, TEXT("[STATE TREE] '%s': Status=%s, Command=%s, Valid=%d"),
+			*GetOwner()->GetName(),
+			*UEnum::GetValueAsString(Status),
+			*UEnum::GetValueAsString(Context.CurrentCommand.CommandType),
+			Context.bIsCommandValid);
+		LastDebugLogTime = GetWorld()->GetTimeSeconds();
 	}
 }
 
@@ -318,10 +413,6 @@ void UFollowerStateTreeComponent::OnCommandReceived(const FStrategicCommand& Com
 				Context.PrimaryTarget->GetActorLocation()
 			);
 		}
-
-		UE_LOG(LogTemp, Display, TEXT("UFollowerStateTreeComponent: Primary target set to '%s' (Distance: %.1f)"),
-			*Context.PrimaryTarget->GetName(),
-			Context.DistanceToPrimaryTarget);
 	}
 	else
 	{
