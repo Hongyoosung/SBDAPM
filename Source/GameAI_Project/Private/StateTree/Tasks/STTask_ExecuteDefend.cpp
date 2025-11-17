@@ -14,18 +14,18 @@ EStateTreeRunStatus FSTTask_ExecuteDefend::EnterState(FStateTreeExecutionContext
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	// Validate inputs
-	if (!InstanceData.FollowerComponent || !InstanceData.AIController)
+	if (!InstanceData.Context.FollowerComponent || !InstanceData.Context.AIController)
 	{
 		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteDefend: Invalid inputs (missing component/controller)"));
 		return EStateTreeRunStatus::Failed;
 	}
 
 	// Initialize defend position
-	if (InstanceData.CurrentCommand.TargetLocation != FVector::ZeroVector)
+	if (InstanceData.Context.CurrentCommand.TargetLocation != FVector::ZeroVector)
 	{
-		InstanceData.DefendPosition = InstanceData.CurrentCommand.TargetLocation;
+		InstanceData.DefendPosition = InstanceData.Context.CurrentCommand.TargetLocation;
 	}
-	else if (APawn* Pawn = InstanceData.AIController->GetPawn())
+	else if (APawn* Pawn = InstanceData.Context.AIController->GetPawn())
 	{
 		InstanceData.DefendPosition = Pawn->GetActorLocation();
 	}
@@ -66,9 +66,9 @@ EStateTreeRunStatus FSTTask_ExecuteDefend::Tick(FStateTreeExecutionContext& Cont
 
 	// Calculate and provide reward
 	float Reward = CalculateDefensiveReward(Context, DeltaTime);
-	if (Reward != 0.0f && InstanceData.FollowerComponent)
+	if (Reward != 0.0f && InstanceData.Context.FollowerComponent)
 	{
-		InstanceData.FollowerComponent->ProvideReward(Reward, false);
+		InstanceData.Context.FollowerComponent->ProvideReward(Reward, false);
 	}
 
 	return EStateTreeRunStatus::Running;
@@ -86,7 +86,7 @@ void FSTTask_ExecuteDefend::ExecuteTacticalAction(FStateTreeExecutionContext& Co
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	switch (InstanceData.CurrentTacticalAction)
+	switch (InstanceData.Context.CurrentTacticalAction)
 	{
 	case ETacticalAction::DefensiveHold:
 		ExecuteDefensiveHold(Context, DeltaTime);
@@ -115,7 +115,7 @@ void FSTTask_ExecuteDefend::ExecuteDefensiveHold(FStateTreeExecutionContext& Con
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	APawn* Pawn = InstanceData.AIController ? InstanceData.AIController->GetPawn() : nullptr;
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Stay in position and engage threats
@@ -129,8 +129,8 @@ void FSTTask_ExecuteDefend::ExecuteDefensiveHold(FStateTreeExecutionContext& Con
 	else
 	{
 		// Hold position and engage
-		InstanceData.AIController->StopMovement();
-		EngageThreats(Context, InstanceData.bInCover ? InstanceData.CoverAccuracyBonus : 1.0f);
+		InstanceData.Context.AIController->StopMovement();
+		EngageThreats(Context, InstanceData.Context.bInCover ? InstanceData.CoverAccuracyBonus : 1.0f);
 	}
 }
 
@@ -138,17 +138,17 @@ void FSTTask_ExecuteDefend::ExecuteSeekCover(FStateTreeExecutionContext& Context
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	APawn* Pawn = InstanceData.AIController ? InstanceData.AIController->GetPawn() : nullptr;
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Find nearest cover if not already in cover
-	if (!InstanceData.bInCover || !InstanceData.CurrentCover)
+	if (!InstanceData.Context.bInCover || !InstanceData.Context.CurrentCover)
 	{
 		AActor* NearestCover = FindNearestCover(Context, Pawn->GetActorLocation());
 		if (NearestCover)
 		{
-			InstanceData.NearestCoverLocation = NearestCover->GetActorLocation();
-			MoveToDefensivePosition(Context, InstanceData.NearestCoverLocation, DeltaTime);
+			InstanceData.Context.NearestCoverLocation = NearestCover->GetActorLocation();
+			MoveToDefensivePosition(Context, InstanceData.Context.NearestCoverLocation, DeltaTime);
 		}
 		else
 		{
@@ -173,7 +173,7 @@ void FSTTask_ExecuteDefend::ExecuteTacticalRetreat(FStateTreeExecutionContext& C
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	APawn* Pawn = InstanceData.AIController ? InstanceData.AIController->GetPawn() : nullptr;
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Retreat away from threats toward defend position
@@ -187,9 +187,9 @@ AActor* FSTTask_ExecuteDefend::FindNearestCover(FStateTreeExecutionContext& Cont
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.AIController) return nullptr;
+	if (!InstanceData.Context.AIController) return nullptr;
 
-	UWorld* World = InstanceData.AIController->GetWorld();
+	UWorld* World = InstanceData.Context.AIController->GetWorld();
 	if (!World) return nullptr;
 
 	// Find all cover actors within search radius
@@ -211,7 +211,7 @@ AActor* FSTTask_ExecuteDefend::FindNearestCover(FStateTreeExecutionContext& Cont
 
 	if (NearestCover)
 	{
-		InstanceData.DistanceToNearestCover = MinDistance;
+		InstanceData.Context.DistanceToNearestCover = MinDistance;
 	}
 
 	return NearestCover;
@@ -230,13 +230,13 @@ float FSTTask_ExecuteDefend::CalculateDefensiveReward(FStateTreeExecutionContext
 	}
 
 	// Reward for using cover
-	if (InstanceData.bInCover)
+	if (InstanceData.Context.bInCover)
 	{
 		Reward += 5.0f * DeltaTime; // +5.0 per second in cover
 	}
 
 	// Reward for survival under fire
-	if (InstanceData.bUnderFire && InstanceData.bIsAlive)
+	if (InstanceData.Context.bUnderFire && InstanceData.Context.bIsAlive)
 	{
 		Reward += 4.0f * DeltaTime; // +4.0 per second surviving under fire
 	}
@@ -249,13 +249,13 @@ bool FSTTask_ExecuteDefend::ShouldCompleteDefense(FStateTreeExecutionContext& Co
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	// Abort if dead
-	if (!InstanceData.bIsAlive)
+	if (!InstanceData.Context.bIsAlive)
 	{
 		return true;
 	}
 
 	// Abort if command changed/invalid
-	if (!InstanceData.bIsCommandValid)
+	if (!InstanceData.Context.bIsCommandValid)
 	{
 		return true;
 	}
@@ -268,16 +268,16 @@ void FSTTask_ExecuteDefend::MoveToDefensivePosition(FStateTreeExecutionContext& 
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.AIController) return;
+	if (!InstanceData.Context.AIController) return;
 
-	InstanceData.AIController->MoveToLocation(Destination, 50.0f); // 50cm acceptance radius
+	InstanceData.Context.AIController->MoveToLocation(Destination, 50.0f); // 50cm acceptance radius
 }
 
 void FSTTask_ExecuteDefend::EngageThreats(FStateTreeExecutionContext& Context, float AccuracyModifier) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.PrimaryTarget || !InstanceData.bWeaponReady)
+	if (!InstanceData.Context.PrimaryTarget || !InstanceData.Context.bWeaponReady)
 	{
 		return;
 	}
@@ -285,8 +285,8 @@ void FSTTask_ExecuteDefend::EngageThreats(FStateTreeExecutionContext& Context, f
 	// Engage primary target
 	// (Weapon firing would be handled by separate component/task)
 	// For now, just track the target
-	if (InstanceData.AIController)
+	if (InstanceData.Context.AIController)
 	{
-		InstanceData.AIController->SetFocus(InstanceData.PrimaryTarget);
+		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
 	}
 }

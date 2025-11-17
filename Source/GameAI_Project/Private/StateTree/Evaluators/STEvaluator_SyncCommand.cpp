@@ -8,10 +8,10 @@ void FSTEvaluator_SyncCommand::TreeStart(FStateTreeExecutionContext& Context) co
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Initialize last command type
-	if (InstanceData.FollowerComponent)
+	// Initialize last command type from context's follower component
+	if (InstanceData.Context.FollowerComponent)
 	{
-		InstanceData.LastCommandType = InstanceData.FollowerComponent->GetCurrentCommand().CommandType;
+		InstanceData.LastCommandType = InstanceData.Context.FollowerComponent->GetCurrentCommand().CommandType;
 	}
 }
 
@@ -19,18 +19,18 @@ void FSTEvaluator_SyncCommand::Tick(FStateTreeExecutionContext& Context, float D
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.FollowerComponent)
+	if (!InstanceData.Context.FollowerComponent)
 	{
 		return;
 	}
 
 	// Get current command from follower component
-	FStrategicCommand NewCommand = InstanceData.FollowerComponent->GetCurrentCommand();
+	FStrategicCommand NewCommand = InstanceData.Context.FollowerComponent->GetCurrentCommand();
 
-	// Update outputs
-	InstanceData.CurrentCommand = NewCommand;
-	InstanceData.bIsCommandValid = InstanceData.FollowerComponent->IsCommandValid();
-	InstanceData.TimeSinceCommand = InstanceData.FollowerComponent->GetTimeSinceLastCommand();
+	// Update context outputs (shared with all tasks/evaluators)
+	InstanceData.Context.CurrentCommand = NewCommand;
+	InstanceData.Context.bIsCommandValid = InstanceData.Context.FollowerComponent->IsCommandValid();
+	InstanceData.Context.TimeSinceCommand = InstanceData.Context.FollowerComponent->GetTimeSinceLastCommand();
 
 	// Log command changes
 	if (InstanceData.bLogCommandChanges && NewCommand.CommandType != InstanceData.LastCommandType)

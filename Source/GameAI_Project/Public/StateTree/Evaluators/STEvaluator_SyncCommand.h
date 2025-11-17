@@ -25,25 +25,28 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommandInstanceData
 {
 	GENERATED_BODY()
 
-	/** Follower component (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<UFollowerAgentComponent> FollowerComponent = nullptr;
+	//--------------------------------------------------------------------------
+	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
+	//--------------------------------------------------------------------------
 
-	/** Current command (output - bound to context) */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	FStrategicCommand CurrentCommand;
+	/**
+	 * Shared context struct - automatically bound by StateTree
+	 * Contains all agent state, commands, and components
+	 */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	FFollowerStateTreeContext Context;
 
-	/** Is command valid (output - bound to context) */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	bool bIsCommandValid = false;
-
-	/** Time since command (output - bound to context) */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	float TimeSinceCommand = 0.0f;
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
 
 	/** Log command changes */
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bLogCommandChanges = true;
+
+	//--------------------------------------------------------------------------
+	// RUNTIME STATE
+	//--------------------------------------------------------------------------
 
 	/** Last command type (for change detection) */
 	UPROPERTY()

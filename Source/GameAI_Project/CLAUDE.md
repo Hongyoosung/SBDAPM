@@ -41,6 +41,44 @@ Followers (N agents) → RL Policy + State Tree → Tactical execution
 - **Conditions:** `STCondition_CheckCommandType`, `STCondition_CheckTacticalAction`, `STCondition_IsAlive`
 - **Status:** ✅ Implemented, replaces FSM + BehaviorTree
 
+#### **UE 5.6 StateTree Binding Pattern (Standardized)**
+All tasks/evaluators use **direct context binding** for consistency and simplicity:
+
+**Tasks & Evaluators:**
+```cpp
+USTRUCT()
+struct FMyTaskInstanceData {
+    // AUTO-BINDS to FFollowerStateTreeContext from schema
+    UPROPERTY(EditAnywhere, Category = "Context")
+    FFollowerStateTreeContext Context;
+
+    // Config properties (Parameter category)
+    UPROPERTY(EditAnywhere, Category = "Parameter")
+    float MyConfigValue = 1.0f;
+
+    // Task-specific runtime state (no category)
+    UPROPERTY()
+    float MyRuntimeState = 0.0f;
+};
+```
+
+**Conditions (lightweight - use individual bindings):**
+```cpp
+USTRUCT()
+struct FMyConditionInstanceData {
+    // Bind only the specific property needed
+    UPROPERTY(EditAnywhere, Category = "Input")
+    bool bIsAlive = true;
+};
+```
+
+**Key Rules:**
+- **Context category**: Auto-binds to matching struct name from schema (`FollowerContext`)
+- **Parameter category**: Optional config values (can bind OR set in editor)
+- **Input/Output categories**: For individual property bindings (conditions only)
+- NO manual `FStateTreeExternalDataHandle` usage (outdated UE 5.4 pattern)
+- Tasks/evaluators access shared state via `InstanceData.Context.PropertyName`
+
 ### 4. RL Policy (`RL/RLPolicyNetwork.h/cpp`, `RL/RLReplayBuffer.h/cpp`)
 - 3-layer network (128→128→64 neurons)
 - PPO training algorithm
@@ -87,7 +125,7 @@ Followers (N agents) → RL Policy + State Tree → Tactical execution
 ## Current Status
 
 **✅ Implemented & Validated:**
-- **Full MCTS Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers ✅
+- **Command Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers → State Transitions ✅
 - **Perception system** - Enemy detection, team filtering, auto-reporting ✅
 - **Combat system** - Health/Weapon components, RL reward integration, observation population ✅
 - **Comprehensive logging** - Color-coded debug system ✅
@@ -100,12 +138,17 @@ Followers (N agents) → RL Policy + State Tree → Tactical execution
 - Simulation Manager GameMode (team registration, enemy tracking)
 - BehaviorTree (LEGACY - deprecated in favor of StateTree)
 
-**🔄 Next Steps:**
-1. **StateTree Asset Creation** - Create ST_FollowerBehavior in UE5 editor, link Tasks/Evaluators/Conditions
-2. **RL Training Infrastructure** - Now unblocked! Implement experience collection during gameplay, PPO batch updates
-3. **Projectile System** - Implement AProjectileBase for WeaponComponent (currently spawns nullptr)
-4. **End-to-End Testing** - Test full combat loop: Perception → MCTS → Commands → StateTree → Weapon firing → Damage → RL rewards
-5. **Performance Profiling** - MCTS time measurement, frame overhead validation
+**⚠️ Current Issue:**
+- **Execution Gap** - Agents receive Assault commands and transition states, but don't execute (no movement/firing)
+- Root causes: No target assignment, ExecuteAssault task incomplete, possible StateTree asset gaps
+- See `next_step.md` for detailed execution pipeline plan
+
+**🔄 Next Steps (see next_step.md):**
+1. **Fix ExecuteAssault Task** - Implement movement toward target + weapon firing in STTask_ExecuteAssault
+2. **Target Assignment** - Team Leader assigns nearest enemy when issuing Assault commands
+3. **StateTree Asset Validation** - Verify ST_FollowerBehavior has proper task bindings
+4. **Movement Integration** - AIController MoveTo commands in assault execution
+5. **End-to-End Combat Test** - Full loop: Perception → MCTS → Commands → Movement → Firing → Damage → Rewards
 
 **📋 Planned:**
 - Distributed training (Ray RLlib integration)
@@ -162,6 +205,7 @@ Source/GameAI_Project/
 ```
 
 **Key Files:**
+- `next_step.md` - Current implementation plan (execution pipeline fixes)
 - `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
 - `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
 - `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system

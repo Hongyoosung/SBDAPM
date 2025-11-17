@@ -447,7 +447,36 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
                 // Good health, not outnumbered - assault
                 Command.CommandType = EStrategicCommandType::Assault;
                 Command.Priority = 7;
-                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ASSAULT (healthy, advantage)"), *Follower->GetName());
+
+                // Assign nearest enemy as target
+                AActor* NearestEnemy = nullptr;
+                float NearestDistance = FLT_MAX;
+                FVector FollowerLocation = Follower->GetActorLocation();
+
+                for (AActor* Enemy : TeamObs.TrackedEnemies)
+                {
+                    if (Enemy && Enemy->IsValidLowLevel())
+                    {
+                        float Distance = FVector::Dist(FollowerLocation, Enemy->GetActorLocation());
+                        if (Distance < NearestDistance)
+                        {
+                            NearestDistance = Distance;
+                            NearestEnemy = Enemy;
+                        }
+                    }
+                }
+
+                if (NearestEnemy)
+                {
+                    Command.TargetActor = NearestEnemy;
+                    Command.TargetLocation = NearestEnemy->GetActorLocation();
+                    UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ASSAULT (healthy, advantage) - Target: %s (Distance: %.1f)"),
+                        *Follower->GetName(), *NearestEnemy->GetName(), NearestDistance);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - ASSAULT (no valid target found)"), *Follower->GetName());
+                }
             }
             else
             {

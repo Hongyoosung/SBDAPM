@@ -40,40 +40,31 @@ struct GAMEAI_PROJECT_API FSTTask_QueryRLPolicyInstanceData
 {
 	GENERATED_BODY()
 
-	/** Follower component (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<UFollowerAgentComponent> FollowerComponent = nullptr;
+	//--------------------------------------------------------------------------
+	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
+	//--------------------------------------------------------------------------
 
-	/** RL Policy network (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<URLPolicyNetwork> TacticalPolicy = nullptr;
+	/**
+	 * Shared context struct - automatically bound by StateTree
+	 * Contains all agent state, commands, observations, and components
+	 */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	FFollowerStateTreeContext Context;
 
-	/** Current observation (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	FObservationElement CurrentObservation;
-
-	/** Current command (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	FStrategicCommand CurrentCommand;
-
-	/** In cover flag (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bInCover = false;
-
-	/** Selected tactical action (output - bound to context) */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	ETacticalAction SelectedAction = ETacticalAction::DefensiveHold;
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
 
 	/** Log action selection to console */
-	UPROPERTY(EditAnywhere, Category = "Config")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bLogActionSelection = true;
 
 	/** Draw debug visualization */
-	UPROPERTY(EditAnywhere, Category = "Config")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bDrawDebugInfo = false;
 
 	/** Use RL policy (if false, uses rule-based fallback) */
-	UPROPERTY(EditAnywhere, Category = "Config")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bUseRLPolicy = true;
 };
 

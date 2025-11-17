@@ -11,31 +11,32 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Validate inputs
-	if (!InstanceData.FollowerComponent)
+	// Validate context components
+	if (!InstanceData.Context.FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("STTask_QueryRLPolicy: FollowerComponent is null"));
+		UE_LOG(LogTemp, Error, TEXT("STTask_QueryRLPolicy: FollowerComponent is null in context"));
 		return EStateTreeRunStatus::Failed;
 	}
 
 	// Query the policy
 	ETacticalAction SelectedAction = QueryPolicy(Context);
 
-	// Output selected action
-	InstanceData.SelectedAction = SelectedAction;
+	// Write selected action to context (so other tasks can read it)
+	InstanceData.Context.CurrentTacticalAction = SelectedAction;
+	InstanceData.Context.TimeInTacticalAction = 0.0f;
 
 	// Log if enabled
 	if (InstanceData.bLogActionSelection)
 	{
 		UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Selected action '%s' for '%s'"),
 			*UEnum::GetValueAsString(SelectedAction),
-			*InstanceData.FollowerComponent->GetOwner()->GetName());
+			*InstanceData.Context.FollowerComponent->GetOwner()->GetName());
 	}
 
 	// Draw debug if enabled
-	if (InstanceData.bDrawDebugInfo && InstanceData.FollowerComponent->GetOwner())
+	if (InstanceData.bDrawDebugInfo && InstanceData.Context.FollowerComponent->GetOwner())
 	{
-		AActor* Owner = InstanceData.FollowerComponent->GetOwner();
+		AActor* Owner = InstanceData.Context.FollowerComponent->GetOwner();
 		FVector Location = Owner->GetActorLocation();
 		FString ActionName = UEnum::GetValueAsString(SelectedAction);
 		DrawDebugString(Owner->GetWorld(), Location + FVector(0, 0, 100),
@@ -56,10 +57,10 @@ ETacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& C
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	// Check if using RL policy
-	if (InstanceData.bUseRLPolicy && InstanceData.TacticalPolicy && InstanceData.TacticalPolicy->IsReady())
+	if (InstanceData.bUseRLPolicy && InstanceData.Context.TacticalPolicy && InstanceData.Context.TacticalPolicy->IsReady())
 	{
-		// Query RL policy network using public API
-		ETacticalAction SelectedAction = InstanceData.TacticalPolicy->SelectAction(InstanceData.CurrentObservation);
+		// Query RL policy network using current observation from context
+		ETacticalAction SelectedAction = InstanceData.Context.TacticalPolicy->SelectAction(InstanceData.Context.CurrentObservation);
 		return SelectedAction;
 	}
 	else
@@ -73,16 +74,16 @@ ETacticalAction FSTTask_QueryRLPolicy::GetFallbackAction(FStateTreeExecutionCont
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Simple rule-based fallback based on command type
-	switch (InstanceData.CurrentCommand.CommandType)
+	// Simple rule-based fallback based on command type from context
+	switch (InstanceData.Context.CurrentCommand.CommandType)
 	{
 	case EStrategicCommandType::Assault:
-		return InstanceData.CurrentObservation.AgentHealth > 0.5f
+		return InstanceData.Context.CurrentObservation.AgentHealth > 0.5f
 			? ETacticalAction::AggressiveAssault
 			: ETacticalAction::CautiousAdvance;
 
 	case EStrategicCommandType::Defend:
-		return InstanceData.bInCover
+		return InstanceData.Context.bInCover
 			? ETacticalAction::DefensiveHold
 			: ETacticalAction::SeekCover;
 

@@ -21,13 +21,19 @@ EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContex
 		return EStateTreeRunStatus::Failed;
 	}
 
+	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
+	FString TargetName = InstanceData.Context.PrimaryTarget ? InstanceData.Context.PrimaryTarget->GetName() : TEXT("None");
+
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [ASSAULT TASK] '%s': ENTERED assault state - Target: %s, Tactic: %s"),
+		*PawnName,
+		*TargetName,
+		*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction));
+
 	// Reset timers
 	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.Context.TimeInTacticalAction = 0.0f;
 	InstanceData.Context.ActionProgress = 0.0f;
-
-	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteAssault: Starting assault with tactic: %d"),
-		static_cast<int32>(InstanceData.Context.CurrentTacticalAction));
 
 	return EStateTreeRunStatus::Running;
 }
@@ -112,12 +118,23 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
-	if (!Pawn) return;
+	if (!Pawn)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] AggressiveAssault: No pawn!"));
+		return;
+	}
 
 	// Move toward target aggressively
 	if (InstanceData.Context.PrimaryTarget)
 	{
+		FVector CurrentLocation = Pawn->GetActorLocation();
 		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		float Distance = FVector::Dist(CurrentLocation, TargetLocation);
+
+		UE_LOG(LogTemp, Display, TEXT("[ASSAULT TASK] '%s': Moving to target '%s' (Distance: %.1f cm)"),
+			*Pawn->GetName(),
+			*InstanceData.Context.PrimaryTarget->GetName(),
+			Distance);
 
 		// Set high speed multiplier
 		InstanceData.Context.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
@@ -132,10 +149,31 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 		// Fire weapon at target if available
 		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
 		{
-			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+			if (WeaponComp->CanFire())
 			{
-				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+				if (InstanceData.Context.bHasLOS)
+				{
+					WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+					UE_LOG(LogTemp, Display, TEXT("[ASSAULT TASK] '%s': Firing at target '%s'"),
+						*Pawn->GetName(),
+						*InstanceData.Context.PrimaryTarget->GetName());
+				}
+				else
+				{
+					UE_LOG(LogTemp, Verbose, TEXT("[ASSAULT TASK] '%s': No LOS to target, moving only"),
+						*Pawn->GetName());
+				}
 			}
+			else
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("[ASSAULT TASK] '%s': Weapon on cooldown"),
+					*Pawn->GetName());
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No WeaponComponent found!"),
+				*Pawn->GetName());
 		}
 
 		InstanceData.Context.bIsMoving = true;
@@ -144,12 +182,20 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 	else if (InstanceData.Context.CurrentCommand.TargetLocation != FVector::ZeroVector)
 	{
 		// No target, move to command location
+		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No PrimaryTarget, moving to command location"),
+			*Pawn->GetName());
+
 		if (InstanceData.Context.AIController)
 		{
 			InstanceData.Context.AIController->MoveToLocation(
 				InstanceData.Context.CurrentCommand.TargetLocation, 100.0f);
 		}
 		InstanceData.Context.bIsMoving = true;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': No target and no command location!"),
+			*Pawn->GetName());
 	}
 }
 

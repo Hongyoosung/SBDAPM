@@ -37,48 +37,15 @@ struct GAMEAI_PROJECT_API FSTEvaluator_UpdateObservationInstanceData
 	GENERATED_BODY()
 
 	//--------------------------------------------------------------------------
-	// INPUTS (bound from context)
+	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
 	//--------------------------------------------------------------------------
 
-	/** Follower component */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<UFollowerAgentComponent> FollowerComponent = nullptr;
-
-	/** AI Controller */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<AAIController> AIController = nullptr;
-
-	//--------------------------------------------------------------------------
-	// OUTPUTS (bound to context)
-	//--------------------------------------------------------------------------
-
-	/** Current observation */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	FObservationElement CurrentObservation;
-
-	/** Previous observation */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	FObservationElement PreviousObservation;
-
-	/** Visible enemies */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	TArray<TObjectPtr<AActor>> VisibleEnemies;
-
-	/** Primary target */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	TObjectPtr<AActor> PrimaryTarget = nullptr;
-
-	/** In cover */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	bool bInCover = false;
-
-	/** Under fire */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	bool bUnderFire = false;
-
-	/** Has LOS to target */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	bool bHasLOS = false;
+	/**
+	 * Shared context struct - automatically bound by StateTree
+	 * Contains all agent state, commands, observations, and targets
+	 */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	FFollowerStateTreeContext Context;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION
@@ -127,17 +94,18 @@ protected:
 	void PerformRaycastPerception(FObservationElement& Observation, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Scan for nearby enemies */
-	void ScanForEnemies(FObservationElement& Observation, APawn* ControlledPawn, UWorld* World) const;
+	void ScanForEnemies(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Detect cover availability */
-	void DetectCover(FObservationElement& Observation, APawn* ControlledPawn, UWorld* World) const;
+	void DetectCover(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Update combat state */
-	void UpdateCombatState(FObservationElement& Observation, APawn* ControlledPawn) const;
+	void UpdateCombatState(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn) const;
 
 	/** Classify raycast hit type */
 	ERaycastHitType ClassifyHitType(const FHitResult& HitResult) const;
 
 	/** Detect terrain type */
 	ETerrainType DetectTerrainType(APawn* ControlledPawn) const;
+
 };

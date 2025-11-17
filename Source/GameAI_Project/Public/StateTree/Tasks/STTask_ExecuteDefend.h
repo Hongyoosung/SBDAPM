@@ -45,64 +45,15 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteDefendInstanceData
 	GENERATED_BODY()
 
 	//--------------------------------------------------------------------------
-	// INPUTS (bound from context)
+	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
 	//--------------------------------------------------------------------------
 
-	/** Follower component */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<UFollowerAgentComponent> FollowerComponent = nullptr;
-
-	/** AI Controller */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<AAIController> AIController = nullptr;
-
-	/** Current tactical action */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	ETacticalAction CurrentTacticalAction = ETacticalAction::DefensiveHold;
-
-	/** Current command */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	FStrategicCommand CurrentCommand;
-
-	/** Is command valid */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bIsCommandValid = false;
-
-	/** Is alive */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bIsAlive = true;
-
-	/** In cover */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bInCover = false;
-
-	/** Current cover actor */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<AActor> CurrentCover = nullptr;
-
-	/** Primary target */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<AActor> PrimaryTarget = nullptr;
-
-	/** Is weapon ready */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bWeaponReady = true;
-
-	/** Under fire */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	bool bUnderFire = false;
-
-	//--------------------------------------------------------------------------
-	// OUTPUTS (written back to context)
-	//--------------------------------------------------------------------------
-
-	/** Nearest cover location */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	FVector NearestCoverLocation = FVector::ZeroVector;
-
-	/** Distance to nearest cover */
-	UPROPERTY(EditAnywhere, Category = "Output")
-	float DistanceToNearestCover = 0.0f;
+	/**
+	 * Shared context struct - automatically bound by StateTree
+	 * Contains all agent state, commands, observations, and targets
+	 */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	FFollowerStateTreeContext Context;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION

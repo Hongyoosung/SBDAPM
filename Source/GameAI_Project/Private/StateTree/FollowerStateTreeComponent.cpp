@@ -275,13 +275,7 @@ UFollowerAgentComponent* UFollowerStateTreeComponent::FindFollowerComponent()
 		return nullptr;
 	}
 
-
 	UFollowerAgentComponent* OwnerFollowerComp = Owner->FindComponentByClass<UFollowerAgentComponent>();
-
-	for (UActorComponent* Comp : Owner->GetComponents())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Found component '%s' on '%s'"), *Comp->GetName(), *Owner->GetName());
-	}
 
 	if (!OwnerFollowerComp)
 	{
@@ -310,6 +304,30 @@ void UFollowerStateTreeComponent::OnCommandReceived(const FStrategicCommand& Com
 	Context.CurrentCommand = Command;
 	Context.bIsCommandValid = true;
 	Context.TimeSinceCommand = 0.0f;
+
+	// CRITICAL: Immediately set primary target from command (don't wait for evaluator tick)
+	if (Command.TargetActor && Command.TargetActor->IsValidLowLevel() && !Command.TargetActor->IsPendingKillPending())
+	{
+		Context.PrimaryTarget = Command.TargetActor;
+
+		// Update distance if we have a pawn
+		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+		{
+			Context.DistanceToPrimaryTarget = FVector::Dist(
+				OwnerPawn->GetActorLocation(),
+				Context.PrimaryTarget->GetActorLocation()
+			);
+		}
+
+		UE_LOG(LogTemp, Display, TEXT("UFollowerStateTreeComponent: Primary target set to '%s' (Distance: %.1f)"),
+			*Context.PrimaryTarget->GetName(),
+			Context.DistanceToPrimaryTarget);
+	}
+	else
+	{
+		Context.PrimaryTarget = nullptr;
+		Context.DistanceToPrimaryTarget = 0.0f;
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Command received - Type: %s, State: %s"),
 		*UEnum::GetValueAsString(Command.CommandType),

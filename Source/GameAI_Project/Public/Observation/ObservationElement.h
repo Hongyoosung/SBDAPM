@@ -57,6 +57,9 @@ struct GAMEAI_PROJECT_API FObservationElement
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Observation|Combat")
     int32 CurrentWeaponType = 0;  // 1 feature
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Observation|Combat")
+    float DistanceToNearestEnemy = 99999.0f;
+
     //--------------------------------------------------------------------------
     // ENVIRONMENT PERCEPTION (32 features)
     //--------------------------------------------------------------------------
