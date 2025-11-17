@@ -10,11 +10,9 @@ AFollowerCharacter::AFollowerCharacter()
 
 	// Create follower agent component
 	FollowerAgentComponent = CreateDefaultSubobject<UFollowerAgentComponent>(TEXT("FollowerAgentComponent"));
-	UE_LOG(LogTemp, Warning, TEXT("AFollowerCharacter::Constructor: Created FollowerAgentComponent"));
 
 	// Create state tree component
 	StateTreeComponent = CreateDefaultSubobject<UFollowerStateTreeComponent>(TEXT("StateTreeComponent"));
-	UE_LOG(LogTemp, Warning, TEXT("AFollowerCharacter::Constructor: Created StateTreeComponent"));
 }
 
 void AFollowerCharacter::BeginPlay()

@@ -132,7 +132,6 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 
 TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
 {
-	// �θ��� Context ��������
 	TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
 
 	static TArray<FStateTreeExternalDataDesc> _ContextDataDescs;
@@ -142,34 +141,36 @@ TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContext
 		// Parent context descriptors
 		_ContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
 
-		// UE 5.6: Each FStateTreeExternalDataDesc needs a unique ID
+		// UE 5.6 FIX: Use deterministic GUIDs based on descriptor names
+		// These MUST be stable across editor restarts to preserve bindings
+
 		// Primary context struct (contains all shared state data)
 		FStateTreeExternalDataDesc ContextDesc;
 		ContextDesc.Name = FName(TEXT("FollowerContext"));
 		ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
 		ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-		ContextDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788); // Deterministic GUID
 		_ContextDataDescs.Add(ContextDesc);
 
 		FStateTreeExternalDataDesc FollowerDesc;
 		FollowerDesc.Name = FName(TEXT("FollowerComponent"));
 		FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
 		FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-		FollowerDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		FollowerDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60002, 0x11223344, 0x55667788); // Deterministic GUID
 		_ContextDataDescs.Add(FollowerDesc);
 
 		FStateTreeExternalDataDesc TeamLeaderDesc;
 		TeamLeaderDesc.Name = FName(TEXT("TeamLeader"));
 		TeamLeaderDesc.Struct = UTeamLeaderComponent::StaticClass();
 		TeamLeaderDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		TeamLeaderDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		TeamLeaderDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60003, 0x11223344, 0x55667788); // Deterministic GUID
 		_ContextDataDescs.Add(TeamLeaderDesc);
 
 		FStateTreeExternalDataDesc TacticalPolicyDesc;
 		TacticalPolicyDesc.Name = FName(TEXT("TacticalPolicy"));
 		TacticalPolicyDesc.Struct = URLPolicyNetwork::StaticClass();
 		TacticalPolicyDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		TacticalPolicyDesc.ID = FGuid::NewGuid(); // Generate unique ID
+		TacticalPolicyDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60004, 0x11223344, 0x55667788); // Deterministic GUID
 		_ContextDataDescs.Add(TacticalPolicyDesc);
 	}
 

@@ -90,15 +90,29 @@ void UFollowerStateTreeComponent::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: bAutoStartStateTree = %s"), bAutoStartStateTree ? TEXT("true") : TEXT("false"));
 	if (bAutoStartStateTree)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Calling StartLogic()..."));
+		// Validate StateTree asset
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Validating StateTree asset..."));
+		UE_LOG(LogTemp, Warning, TEXT("  - StateTree Name: %s"), *StateTree->GetName());
+		UE_LOG(LogTemp, Warning, TEXT("  - IsReadyToRun: %s"), StateTree->IsReadyToRun() ? TEXT("true") : TEXT("false"));
+		UE_LOG(LogTemp, Warning, TEXT("  - Schema: %s"), StateTree->GetSchema() ? *StateTree->GetSchema()->GetName() : TEXT("NULL"));
+		UE_LOG(LogTemp, Warning, TEXT("  - Expected Schema: %s"), *GetSchema()->GetName());
 
-		// Check if StateTree is valid and compiled
 		if (!StateTree->IsReadyToRun())
 		{
 			UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ StateTree '%s' is NOT ready to run! Check for compilation errors in the asset."),
 				*StateTree->GetName());
+			// Continue anyway to get more diagnostic info
 		}
 
+		// Validate context is initialized
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Context validation..."));
+		UE_LOG(LogTemp, Warning, TEXT("  - FollowerComponent: %s"), Context.FollowerComponent ? TEXT("Valid") : TEXT("NULL"));
+		UE_LOG(LogTemp, Warning, TEXT("  - AIController: %s"), Context.AIController ? TEXT("Valid") : TEXT("NULL"));
+		UE_LOG(LogTemp, Warning, TEXT("  - bIsAlive: %s"), Context.bIsAlive ? TEXT("true") : TEXT("false"));
+
+		// Actually start the StateTree execution
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Calling StartLogic()..."));
+		StartLogic();
 
 		EStateTreeRunStatus Status = GetStateTreeRunStatus();
 		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: StartLogic() returned - Status = %s"),
@@ -196,11 +210,52 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 
 bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
-	if (!Super::SetContextRequirements(InContext, bLogErrors))
+	UE_LOG(LogTemp, Warning, TEXT("🔧 SetContextRequirements CALLED"));
+
+	// Validate StateTree before calling Super
+	const UStateTree* StateTree = StateTreeRef.GetStateTree();
+	if (!StateTree)
 	{
+		UE_LOG(LogTemp, Error, TEXT("🔧 StateTreeRef.GetStateTree() returned NULL!"));
 		return false;
 	}
 
+	// Validate Owner/Pawn/Controller (required by base class)
+	AActor* Owner = GetOwner();
+	APawn* OwnerPawn = Cast<APawn>(Owner);
+	AAIController* AIController = OwnerPawn ? Cast<AAIController>(OwnerPawn->GetController()) : nullptr;
+
+	UE_LOG(LogTemp, Warning, TEXT("🔧 Component/Owner validation:"));
+	UE_LOG(LogTemp, Warning, TEXT("  - Owner: %s"), Owner ? *Owner->GetName() : TEXT("NULL"));
+	UE_LOG(LogTemp, Warning, TEXT("  - Owner is Pawn: %s"), OwnerPawn ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Warning, TEXT("  - AIController: %s"), AIController ? *AIController->GetName() : TEXT("NULL"));
+	UE_LOG(LogTemp, Warning, TEXT("  - World: %s"), GetWorld() ? TEXT("Valid") : TEXT("NULL"));
+
+	UE_LOG(LogTemp, Warning, TEXT("🔧 StateTree validation:"));
+	UE_LOG(LogTemp, Warning, TEXT("  - Name: %s"), *StateTree->GetName());
+	UE_LOG(LogTemp, Warning, TEXT("  - IsReadyToRun: %s"), StateTree->IsReadyToRun() ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Warning, TEXT("  - Schema: %s"), StateTree->GetSchema() ? *StateTree->GetSchema()->GetName() : TEXT("NULL"));
+
+	// Call parent with logging enabled to see what fails
+	UE_LOG(LogTemp, Warning, TEXT("🔧 Calling Super::SetContextRequirements..."));
+	const bool bSuperResult = Super::SetContextRequirements(InContext, true); // Force logging
+
+	if (!bSuperResult)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔧 Super::SetContextRequirements FAILED - Check LogStateTree category for details"));
+		UE_LOG(LogTemp, Error, TEXT("🔧 Common causes:"));
+		UE_LOG(LogTemp, Error, TEXT("  - Owner not a Pawn: %s"), OwnerPawn ? TEXT("false (OK)") : TEXT("TRUE (ERROR)"));
+		UE_LOG(LogTemp, Error, TEXT("  - No AIController: %s"), AIController ? TEXT("false (OK)") : TEXT("TRUE (ERROR)"));
+		UE_LOG(LogTemp, Error, TEXT("  - Schema mismatch (expected: FollowerStateTreeSchema, got: %s)"),
+			StateTree->GetSchema() ? *StateTree->GetSchema()->GetName() : TEXT("NULL"));
+		return false;
+	}
+
+	// Register CollectExternalData callback
+	InContext.SetCollectExternalDataCallback(FOnCollectStateTreeExternalData::CreateUObject(
+		this, &UFollowerStateTreeComponent::CollectExternalData));
+
+	UE_LOG(LogTemp, Warning, TEXT("🔧 SetContextRequirements SUCCESS - CollectExternalData callback registered"));
 	return true;
 }
 
@@ -329,36 +384,49 @@ bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionC
 	const UStateTree* StateTree, TArrayView<const FStateTreeExternalDataDesc> ExternalDataDescs,
 	TArrayView<FStateTreeDataView> OutDataViews)
 {
+	UE_LOG(LogTemp, Warning, TEXT("🔍 CollectExternalData CALLED - Requested %d external data items"), ExternalDataDescs.Num());
+
 	for (int32 Index = 0; Index < ExternalDataDescs.Num(); Index++)
 	{
 		const FStateTreeExternalDataDesc& Desc = ExternalDataDescs[Index];
+		UE_LOG(LogTemp, Warning, TEXT("  [%d] Requested: Name='%s', Type=%s, Requirement=%s"),
+			Index,
+			*Desc.Name.ToString(),
+			Desc.Struct ? *Desc.Struct->GetName() : TEXT("NULL"),
+			*UEnum::GetValueAsString(Desc.Requirement));
 
 		// Provide the FollowerContext struct
 		if (Desc.Name == FName(TEXT("FollowerContext")))
 		{
 			OutDataViews[Index] = FStateTreeDataView(FFollowerStateTreeContext::StaticStruct(), reinterpret_cast<uint8*>(&Context));
+			UE_LOG(LogTemp, Warning, TEXT("  ✅ Provided FollowerContext struct"));
 		}
 		// Provide FollowerAgentComponent
 		else if (Desc.Name == FName(TEXT("FollowerComponent")))
 		{
 			OutDataViews[Index] = FStateTreeDataView(FollowerComponent);
+			UE_LOG(LogTemp, Warning, TEXT("  ✅ Provided FollowerComponent: %s"), FollowerComponent ? TEXT("Valid") : TEXT("NULL"));
 		}
 		// Provide TeamLeaderComponent
 		else if (Desc.Name == FName(TEXT("TeamLeader")))
 		{
 			OutDataViews[Index] = FStateTreeDataView(Context.TeamLeader);
+			UE_LOG(LogTemp, Warning, TEXT("  ✅ Provided TeamLeader: %s"), Context.TeamLeader ? TEXT("Valid") : TEXT("NULL"));
 		}
 		// Provide TacticalPolicy
 		else if (Desc.Name == FName(TEXT("TacticalPolicy")))
 		{
 			OutDataViews[Index] = FStateTreeDataView(Context.TacticalPolicy);
+			UE_LOG(LogTemp, Warning, TEXT("  ✅ Provided TacticalPolicy: %s"), Context.TacticalPolicy ? TEXT("Valid") : TEXT("NULL"));
 		}
 		else
 		{
 			OutDataViews[Index] = FStateTreeDataView();
+			UE_LOG(LogTemp, Error, TEXT("  ❌ UNHANDLED external data request: '%s'"), *Desc.Name.ToString());
 		}
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("🔍 CollectExternalData COMPLETE - Returning true"));
 	return true;
 }
 
