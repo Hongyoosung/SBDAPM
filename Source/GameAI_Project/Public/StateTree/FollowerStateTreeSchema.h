@@ -40,6 +40,10 @@ public:
 
 	virtual TConstArrayView<FStateTreeExternalDataDesc> GetContextDataDescs() const override;
 
+protected:
+	// Override to provide custom context data (FollowerContext, FollowerComponent, etc.)
+	virtual void SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const override;
+
 	/** AIController class for this schema */
 	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear)
 	TSubclassOf<AAIController> AIControllerClass;

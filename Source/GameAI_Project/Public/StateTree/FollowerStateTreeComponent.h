@@ -66,8 +66,12 @@ public:
 	// Override to provide external data to StateTree
 	virtual bool SetContextRequirements(FStateTreeExecutionContext& Context, bool bLogErrors = false) override;
 
-	
-
+	virtual bool CollectExternalData(
+		const FStateTreeExecutionContext& InContext,
+		const UStateTree* StateTree,
+		TArrayView<const FStateTreeExternalDataDesc> Descs,
+		TArrayView<FStateTreeDataView> OutDataViews
+	) const override;
 
 	//--------------------------------------------------------------------------
 	// API
@@ -101,14 +105,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FStrategicCommand GetCurrentCommand() const { return Context.CurrentCommand; }
 
-	// External data collection delegate
-	bool CollectExternalData(
-		const FStateTreeExecutionContext& InContext,
-		const UStateTree* StateTree,
-		TArrayView<const FStateTreeExternalDataDesc> ExternalDataDescs,
-		TArrayView<FStateTreeDataView> OutDataViews
-	);
-
+	
 protected:
 	/** Find FollowerAgentComponent on actor */
 	UFollowerAgentComponent* FindFollowerComponent();
@@ -138,10 +135,6 @@ public:
 	/** Auto-find FollowerAgentComponent on same actor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
 	bool bAutoFindFollowerComponent = true;
-
-	/** Auto-start State Tree on BeginPlay */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	bool bAutoStartStateTree = true;
 
 	//--------------------------------------------------------------------------
 	// STATE TREE CONTEXT

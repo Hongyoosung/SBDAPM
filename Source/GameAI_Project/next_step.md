@@ -6,14 +6,11 @@ Agents receive Assault commands but don't execute (stuck, no movement/firing).
 **Logs show:**
 - ✅ Commands received
 - ✅ State transitions (Idle → Assault)
-- ❌ No target assigned ("No target")
+- ✅ target assigned
 - ❌ No actual execution (movement/weapon firing)
 
 ## Root Causes
-1. **No Target Assignment** - Team Leader doesn't assign enemies when issuing commands
-2. **ExecuteAssault Task** - Not moving agent or firing weapon
-3. **StateTree Asset** - May not be wired properly in editor
-4. **AIController** - Movement commands not integrated
+1. **ExecuteAssault Task** - Not moving agent or firing weapon, may not working state tree asset
 
 ## Implementation Order
 

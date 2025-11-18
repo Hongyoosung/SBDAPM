@@ -1,9 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "StateTreeExecutionContext.h"
 #include "Components/StateTreeComponent.h"
-#include "AIController.h"
+#include "AI/AIController/FollowerAIController.h"
+#include "Actor/FollowerCharacter.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
@@ -22,8 +24,8 @@
 
 UFollowerStateTreeSchema::UFollowerStateTreeSchema()
 {
-	AIControllerClass = AAIController::StaticClass();
-	PawnClass = APawn::StaticClass();
+	AIControllerClass = AFollowerAIController::StaticClass();
+	PawnClass = AFollowerCharacter::StaticClass();
 }
 
 bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStruct) const
@@ -132,47 +134,70 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 
 TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
 {
-	TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
+	// UE 5.6 CRITICAL FIX: Use PERSISTENT static storage
+	// The returned TConstArrayView MUST point to stable memory across ALL calls
+	// If the array moves/reallocates, base class validation fails
+	static TArray<FStateTreeExternalDataDesc> InContextDataDescs;
 
-	static TArray<FStateTreeExternalDataDesc> _ContextDataDescs;
-
-	if (_ContextDataDescs.IsEmpty())
+	// Only initialize once - subsequent calls return same array
+	static bool bInitialized = false;
+	if (!bInitialized)
 	{
-		// Parent context descriptors
-		_ContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
+		bInitialized = true;
+
+		// Get parent descriptors (AIController, Pawn, etc.) from UStateTreeComponentSchema
+		TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
+		InContextDataDescs.Reserve(ParentDescs.Num() + 4); // Reserve space to prevent reallocation
+		InContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
+
+		UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeSchema::GetContextDataDescs - Added %d parent descriptors"), ParentDescs.Num());
 
 		// UE 5.6 FIX: Use deterministic GUIDs based on descriptor names
 		// These MUST be stable across editor restarts to preserve bindings
 
-		// Primary context struct (contains all shared state data)
+		// Primary context struct - provided via CollectExternalData callback
 		FStateTreeExternalDataDesc ContextDesc;
 		ContextDesc.Name = FName(TEXT("FollowerContext"));
 		ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
 		ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788); // Deterministic GUID
-		_ContextDataDescs.Add(ContextDesc);
+		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788);
+		InContextDataDescs.Add(ContextDesc);
 
 		FStateTreeExternalDataDesc FollowerDesc;
 		FollowerDesc.Name = FName(TEXT("FollowerComponent"));
 		FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
 		FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
 		FollowerDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60002, 0x11223344, 0x55667788); // Deterministic GUID
-		_ContextDataDescs.Add(FollowerDesc);
+		InContextDataDescs.Add(FollowerDesc);
 
 		FStateTreeExternalDataDesc TeamLeaderDesc;
 		TeamLeaderDesc.Name = FName(TEXT("TeamLeader"));
 		TeamLeaderDesc.Struct = UTeamLeaderComponent::StaticClass();
 		TeamLeaderDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
 		TeamLeaderDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60003, 0x11223344, 0x55667788); // Deterministic GUID
-		_ContextDataDescs.Add(TeamLeaderDesc);
+		InContextDataDescs.Add(TeamLeaderDesc);
 
 		FStateTreeExternalDataDesc TacticalPolicyDesc;
 		TacticalPolicyDesc.Name = FName(TEXT("TacticalPolicy"));
 		TacticalPolicyDesc.Struct = URLPolicyNetwork::StaticClass();
 		TacticalPolicyDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
 		TacticalPolicyDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60004, 0x11223344, 0x55667788); // Deterministic GUID
-		_ContextDataDescs.Add(TacticalPolicyDesc);
+		InContextDataDescs.Add(TacticalPolicyDesc);
+
+		UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeSchema::GetContextDataDescs - Initialized %d total descriptors"), InContextDataDescs.Num());
 	}
 
-	return _ContextDataDescs;
+	return InContextDataDescs;
+}
+
+void UFollowerStateTreeSchema::SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const
+{
+	UE_LOG(LogTemp, Warning, TEXT("🔧 UFollowerStateTreeSchema::SetContextData CALLED"));
+
+	// Call parent to handle all descriptors
+	// Parent's implementation handles UActorComponent types via FindComponentByClass
+	// This will automatically find: FollowerComponent, TeamLeader, TacticalPolicy
+	Super::SetContextData(ContextDataSetter, bLogErrors);
+
+	UE_LOG(LogTemp, Warning, TEXT("🔧 UFollowerStateTreeSchema::SetContextData COMPLETE"));
 }

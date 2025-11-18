@@ -110,13 +110,13 @@ bool AFollowerAIController::StartStateTree()
 	//StateTreeComp->InitializeContext();
 
 	// Start State Tree
-	if (!StateTreeComp->IsStateTreeRunning())
-	{
-		StateTreeComp->StartLogic();
-		UE_LOG(LogTemp, Log, TEXT("FollowerAIController: Started State Tree for pawn '%s'"),
-			*GetNameSafe(GetPawn()));
-		return true;
-	}
+	//if (!StateTreeComp->IsStateTreeRunning())
+	//{
+	//	StateTreeComp->StartLogic();
+	//	UE_LOG(LogTemp, Log, TEXT("FollowerAIController: Started State Tree for pawn '%s'"),
+	//		*GetNameSafe(GetPawn()));
+	//	return true;
+	//}
 
 	return false;
 }
