@@ -213,7 +213,6 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 
 bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
-	UE_LOG(LogTemp, Warning, TEXT("🔧 SetContextRequirements CALLED (Custom Implementation)"));
 
 	InContext.SetLinkedStateTreeOverrides(LinkedStateTreeOverrides);
 
@@ -230,7 +229,7 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	);
 	if (InContext.SetContextDataByName(FName(TEXT("FollowerContext")), ContextView))
 	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerContext set via SetContextDataByName"));
+		//UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerContext set via SetContextDataByName"));
 	}
 	else if (bLogErrors)
 	{
@@ -240,7 +239,7 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	// Set FollowerComponent
 	if (InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
 	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerComponent set: %s"), FollowerComponent ? TEXT("Valid") : TEXT("NULL"));
+		//UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerComponent set: %s"), FollowerComponent ? TEXT("Valid") : TEXT("NULL"));
 	}
 	else if (bLogErrors)
 	{
@@ -251,14 +250,14 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	UTeamLeaderComponent* TeamLeader = Context.TeamLeader;
 	if (InContext.SetContextDataByName(FName(TEXT("TeamLeader")), FStateTreeDataView(TeamLeader)))
 	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ TeamLeader set: %s"), TeamLeader ? TEXT("Valid") : TEXT("NULL (Optional)"));
+		//UE_LOG(LogTemp, Log, TEXT("  ✅ TeamLeader set: %s"), TeamLeader ? TEXT("Valid") : TEXT("NULL (Optional)"));
 	}
 
 	// Set TacticalPolicy (optional)
 	URLPolicyNetwork* TacticalPolicy = Context.TacticalPolicy;
 	if (InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(TacticalPolicy)))
 	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ TacticalPolicy set: %s"), TacticalPolicy ? TEXT("Valid") : TEXT("NULL (Optional)"));
+		//UE_LOG(LogTemp, Log, TEXT("  ✅ TacticalPolicy set: %s"), TacticalPolicy ? TEXT("Valid") : TEXT("NULL (Optional)"));
 	}
 
 	// Now call parent to handle base data (AIController, Pawn, Actor) and validation
@@ -268,10 +267,6 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	{
 		UE_LOG(LogTemp, Error, TEXT("🔧 UStateTreeComponentSchema::SetContextRequirements FAILED."));
 		UE_LOG(LogTemp, Error, TEXT("   Check that AIController and Pawn are valid."));
-	}
-	else if (bResult)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("🔧 SetContextRequirements SUCCESS"));
 	}
 
 	return bResult;

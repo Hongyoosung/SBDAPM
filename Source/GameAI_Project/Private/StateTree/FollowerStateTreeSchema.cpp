@@ -192,12 +192,8 @@ TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContext
 
 void UFollowerStateTreeSchema::SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const
 {
-	UE_LOG(LogTemp, Warning, TEXT("🔧 UFollowerStateTreeSchema::SetContextData CALLED"));
-
 	// Call parent to handle all descriptors
 	// Parent's implementation handles UActorComponent types via FindComponentByClass
 	// This will automatically find: FollowerComponent, TeamLeader, TacticalPolicy
 	Super::SetContextData(ContextDataSetter, bLogErrors);
-
-	UE_LOG(LogTemp, Warning, TEXT("🔧 UFollowerStateTreeSchema::SetContextData COMPLETE"));
 }

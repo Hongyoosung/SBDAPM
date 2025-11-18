@@ -8,10 +8,30 @@ void FSTEvaluator_SyncCommand::TreeStart(FStateTreeExecutionContext& Context) co
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Initialize last command type from context's follower component
+	// Initialize context outputs from follower component
+	// CRITICAL: This must happen in TreeStart so conditions can evaluate during initial state selection
 	if (InstanceData.Context.FollowerComponent)
 	{
-		InstanceData.LastCommandType = InstanceData.Context.FollowerComponent->GetCurrentCommand().CommandType;
+		FStrategicCommand CurrentCommand = InstanceData.Context.FollowerComponent->GetCurrentCommand();
+		bool bCommandValid = InstanceData.Context.FollowerComponent->IsCommandValid();
+		float TimeSinceCommand = InstanceData.Context.FollowerComponent->GetTimeSinceLastCommand();
+
+		// Set context outputs (shared with conditions/tasks)
+		InstanceData.Context.CurrentCommand = CurrentCommand;
+		InstanceData.Context.bIsCommandValid = bCommandValid;
+		InstanceData.Context.TimeSinceCommand = TimeSinceCommand;
+
+		// Initialize tracking variable
+		InstanceData.LastCommandType = CurrentCommand.CommandType;
+
+		UE_LOG(LogTemp, Warning, TEXT("[SYNC COMMAND] TreeStart: Initialized context - Type=%s, Valid=%d, Time=%.2f"),
+			*UEnum::GetValueAsString(CurrentCommand.CommandType),
+			bCommandValid,
+			TimeSinceCommand);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SYNC COMMAND] TreeStart: ❌ FollowerComponent is null!"));
 	}
 }
 
@@ -21,25 +41,40 @@ void FSTEvaluator_SyncCommand::Tick(FStateTreeExecutionContext& Context, float D
 
 	if (!InstanceData.Context.FollowerComponent)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[SYNC COMMAND] ❌ FollowerComponent is null!"));
 		return;
 	}
 
 	// Get current command from follower component
 	FStrategicCommand NewCommand = InstanceData.Context.FollowerComponent->GetCurrentCommand();
+	bool bNewCommandValid = InstanceData.Context.FollowerComponent->IsCommandValid();
+	float NewTimeSinceCommand = InstanceData.Context.FollowerComponent->GetTimeSinceLastCommand();
 
 	// Update context outputs (shared with all tasks/evaluators)
 	InstanceData.Context.CurrentCommand = NewCommand;
-	InstanceData.Context.bIsCommandValid = InstanceData.Context.FollowerComponent->IsCommandValid();
-	InstanceData.Context.TimeSinceCommand = InstanceData.Context.FollowerComponent->GetTimeSinceLastCommand();
+	InstanceData.Context.bIsCommandValid = bNewCommandValid;
+	InstanceData.Context.TimeSinceCommand = NewTimeSinceCommand;
 
-	// Log command changes
-	if (InstanceData.bLogCommandChanges && NewCommand.CommandType != InstanceData.LastCommandType)
+	// Log command changes (Warning level for visibility)
+	if (NewCommand.CommandType != InstanceData.LastCommandType)
 	{
-		UE_LOG(LogTemp, Log, TEXT("STEvaluator_SyncCommand: Command changed from '%s' to '%s'"),
+		UE_LOG(LogTemp, Warning, TEXT("[SYNC COMMAND] 📝 Command changed: '%s' → '%s', Valid=%d, Time=%.2f"),
 			*UEnum::GetValueAsString(InstanceData.LastCommandType),
-			*UEnum::GetValueAsString(NewCommand.CommandType));
+			*UEnum::GetValueAsString(NewCommand.CommandType),
+			bNewCommandValid,
+			NewTimeSinceCommand);
 
 		InstanceData.LastCommandType = NewCommand.CommandType;
+	}
+
+	// Periodic verbose logging (every 60 ticks)
+	static int32 TickCounter = 0;
+	if (++TickCounter % 60 == 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("[SYNC COMMAND] Current: Type=%s, Valid=%d, Time=%.2f"),
+			*UEnum::GetValueAsString(NewCommand.CommandType),
+			bNewCommandValid,
+			NewTimeSinceCommand);
 	}
 }
 

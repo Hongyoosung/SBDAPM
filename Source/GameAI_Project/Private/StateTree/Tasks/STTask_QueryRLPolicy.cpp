@@ -11,6 +11,8 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	UE_LOG(LogTemp, Warning, TEXT("STTask_QueryRLPolicy: EnterState called"));
+
 	// Validate context components
 	if (!InstanceData.Context.FollowerComponent)
 	{

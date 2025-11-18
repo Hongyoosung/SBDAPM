@@ -26,27 +26,39 @@ struct GAMEAI_PROJECT_API FSTCondition_CheckCommandTypeInstanceData
 {
 	GENERATED_BODY()
 
-	/** Current command (bound from context) */
-	UPROPERTY(EditAnywhere, Category = "Input")
-	FStrategicCommand CurrentCommand;
+	//--------------------------------------------------------------------------
+	// INPUT BINDINGS (bind these in StateTree editor)
+	//--------------------------------------------------------------------------
 
-	/** Is command valid (bound from context) */
+	/**
+	 * Current command type - bind to FollowerContext.CurrentCommand.CommandType
+	 */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	EStrategicCommandType CurrentCommandType = EStrategicCommandType::None;
+
+	/**
+	 * Is command valid - bind to FollowerContext.bIsCommandValid
+	 */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	bool bIsCommandValid = false;
+
+	//--------------------------------------------------------------------------
+	// CONFIGURATION
+	//--------------------------------------------------------------------------
 
 	/**
 	 * Command types to check against.
 	 * If current command matches ANY of these types, condition is true.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Condition")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	TArray<EStrategicCommandType> AcceptedCommandTypes;
 
 	/** If true, condition is inverted (true when command does NOT match) */
-	UPROPERTY(EditAnywhere, Category = "Condition")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bInvertCondition = false;
 
 	/** If true, also checks that command is valid/active */
-	UPROPERTY(EditAnywhere, Category = "Condition")
+	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bRequireValidCommand = true;
 };
 
