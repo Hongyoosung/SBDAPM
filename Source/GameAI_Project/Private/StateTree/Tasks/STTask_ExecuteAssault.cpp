@@ -7,8 +7,10 @@
 #include "AIController.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
+#include "RL/RLPolicyNetwork.h"
 
 EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -55,8 +57,25 @@ EStateTreeRunStatus FSTTask_ExecuteAssault::Tick(FStateTreeExecutionContext& Con
 	// Re-query RL policy if interval elapsed
 	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
 	{
-		// This would trigger a transition back to QueryRLPolicy state
 		InstanceData.TimeSinceLastRLQuery = 0.0f;
+
+		// Query RL policy for new tactical action
+		if (InstanceData.Context.TacticalPolicy && InstanceData.Context.TacticalPolicy->IsReady())
+		{
+			ETacticalAction NewAction = InstanceData.Context.TacticalPolicy->SelectAction(InstanceData.Context.CurrentObservation);
+
+			if (NewAction != InstanceData.Context.CurrentTacticalAction)
+			{
+				APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+				UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteAssault: '%s' changed tactic from '%s' to '%s'"),
+					Pawn ? *Pawn->GetName() : TEXT("Unknown"),
+					*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction),
+					*UEnum::GetValueAsString(NewAction));
+
+				InstanceData.Context.CurrentTacticalAction = NewAction;
+				InstanceData.Context.TimeInTacticalAction = 0.0f;
+			}
+		}
 	}
 
 	// Execute current tactical action
@@ -131,48 +150,87 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
 		float Distance = FVector::Dist(CurrentLocation, TargetLocation);
 
-		UE_LOG(LogTemp, Display, TEXT("[ASSAULT TASK] '%s': Moving to target '%s' (Distance: %.1f cm)"),
-			*Pawn->GetName(),
-			*InstanceData.Context.PrimaryTarget->GetName(),
-			Distance);
-
-		// Set high speed multiplier
+		// Set high speed multiplier and apply to movement component
 		InstanceData.Context.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
 
-		// Move directly toward target
+
+		// Move directly toward target - only update if destination changed significantly
 		if (InstanceData.Context.AIController)
 		{
-			InstanceData.Context.AIController->MoveToLocation(TargetLocation, 100.0f); // 1m acceptance radius
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			float DestinationDelta = FVector::Dist(InstanceData.Context.MovementDestination, TargetLocation);
+			if (DestinationDelta > 200.0f || InstanceData.Context.MovementDestination == FVector::ZeroVector)
+			{
+				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(TargetLocation, 100.0f);
+				InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+				InstanceData.Context.MovementDestination = TargetLocation;
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': No AIController!"),
+				*Pawn->GetName());
+		}
+
+		// Perform LOS check directly (evaluator context is separate)
+		bool bHasLOS = false;
+		UWorld* World = Pawn->GetWorld();
+		if (World)
+		{
+			FHitResult HitResult;
+			FCollisionQueryParams QueryParams;
+			QueryParams.AddIgnoredActor(Pawn);
+
+			FVector StartLoc = CurrentLocation + FVector(0, 0, 80.0f); // Eye height
+			FVector EndLoc = TargetLocation + FVector(0, 0, 80.0f);
+
+			bool bHit = World->LineTraceSingleByChannel(
+				HitResult,
+				StartLoc,
+				EndLoc,
+				ECC_Visibility,
+				QueryParams
+			);
+
+			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+
+			// Debug: draw LOS line
+			DrawDebugLine(World, StartLoc, EndLoc, bHasLOS ? FColor::Green : FColor::Red, false, 0.1f, 0, 2.0f);
 		}
 
 		// Fire weapon at target if available
-		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>();
+		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': WeaponComp=%s, bHasLOS=%d, Distance=%.1f"),
+			*Pawn->GetName(),
+			WeaponComp ? TEXT("Found") : TEXT("NULL"),
+			bHasLOS ? 1 : 0,
+			Distance);
+
+		if (WeaponComp)
 		{
 			if (WeaponComp->CanFire())
 			{
-				if (InstanceData.Context.bHasLOS)
+				if (bHasLOS)
 				{
 					WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
-					UE_LOG(LogTemp, Display, TEXT("[ASSAULT TASK] '%s': Firing at target '%s'"),
+					UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': FIRING at target '%s'"),
 						*Pawn->GetName(),
 						*InstanceData.Context.PrimaryTarget->GetName());
 				}
 				else
 				{
-					UE_LOG(LogTemp, Verbose, TEXT("[ASSAULT TASK] '%s': No LOS to target, moving only"),
+					UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No LOS to target, moving only"),
 						*Pawn->GetName());
 				}
 			}
 			else
 			{
-				UE_LOG(LogTemp, Verbose, TEXT("[ASSAULT TASK] '%s': Weapon on cooldown"),
+				UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Weapon on cooldown"),
 					*Pawn->GetName());
 			}
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No WeaponComponent found!"),
+			UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': No WeaponComponent found!"),
 				*Pawn->GetName());
 		}
 

@@ -232,8 +232,9 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 	// Check LOS and distance to primary target
 	if (InstanceData.Context.PrimaryTarget)
 	{
-		FVector StartLocation = ControlledPawn->GetActorLocation();
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		// Use eye height for LOS trace (avoid hitting ground)
+		FVector StartLocation = ControlledPawn->GetActorLocation() + FVector(0, 0, 80.0f); // Eye height offset
+		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
 
 		// Calculate distance
 		float Distance = FVector::Dist(StartLocation, TargetLocation);
@@ -254,6 +255,15 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 
 		// Has LOS if hit the target or no blocking hit
 		InstanceData.Context.bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+
+		// Debug: Log what blocked LOS
+		if (bHit && HitResult.GetActor() != InstanceData.Context.PrimaryTarget)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': LOS blocked by '%s' at distance %.1f"),
+				*ControlledPawn->GetName(),
+				HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("Unknown"),
+				HitResult.Distance);
+		}
 
 		if (InstanceData.bDrawDebugInfo)
 		{

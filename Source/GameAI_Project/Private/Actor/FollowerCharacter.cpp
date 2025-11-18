@@ -3,6 +3,7 @@
 #include "Actor/FollowerCharacter.h"
 #include "Team/FollowerAgentComponent.h"
 #include "StateTree/FollowerStateTreeComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 AFollowerCharacter::AFollowerCharacter()
 {
@@ -13,6 +14,20 @@ AFollowerCharacter::AFollowerCharacter()
 
 	// Create state tree component
 	StateTreeComponent = CreateDefaultSubobject<UFollowerStateTreeComponent>(TEXT("StateTreeComponent"));
+
+	// Configure character movement for AI pathfinding
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bOrientRotationToMovement = true;
+		MoveComp->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
+		MoveComp->MaxWalkSpeed = 600.0f;
+		MoveComp->bUseControllerDesiredRotation = false;
+	}
+
+	// Don't rotate character based on controller - let movement component handle it
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
 }
 
 void AFollowerCharacter::BeginPlay()

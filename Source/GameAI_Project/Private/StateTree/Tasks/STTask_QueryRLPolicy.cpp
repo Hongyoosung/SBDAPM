@@ -11,8 +11,6 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	UE_LOG(LogTemp, Warning, TEXT("STTask_QueryRLPolicy: EnterState called"));
-
 	// Validate context components
 	if (!InstanceData.Context.FollowerComponent)
 	{
@@ -45,7 +43,7 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 			*ActionName, nullptr, FColor::Cyan, 2.0f, true);
 	}
 
-	// Task completes immediately
+	// Task completes immediately - execution tasks handle their own RL query intervals
 	return EStateTreeRunStatus::Succeeded;
 }
 
