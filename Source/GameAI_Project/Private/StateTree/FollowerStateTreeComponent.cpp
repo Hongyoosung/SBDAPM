@@ -150,8 +150,8 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	static int32 TickCount = 0;
 	if (TickCount++ % 60 == 0) // Log every 60 ticks (~1 second at 60fps)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("🔄 UFollowerStateTreeComponent::TickComponent for '%s' (Tick #%d)"),
-			*GetOwner()->GetName(), TickCount);
+		//UE_LOG(LogTemp, Warning, TEXT("🔄 UFollowerStateTreeComponent::TickComponent for '%s' (Tick #%d)"),
+		//	*GetOwner()->GetName(), TickCount);
 	}
 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);

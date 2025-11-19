@@ -11,6 +11,10 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	// Reset timer state
+	InstanceData.TimeSinceLastQuery = 0.0f;
+	InstanceData.bHasQueriedOnce = false;
+
 	// Validate context components
 	if (!InstanceData.Context.FollowerComponent)
 	{
@@ -18,12 +22,13 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// Query the policy
+	// Query the policy immediately on entry
 	ETacticalAction SelectedAction = QueryPolicy(Context);
 
 	// Write selected action to context (so other tasks can read it)
 	InstanceData.Context.CurrentTacticalAction = SelectedAction;
 	InstanceData.Context.TimeInTacticalAction = 0.0f;
+	InstanceData.bHasQueriedOnce = true;
 
 	// Log if enabled
 	if (InstanceData.bLogActionSelection)
@@ -43,8 +48,56 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 			*ActionName, nullptr, FColor::Cyan, 2.0f, true);
 	}
 
-	// Task completes immediately - execution tasks handle their own RL query intervals
-	return EStateTreeRunStatus::Succeeded;
+	// If interval is 0, complete immediately (one-shot query)
+	if (InstanceData.QueryInterval <= 0.0f)
+	{
+		return EStateTreeRunStatus::Succeeded;
+	}
+
+	// Otherwise keep running to query at intervals
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FSTTask_QueryRLPolicy::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	// Accumulate time
+	InstanceData.TimeSinceLastQuery += DeltaTime;
+
+	// Check if it's time to query again
+	if (InstanceData.TimeSinceLastQuery >= InstanceData.QueryInterval)
+	{
+		InstanceData.TimeSinceLastQuery = 0.0f;
+
+		// Query the policy
+		ETacticalAction SelectedAction = QueryPolicy(Context);
+
+		// Update context
+		InstanceData.Context.CurrentTacticalAction = SelectedAction;
+		// Note: Don't reset TimeInTacticalAction here - let execution tasks track that
+
+		// Log if enabled
+		if (InstanceData.bLogActionSelection)
+		{
+			UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Re-queried action '%s' for '%s'"),
+				*UEnum::GetValueAsString(SelectedAction),
+				*InstanceData.Context.FollowerComponent->GetOwner()->GetName());
+		}
+
+		// Draw debug if enabled
+		if (InstanceData.bDrawDebugInfo && InstanceData.Context.FollowerComponent->GetOwner())
+		{
+			AActor* Owner = InstanceData.Context.FollowerComponent->GetOwner();
+			FVector Location = Owner->GetActorLocation();
+			FString ActionName = UEnum::GetValueAsString(SelectedAction);
+			DrawDebugString(Owner->GetWorld(), Location + FVector(0, 0, 100),
+				*ActionName, nullptr, FColor::Cyan, 2.0f, true);
+		}
+	}
+
+	// Keep running to continue querying at intervals
+	return EStateTreeRunStatus::Running;
 }
 
 void FSTTask_QueryRLPolicy::ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const

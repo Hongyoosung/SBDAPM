@@ -226,19 +226,19 @@ float FSTTask_ExecuteDefend::CalculateDefensiveReward(FStateTreeExecutionContext
 	// Reward for holding position
 	if (InstanceData.TimeInDefensivePosition > 1.0f)
 	{
-		Reward += 3.0f * DeltaTime; // +3.0 per second
+		Reward += 0.2f * DeltaTime; // +0.3 per second
 	}
 
 	// Reward for using cover
 	if (InstanceData.Context.bInCover)
 	{
-		Reward += 5.0f * DeltaTime; // +5.0 per second in cover
+		Reward += 0.3f * DeltaTime; // +0.3 per second in cover
 	}
 
 	// Reward for survival under fire
 	if (InstanceData.Context.bUnderFire && InstanceData.Context.bIsAlive)
 	{
-		Reward += 4.0f * DeltaTime; // +4.0 per second surviving under fire
+		Reward += 0.4f * DeltaTime; // +0.4 per second surviving under fire
 	}
 
 	return Reward;

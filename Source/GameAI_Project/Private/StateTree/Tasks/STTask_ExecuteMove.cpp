@@ -288,7 +288,7 @@ float FSTTask_ExecuteMove::CalculateMovementReward(FStateTreeExecutionContext& C
 	// Reward for reaching waypoint (one-time)
 	if (InstanceData.bHasReachedDestination && InstanceData.Context.CurrentCommand.CommandType == EStrategicCommandType::Patrol)
 	{
-		Reward += 5.0f; // Waypoint reached
+		Reward += 3.0f; // Waypoint reached
 	}
 
 	// Penalty for being stationary

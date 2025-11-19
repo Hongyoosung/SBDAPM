@@ -74,7 +74,7 @@ EStateTreeRunStatus FSTTask_ExecuteSupport::Tick(FStateTreeExecutionContext& Con
 
 	if (Reward != 0.0f && InstanceData.Context.FollowerComponent)
 	{
-		InstanceData.Context.FollowerComponent->ProvideReward(Reward, false);
+		InstanceData.Context.FollowerComponent->ProvideReward(Reward * 0.5f, false);
 	}
 
 	return EStateTreeRunStatus::Running;

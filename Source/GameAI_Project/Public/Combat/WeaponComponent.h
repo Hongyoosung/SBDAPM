@@ -9,6 +9,7 @@
 // Forward declarations
 class AProjectileBase;
 class USkeletalMeshComponent;
+class UAnimMontage;
 
 /**
  * Weapon fire mode
@@ -323,6 +324,22 @@ public:
 	/** Prediction lookahead time (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config|Projectile", meta = (EditCondition = "bUsePredictiveAiming", ClampMin = "0.0"))
 	float PredictionLookahead = 0.5f;
+
+	//--------------------------------------------------------------------------
+	// CONFIGURATION - ANIMATION
+	//--------------------------------------------------------------------------
+
+	/** Animation montage to play when firing */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config|Animation")
+	UAnimMontage* FireMontage = nullptr;
+
+	/** Montage section name to play (empty = play from start) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config|Animation")
+	FName FireMontageSection = NAME_None;
+
+	/** Montage play rate */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Config|Animation", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	float FireMontagePlayRate = 1.0f;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION - AMMO

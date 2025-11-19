@@ -125,8 +125,24 @@ void FSTTask_ExecuteAssault::ExecuteTacticalAction(FStateTreeExecutionContext& C
 		ExecuteMaintainDistance(Context, DeltaTime);
 		break;
 
+	case ETacticalAction::DefensiveHold:
+		ExecuteDefensiveHold(Context, DeltaTime);
+		break;
+
+	case ETacticalAction::SeekCover:
+		ExecuteSeekCover(Context, DeltaTime);
+		break;
+
+	case ETacticalAction::TacticalRetreat:
+		ExecuteTacticalRetreat(Context, DeltaTime);
+		break;
+
+	case ETacticalAction::SuppressiveFire:
+		ExecuteSuppressiveFire(Context, DeltaTime);
+		break;
+
 	default:
-		// Default to aggressive assault
+		// Default to aggressive assault for unhandled actions
 		ExecuteAggressiveAssault(Context, DeltaTime);
 		break;
 	}
@@ -432,7 +448,7 @@ float FSTTask_ExecuteAssault::CalculateAssaultReward(FStateTreeExecutionContext&
 
 			if (FVector::DotProduct(ToTarget.GetSafeNormal(), Velocity.GetSafeNormal()) > 0.0f)
 			{
-				Reward += 2.0f * DeltaTime; // +2.0 per second advancing toward target
+				Reward += 0.2f * DeltaTime; // +0.2 per second advancing toward target
 			}
 		}
 	}
@@ -453,8 +469,225 @@ float FSTTask_ExecuteAssault::CalculateAssaultReward(FStateTreeExecutionContext&
 	if (InstanceData.Context.CurrentTacticalAction == ETacticalAction::CautiousAdvance &&
 		InstanceData.Context.bUnderFire && !InstanceData.Context.bInCover)
 	{
-		Reward -= 2.0f * DeltaTime; // -2.0 per second exposed during cautious advance
+		Reward -= 0.2f * DeltaTime; // -0.2 per second exposed during cautious advance
 	}
 
 	return Reward;
+}
+
+void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Context, float DeltaTime) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn) return;
+
+	// Stop movement and hold position
+	if (InstanceData.Context.AIController)
+	{
+		InstanceData.Context.AIController->StopMovement();
+	}
+	InstanceData.Context.bIsMoving = false;
+	InstanceData.Context.MovementSpeedMultiplier = 0.0f;
+
+	// Focus on target and fire
+	if (InstanceData.Context.PrimaryTarget)
+	{
+		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+
+		// Perform LOS check
+		bool bHasLOS = false;
+		UWorld* World = Pawn->GetWorld();
+		if (World)
+		{
+			FHitResult HitResult;
+			FCollisionQueryParams QueryParams;
+			QueryParams.AddIgnoredActor(Pawn);
+
+			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+
+			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
+			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+		}
+
+		// Fire weapon at target
+		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		{
+			if (WeaponComp->CanFire() && bHasLOS)
+			{
+				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			}
+		}
+	}
+}
+
+void FSTTask_ExecuteAssault::ExecuteSeekCover(FStateTreeExecutionContext& Context, float DeltaTime) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn) return;
+
+	// If already in cover, hold and fire
+	if (InstanceData.Context.bInCover)
+	{
+		ExecuteDefensiveHold(Context, DeltaTime);
+		return;
+	}
+
+	// Move to nearest cover
+	if (InstanceData.Context.NearestCoverLocation != FVector::ZeroVector)
+	{
+		if (InstanceData.Context.AIController)
+		{
+			float DestinationDelta = FVector::Dist(InstanceData.Context.MovementDestination, InstanceData.Context.NearestCoverLocation);
+			if (DestinationDelta > 100.0f || InstanceData.Context.MovementDestination == FVector::ZeroVector)
+			{
+				InstanceData.Context.AIController->MoveToLocation(InstanceData.Context.NearestCoverLocation, 50.0f);
+				InstanceData.Context.MovementDestination = InstanceData.Context.NearestCoverLocation;
+			}
+
+			// Keep focus on target while moving to cover
+			if (InstanceData.Context.PrimaryTarget)
+			{
+				InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			}
+		}
+		InstanceData.Context.bIsMoving = true;
+		InstanceData.Context.MovementSpeedMultiplier = 1.3f; // Move quickly to cover
+	}
+	else
+	{
+		// No cover found, fall back to cautious advance
+		ExecuteCautiousAdvance(Context, DeltaTime);
+	}
+}
+
+void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& Context, float DeltaTime) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn) return;
+
+	FVector CurrentLocation = Pawn->GetActorLocation();
+	FVector RetreatDirection;
+
+	// Calculate retreat direction (away from target or toward spawn)
+	if (InstanceData.Context.PrimaryTarget)
+	{
+		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		RetreatDirection = (CurrentLocation - TargetLocation).GetSafeNormal();
+
+		// Keep focus on target while retreating
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+		}
+	}
+	else
+	{
+		// Retreat toward spawn/command location
+		FVector SpawnLocation = InstanceData.Context.CurrentCommand.TargetLocation;
+		if (SpawnLocation != FVector::ZeroVector)
+		{
+			RetreatDirection = (SpawnLocation - CurrentLocation).GetSafeNormal();
+		}
+		else
+		{
+			RetreatDirection = -Pawn->GetActorForwardVector(); // Just go backward
+		}
+	}
+
+	// Move in retreat direction
+	FVector RetreatDestination = CurrentLocation + RetreatDirection * 500.0f;
+
+	if (InstanceData.Context.AIController)
+	{
+		InstanceData.Context.AIController->MoveToLocation(RetreatDestination, 100.0f);
+	}
+
+	InstanceData.Context.bIsMoving = true;
+	InstanceData.Context.MovementSpeedMultiplier = 1.2f;
+
+	// Fire while retreating if has LOS
+	if (InstanceData.Context.PrimaryTarget)
+	{
+		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		{
+			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+			{
+				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			}
+		}
+	}
+}
+
+void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& Context, float DeltaTime) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn) return;
+
+	// Minimal movement - stay in position or move slowly
+	InstanceData.Context.MovementSpeedMultiplier = 0.3f;
+
+	if (InstanceData.Context.PrimaryTarget)
+	{
+		// Focus on target
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+		}
+
+		// Perform LOS check
+		bool bHasLOS = false;
+		UWorld* World = Pawn->GetWorld();
+		if (World)
+		{
+			FHitResult HitResult;
+			FCollisionQueryParams QueryParams;
+			QueryParams.AddIgnoredActor(Pawn);
+
+			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+
+			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
+			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+		}
+
+		// Fire rapidly at target area (suppressive fire - less accurate but more volume)
+		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
+		{
+			if (WeaponComp->CanFire() && bHasLOS)
+			{
+				// Fire with prediction disabled for suppressive effect (spray area)
+				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, false);
+			}
+		}
+
+		// Slight movement to find better angle if no LOS
+		if (!bHasLOS && InstanceData.Context.AIController)
+		{
+			FVector CurrentLocation = Pawn->GetActorLocation();
+			FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+			FVector ToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
+			FVector SideStep = FVector::CrossProduct(ToTarget, FVector::UpVector) * 200.0f;
+
+			// Alternate side to find LOS
+			if (FMath::Fmod(InstanceData.Context.TimeInTacticalAction, 2.0f) < 1.0f)
+			{
+				SideStep *= -1.0f;
+			}
+
+			InstanceData.Context.AIController->MoveToLocation(CurrentLocation + SideStep, 50.0f);
+			InstanceData.Context.bIsMoving = true;
+		}
+		else
+		{
+			InstanceData.Context.bIsMoving = false;
+		}
+	}
 }

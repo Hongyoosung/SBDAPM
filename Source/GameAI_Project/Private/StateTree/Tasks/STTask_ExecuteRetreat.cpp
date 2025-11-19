@@ -273,26 +273,26 @@ float FSTTask_ExecuteRetreat::CalculateRetreatReward(FStateTreeExecutionContext&
 	// Reward for increasing distance from threats
 	if (InstanceData.DistanceFromThreat > InstanceData.MinSafeDistance)
 	{
-		Reward += 4.0f * DeltaTime; // +4.0 per second at safe distance
+		Reward += 0.4f * DeltaTime; // +0.4 per second at safe distance
 		InstanceData.bHasReachedSafeDistance = true;
 	}
 
 	// Reward for reaching cover
 	if (InstanceData.Context.bInCover)
 	{
-		Reward += 8.0f; // One-time bonus for cover
+		Reward += 3.0f; // One-time bonus for cover
 	}
 
 	// Reward for survival during retreat
 	if (InstanceData.Context.bIsAlive && InstanceData.TimeInRetreat > 2.0f)
 	{
-		Reward += 5.0f * DeltaTime; // +5.0 per second for surviving retreat
+		Reward += 0.5f * DeltaTime; // +5.0 per second for surviving retreat
 	}
 
 	// Bonus for reaching safe zone
 	if (InstanceData.bHasReachedSafeDistance && !InstanceData.Context.bUnderFire)
 	{
-		Reward += 15.0f; // Large bonus for successful retreat
+		Reward += 10.0f; // Large bonus for successful retreat
 	}
 
 	// Penalty for getting hit during retreat

@@ -259,10 +259,10 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 		// Debug: Log what blocked LOS
 		if (bHit && HitResult.GetActor() != InstanceData.Context.PrimaryTarget)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': LOS blocked by '%s' at distance %.1f"),
+			/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': LOS blocked by '%s' at distance %.1f"),
 				*ControlledPawn->GetName(),
 				HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("Unknown"),
-				HitResult.Distance);
+				HitResult.Distance);*/
 		}
 
 		if (InstanceData.bDrawDebugInfo)

@@ -3,6 +3,8 @@
 #include "Combat/WeaponComponent.h"
 #include "Combat/ProjectileBase.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -352,10 +354,25 @@ bool UWeaponComponent::FireInternal(const FVector& FireDirection, AActor* Target
 	// Broadcast event
 	OnWeaponFired.Broadcast(FireData);
 
-	UE_LOG(LogTemp, Log, TEXT("🔫 %s fired at %s → Damage: %.1f, Spread: %.1f°, Cooldown: %.2fs"),
+	// Play fire animation montage
+	if (FireMontage && CachedMeshComponent)
+	{
+		if (UAnimInstance* AnimInstance = CachedMeshComponent->GetAnimInstance())
+		{
+			AnimInstance->Montage_Play(FireMontage, FireMontagePlayRate);
+
+			// Jump to section if specified
+			if (FireMontageSection != NAME_None)
+			{
+				AnimInstance->Montage_JumpToSection(FireMontageSection, FireMontage);
+			}
+		}
+	}
+
+	/*UE_LOG(LogTemp, Log, TEXT("🔫 %s fired at %s → Damage: %.1f, Spread: %.1f°, Cooldown: %.2fs"),
 		*GetOwner()->GetName(),
 		Target ? *Target->GetName() : TEXT("Direction"),
-		RandomizedDamage, WeaponSpread, CurrentCooldown);
+		RandomizedDamage, WeaponSpread, CurrentCooldown);*/
 
 	return true;
 }

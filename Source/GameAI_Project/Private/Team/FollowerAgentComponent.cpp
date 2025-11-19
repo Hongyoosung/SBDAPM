@@ -509,8 +509,8 @@ void UFollowerAgentComponent::ProvideReward(float Reward, bool bTerminal)
 	// Always accumulate reward (independent of RL policy or experience collection)
 	AccumulatedReward += Reward;
 
-	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
-		*GetOwner()->GetName(), Reward, AccumulatedReward, bTerminal ? TEXT("Yes") : TEXT("No"));
+	/*UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
+		*GetOwner()->GetName(), Reward, AccumulatedReward, bTerminal ? TEXT("Yes") : TEXT("No"));*/
 
 	// Store experience if RL policy is enabled and collecting experiences
 	if (bUseRLPolicy && TacticalPolicy && bCollectExperiences)

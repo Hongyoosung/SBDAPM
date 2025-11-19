@@ -66,6 +66,18 @@ struct GAMEAI_PROJECT_API FSTTask_QueryRLPolicyInstanceData
 	/** Use RL policy (if false, uses rule-based fallback) */
 	UPROPERTY(EditAnywhere, Category = "Parameter")
 	bool bUseRLPolicy = true;
+
+	/** Interval between policy queries (seconds). Set to 0 for one-shot query. */
+	UPROPERTY(EditAnywhere, Category = "Parameter")
+	float QueryInterval = 0.5f;
+
+	/** Time since last query */
+	UPROPERTY()
+	float TimeSinceLastQuery = 0.0f;
+
+	/** Has queried at least once this state entry */
+	UPROPERTY()
+	bool bHasQueriedOnce = false;
 };
 
 USTRUCT(meta = (DisplayName = "Query RL Policy"))
@@ -80,6 +92,7 @@ struct GAMEAI_PROJECT_API FSTTask_QueryRLPolicy : public FStateTreeTaskBase
 	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
 
 	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
 	virtual void ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
 
 protected:

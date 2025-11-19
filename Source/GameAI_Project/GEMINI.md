@@ -4,12 +4,12 @@
 
 ## Architecture (v2.0)
 
-**Hierarchical Team System:** Leader (MCTS strategic) → Followers (RL tactical + BT execution)
+**Hierarchical Team System:** Leader (MCTS strategic) → Followers (RL tactical + StateTree execution)
 
 ```
 Team Leader (per team) → Event-driven MCTS → Strategic commands
     ↓
-Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
+Followers (N agents) → RL Policy + State Tree → Tactical execution
 ```
 
 **Key Benefits:**
@@ -28,13 +28,56 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 
 ### 2. Followers (`Team/FollowerAgentComponent.h/cpp`)
 - Receives commands from leader
-- FSM transitions based on commands
 - RL policy selects tactical actions
 - Signals events to leader
+- Integrates with StateTree for execution
 
-### 3. FSM (`StateMachine.h/cpp`, `State.h/cpp`)
-- **v2.0 Role:** Command-driven state transitions (NO per-agent MCTS)
+### 3. State Tree (`StateTree/FollowerStateTreeComponent.h/cpp`)
+- **v2.0 PRIMARY:** Unified execution system replacing FSM + BehaviorTree
+- Command-driven state transitions (NO per-agent MCTS)
 - States: Idle, Assault, Defend, Support, Move, Retreat, Dead
+- **Tasks:** `STTask_QueryRLPolicy`, `STTask_ExecuteDefend`, `STTask_ExecuteAssault`, `STTask_ExecuteSupport`, `STTask_ExecuteMove`, `STTask_ExecuteRetreat`
+- **Evaluators:** `STEvaluator_SyncCommand`, `STEvaluator_UpdateObservation`
+- **Conditions:** `STCondition_CheckCommandType`, `STCondition_CheckTacticalAction`, `STCondition_IsAlive`
+- **Status:** ✅ Implemented, replaces FSM + BehaviorTree
+
+#### **UE 5.6 StateTree Binding Pattern (Standardized)**
+All tasks/evaluators use **direct context binding** for consistency and simplicity:
+
+**Tasks & Evaluators:**
+```cpp
+USTRUCT()
+struct FMyTaskInstanceData {
+    // AUTO-BINDS to FFollowerStateTreeContext from schema
+    UPROPERTY(EditAnywhere, Category = "Context")
+    FFollowerStateTreeContext Context;
+
+    // Config properties (Parameter category)
+    UPROPERTY(EditAnywhere, Category = "Parameter")
+    float MyConfigValue = 1.0f;
+
+    // Task-specific runtime state (no category)
+    UPROPERTY()
+    float MyRuntimeState = 0.0f;
+};
+```
+
+**Conditions (lightweight - use individual bindings):**
+```cpp
+USTRUCT()
+struct FMyConditionInstanceData {
+    // Bind only the specific property needed
+    UPROPERTY(EditAnywhere, Category = "Input")
+    bool bIsAlive = true;
+};
+```
+
+**Key Rules:**
+- **Context category**: Auto-binds to matching struct name from schema (`FollowerContext`)
+- **Parameter category**: Optional config values (can bind OR set in editor)
+- **Input/Output categories**: For individual property bindings (conditions only)
+- NO manual `FStateTreeExternalDataHandle` usage (outdated UE 5.4 pattern)
+- Tasks/evaluators access shared state via `InstanceData.Context.PropertyName`
 
 ### 4. RL Policy (`RL/RLPolicyNetwork.h/cpp`, `RL/RLReplayBuffer.h/cpp`)
 - 3-layer network (128→128→64 neurons)
@@ -42,10 +85,13 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - 16 tactical actions
 - Reward: +10 kill, +5 damage, -5 take damage, -10 die
 
-### 5. Behavior Trees (`BehaviorTree/*`)
-- Custom tasks: `UBTTask_QueryRLPolicy`, `UBTTask_SignalEventToLeader`, etc.
-- Custom services: `UBTService_UpdateObservation`, etc.
-- Custom decorators: `UBTDecorator_CheckCommandType`, etc.
+
+### 5. EQS Cover System (`EQS/*`)
+- **Generator:** `EnvQueryGenerator_CoverPoints` - Grid/tag-based cover candidate generation
+- **Test:** `EnvQueryTest_CoverQuality` - Multi-factor cover scoring (enemy distance, LOS, navigability)
+- **Context:** `EnvQueryContext_CoverEnemies` - Auto-fetches enemies from Team Leader
+- **BT Integration:** `BTTask_FindCoverLocation` (EQS) + `BTTask_ExecuteDefend::FindNearestCover()` (tag-based)
+- **Status:** ✅ Implemented, tag-based active, EQS available
 
 ### 6. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
 - **Status:** ✅ Fully updated (71 individual + 40 team features)
@@ -54,23 +100,61 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - Leader ↔ Follower message passing
 - Event priority system (triggers MCTS at priority ≥5)
 
+### 8. Perception System (`Perception/AgentPerceptionComponent.h/cpp`)
+- UE5 AI Perception integration (sight-based detection)
+- Team-based enemy filtering via SimulationManager
+- Auto-updates RL observations with enemy data
+- 360° raycasting for environmental awareness
+- Auto-reports enemies to Team Leader (triggers MCTS)
+- **Status:** ✅ Implemented & Validated (full pipeline tested)
+
+### 9. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
+- Team registration and management
+- Enemy relationship tracking (mutual enemies, free-for-all)
+- Actor-to-team mapping (O(1) lookup)
+- **Status:** ✅ Implemented
+
+### 10. Combat System (`Combat/HealthComponent.h/cpp`, `Combat/WeaponComponent.h/cpp`)
+- **HealthComponent:** Damage/death handling, armor mitigation, health regen
+- **WeaponComponent:** Configurable damage/fire rate, predictive aiming, ammo system
+- **RL Integration:** Auto-binds to FollowerAgentComponent for rewards (+10 kill, +5 damage, -5 take damage, -10 die)
+- **StateTree Integration:** WeaponComponent used in ExecuteAssault/Defend tasks
+- **Observation Integration:** Health/ammo/cooldown auto-populated from components
+- **Status:** ✅ Fully Integrated (FollowerAgentComponent.cpp:426-440, 86-102, 634-699)
+
 ## Current Status
 
-**✅ Implemented:**
+**✅ Implemented & Validated:**
+- **Command Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers → State Transitions ✅
+- **Perception system** - Enemy detection, team filtering, auto-reporting ✅
+- **Combat system** - Health/Weapon components, RL reward integration, observation population ✅
+- **Comprehensive logging** - Color-coded debug system ✅
 - Enhanced observation system (71+40 features)
-- Team architecture foundations
-- RL policy network structure
-- FSM refactored (command-driven, no per-agent MCTS)
+- Team architecture (Leader, Follower, Communication)
+- RL policy network structure (128→128→64)
+- State Tree execution system (Tasks, Evaluators, Conditions)
+- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat)
+- EQS cover system (Generator, Test, Context)
+- Simulation Manager GameMode (team registration, enemy tracking)
+- BehaviorTree (LEGACY - deprecated in favor of StateTree)
 
-**🔄 In Progress:**
-- Behavior Tree custom components
-- RL training infrastructure
-- Complete state implementations
+**⚠️ Current Issue:**
+- **Execution Gap** - Agents receive Assault commands and transition states, but don't execute (no movement/firing)
+- Root causes: No target assignment, ExecuteAssault task incomplete, possible StateTree asset gaps
+- See `next_step.md` for detailed execution pipeline plan
+
+**🔄 Next Steps (see next_step.md):**
+1. **Fix ExecuteAssault Task** - Implement movement toward target + weapon firing in STTask_ExecuteAssault
+2. **Target Assignment** - Team Leader assigns nearest enemy when issuing Assault commands
+3. **StateTree Asset Validation** - Verify ST_FollowerBehavior has proper task bindings
+4. **Movement Integration** - AIController MoveTo commands in assault execution
+5. **End-to-End Combat Test** - Full loop: Perception → MCTS → Commands → Movement → Firing → Damage → Rewards
 
 **📋 Planned:**
-- Distributed training (Ray RLlib)
-- Model persistence
-- Multi-team support (Red vs Blue)
+- Distributed training (Ray RLlib integration)
+- Model persistence and loading
+- Full multi-team scenarios (Red vs Blue vs Green)
+- Performance profiling and optimization
 
 ## Work Instructions
 
@@ -89,24 +173,46 @@ Followers (N agents) → FSM + RL Policy + Behavior Tree → Tactical execution
 - Followers NEVER run MCTS (only leader does)
 - All MCTS is event-driven and async
 - RL policy runs per follower, not per team
-- Behavior Trees execute RL-selected actions
+- State Tree executes RL-selected actions (StateTree replaces FSM + BehaviorTree)
 
 **Performance Targets:**
-- Team Leader MCTS: 50-100ms async (1-5 decisions/minute)
+- Team Leader MCTS: 50-100ms async (1-5 decisions/minute) - **✅ ~34ms achieved**
 - Follower RL inference: 1-5ms per decision
-- BT tick: <0.5ms per agent
+- StateTree tick: <0.5ms per agent
 - Total frame overhead: 10-20ms for 4-agent team
+
 
 ## File Structure
 
 ```
 Source/GameAI_Project/
-├── MCTS/              # Team leader strategic planning
-├── RL/                # Follower tactical policies
-├── StateMachine/      # Command-driven FSM
-├── BehaviorTree/      # Custom BT components
+├── MCTS/              # Team leader strategic planning (event-driven)
+├── RL/                # Follower tactical policies (PPO network)
+├── StateTree/         # ⭐ PRIMARY execution system
+│   ├── Tasks/         # ExecuteDefend, ExecuteAssault, QueryRLPolicy, ExecuteMove, ExecuteRetreat
+│   ├── Evaluators/    # SyncCommand, UpdateObservation
+│   ├── Conditions/    # CheckCommandType, CheckTacticalAction, IsAlive
+│   └── FollowerStateTreeComponent.h/cpp
+├── Combat/            # ✅ HealthComponent, WeaponComponent (fully integrated)
+├── EQS/               # Environment Query System (cover finding)
+│   ├── Generator      # CoverPoints (grid + tag-based)
+│   ├── Test           # CoverQuality (multi-factor scoring)
+│   └── Context        # CoverEnemies (Team Leader integration)
+├── Perception/        # AgentPerceptionComponent (enemy detection)
 ├── Team/              # Leader, Follower, Communication
-└── Observation/       # 71+40 feature observation system
+├── Observation/       # 71+40 feature observation system
+└── Core/              # SimulationManagerGameMode (team management)
 ```
 
-**See REFACTORING_PLAN.md for detailed roadmap**
+**Key Files:**
+- `next_step.md` - Current implementation plan (execution pipeline fixes)
+- `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
+- `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
+- `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system
+- `StateTree/Tasks/STTask_ExecuteDefend.cpp` - Defend state execution
+- `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Assault state execution with weapon firing
+- `Combat/HealthComponent.cpp` - Damage/death handling, event broadcasting
+- `Combat/WeaponComponent.cpp` - Weapon firing, predictive aiming
+- `Perception/AgentPerceptionComponent.cpp` - Enemy detection and tracking
+- `EQS_SETUP_GUIDE.md` - EQS integration and setup instructions
+- `PERCEPTION_SETUP.md` - Perception system setup guide

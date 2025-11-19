@@ -29,11 +29,13 @@ AProjectileBase::AProjectileBase()
 	// Create projectile movement
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
 	ProjectileMovement->UpdatedComponent = CollisionComponent;
-	ProjectileMovement->InitialSpeed = ProjectileSpeed;
+	ProjectileMovement->InitialSpeed = 0.0f; // Start at zero, set in InitializeProjectile
 	ProjectileMovement->MaxSpeed = ProjectileSpeed;
 	ProjectileMovement->bRotationFollowsVelocity = true;
 	ProjectileMovement->bShouldBounce = false;
 	ProjectileMovement->ProjectileGravityScale = 0.0f; // No gravity by default
+	ProjectileMovement->bInitialVelocityInLocalSpace = false;
+	ProjectileMovement->bAutoActivate = true; // Ensure component is active
 
 	// Create mesh component (optional)
 	MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
@@ -60,10 +62,9 @@ void AProjectileBase::BeginPlay()
 		CollisionComponent->SetSphereRadius(CollisionRadius);
 	}
 
-	// Set projectile speed
+	// Set projectile max speed
 	if (ProjectileMovement)
 	{
-		ProjectileMovement->InitialSpeed = ProjectileSpeed;
 		ProjectileMovement->MaxSpeed = ProjectileSpeed;
 	}
 
@@ -132,18 +133,56 @@ void AProjectileBase::InitializeProjectile(AActor* InOwner, AActor* InInstigator
 	InstigatorActor = InInstigator;
 	BaseDamage = InBaseDamage;
 
-	// Set velocity
-	if (ProjectileMovement)
+	if (CollisionComponent)
 	{
-		FVector Velocity = InDirection.GetSafeNormal() * ProjectileSpeed;
-		ProjectileMovement->Velocity = Velocity;
+		// 투사체가 이동할 때 Owner(캐릭터)를 무시하도록 설정
+		if (InOwner)
+		{
+			CollisionComponent->IgnoreActorWhenMoving(InOwner, true);
+
+			// (선택 사항) 만약 Owner 측에서도 투사체를 확실히 무시하게 하려면:
+			// Owner의 루트 컴포넌트(주로 캡슐)를 가져와서 설정해야 합니다.
+			if (UPrimitiveComponent* OwnerRoot = Cast<UPrimitiveComponent>(InOwner->GetRootComponent()))
+			{
+				OwnerRoot->IgnoreActorWhenMoving(this, true);
+			}
+		}
+
+		// Instigator(가해자)도 무시
+		if (InInstigator && InInstigator != InOwner)
+		{
+			CollisionComponent->IgnoreActorWhenMoving(InInstigator, true);
+
+			if (UPrimitiveComponent* InstigatorRoot = Cast<UPrimitiveComponent>(InInstigator->GetRootComponent()))
+			{
+				InstigatorRoot->IgnoreActorWhenMoving(this, true);
+			}
+		}
 	}
 
-	// Set rotation to face direction
-	SetActorRotation(InDirection.Rotation());
+	// 2. 속도 및 이동 설정
+	if (ProjectileMovement)
+	{
+		FVector NormalizedDir = InDirection.GetSafeNormal();
 
-	UE_LOG(LogTemp, Log, TEXT("🚀 Projectile initialized: Owner=%s, Damage=%.1f, Speed=%.0f"),
-		InOwner ? *InOwner->GetName() : TEXT("None"), BaseDamage, ProjectileSpeed);
+		// 속도 값 강제 설정
+		ProjectileMovement->InitialSpeed = ProjectileSpeed;
+		ProjectileMovement->MaxSpeed = ProjectileSpeed;
+
+		// 속도 벡터 직접 할당 (중요)
+		ProjectileMovement->Velocity = NormalizedDir * ProjectileSpeed;
+
+		// 컴포넌트 활성화 및 업데이트 대상 설정
+		ProjectileMovement->SetUpdatedComponent(CollisionComponent);
+		ProjectileMovement->UpdateComponentVelocity();
+
+		// 디버그 로그: 속도가 0이 아닌지 확인
+		UE_LOG(LogTemp, Log, TEXT("🚀 Projectile Init: Owner=%s, Vel=%s"),
+			InOwner ? *InOwner->GetName() : TEXT("None"),
+			*ProjectileMovement->Velocity.ToString());
+	}
+
+	SetActorRotation(InDirection.Rotation());
 }
 
 void AProjectileBase::SetVelocity(const FVector& NewVelocity)

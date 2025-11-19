@@ -67,5 +67,9 @@ protected:
 	void ExecuteCautiousAdvance(FStateTreeExecutionContext& Context, float DeltaTime) const;
 	void ExecuteFlankManeuver(FStateTreeExecutionContext& Context, float DeltaTime, bool bFlankLeft) const;
 	void ExecuteMaintainDistance(FStateTreeExecutionContext& Context, float DeltaTime) const;
+	void ExecuteDefensiveHold(FStateTreeExecutionContext& Context, float DeltaTime) const;
+	void ExecuteSeekCover(FStateTreeExecutionContext& Context, float DeltaTime) const;
+	void ExecuteTacticalRetreat(FStateTreeExecutionContext& Context, float DeltaTime) const;
+	void ExecuteSuppressiveFire(FStateTreeExecutionContext& Context, float DeltaTime) const;
 	float CalculateAssaultReward(FStateTreeExecutionContext& Context, float DeltaTime) const;
 };
