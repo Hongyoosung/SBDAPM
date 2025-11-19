@@ -21,9 +21,10 @@ AProjectileBase::AProjectileBase()
 	CollisionComponent->InitSphereRadius(CollisionRadius);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Overlap);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+	CollisionComponent->SetGenerateOverlapEvents(true);
 	RootComponent = CollisionComponent;
 
 	// Create projectile movement
@@ -55,10 +56,10 @@ void AProjectileBase::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Bind collision event
+	// Bind overlap event
 	if (CollisionComponent)
 	{
-		CollisionComponent->OnComponentHit.AddDynamic(this, &AProjectileBase::OnProjectileHit);
+		CollisionComponent->OnComponentBeginOverlap.AddDynamic(this, &AProjectileBase::OnProjectileBeginOverlap);
 		CollisionComponent->SetSphereRadius(CollisionRadius);
 	}
 
@@ -149,7 +150,7 @@ void AProjectileBase::InitializeProjectile(AActor* InOwner, AActor* InInstigator
 		}
 
 		// Instigator(가해자)도 무시
-		if (InInstigator && InInstigator != InOwner)
+		/*if (InInstigator && InInstigator != InOwner)
 		{
 			CollisionComponent->IgnoreActorWhenMoving(InInstigator, true);
 
@@ -157,7 +158,7 @@ void AProjectileBase::InitializeProjectile(AActor* InOwner, AActor* InInstigator
 			{
 				InstigatorRoot->IgnoreActorWhenMoving(this, true);
 			}
-		}
+		}*/
 	}
 
 	// 2. 속도 및 이동 설정
@@ -222,8 +223,8 @@ void AProjectileBase::Explode()
 // COLLISION & DAMAGE
 //------------------------------------------------------------------------------
 
-void AProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+void AProjectileBase::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (!bIsActive || !OtherActor)
 	{
@@ -249,19 +250,23 @@ void AProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor*
 		return;
 	}
 
+	// Get hit location and normal
+	FVector HitLocation = bFromSweep ? FVector(SweepResult.ImpactNormal) : OtherActor->GetActorLocation();
+	FVector HitNormal = bFromSweep ? FVector(SweepResult.ImpactNormal) : -GetActorForwardVector();
+
 	// Apply damage
-	ApplyDamageToActor(OtherActor, Hit.ImpactPoint, Hit.ImpactNormal);
+	ApplyDamageToActor(OtherActor, HitLocation, HitNormal);
 
 	// Track hit
 	HitActors.Add(OtherActor);
 	HitCount++;
 
 	// Spawn impact effects
-	SpawnImpactEffects(Hit.ImpactPoint, Hit.ImpactNormal);
+	SpawnImpactEffects(HitLocation, HitNormal);
 
 	// Create hit data
 	float FinalDamage = CalculateDamageWithFalloff(DistanceTraveled);
-	FProjectileHitData HitData(OtherActor, Hit.ImpactPoint, Hit.ImpactNormal, DistanceTraveled, FinalDamage, true);
+	FProjectileHitData HitData(OtherActor, HitLocation, HitNormal, DistanceTraveled, FinalDamage, true);
 
 	// Broadcast event
 	OnProjectileHit_Delegate.Broadcast(HitData);
