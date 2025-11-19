@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Core/SimulationManagerGameMode.h"
 
 AProjectileBase::AProjectileBase()
 {
@@ -19,12 +20,13 @@ AProjectileBase::AProjectileBase()
 	// Create collision component
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComponent"));
 	CollisionComponent->InitSphereRadius(CollisionRadius);
-	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Overlap);
-	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
-	CollisionComponent->SetGenerateOverlapEvents(true);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	CollisionComponent->SetNotifyRigidBodyCollision(true);
 	RootComponent = CollisionComponent;
 
 	// Create projectile movement
@@ -56,10 +58,10 @@ void AProjectileBase::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Bind overlap event
+	// Bind hit event
 	if (CollisionComponent)
 	{
-		CollisionComponent->OnComponentBeginOverlap.AddDynamic(this, &AProjectileBase::OnProjectileBeginOverlap);
+		CollisionComponent->OnComponentHit.AddDynamic(this, &AProjectileBase::OnProjectileHit);
 		CollisionComponent->SetSphereRadius(CollisionRadius);
 	}
 
@@ -176,11 +178,6 @@ void AProjectileBase::InitializeProjectile(AActor* InOwner, AActor* InInstigator
 		// 컴포넌트 활성화 및 업데이트 대상 설정
 		ProjectileMovement->SetUpdatedComponent(CollisionComponent);
 		ProjectileMovement->UpdateComponentVelocity();
-
-		// 디버그 로그: 속도가 0이 아닌지 확인
-		UE_LOG(LogTemp, Log, TEXT("🚀 Projectile Init: Owner=%s, Vel=%s"),
-			InOwner ? *InOwner->GetName() : TEXT("None"),
-			*ProjectileMovement->Velocity.ToString());
 	}
 
 	SetActorRotation(InDirection.Rotation());
@@ -223,8 +220,8 @@ void AProjectileBase::Explode()
 // COLLISION & DAMAGE
 //------------------------------------------------------------------------------
 
-void AProjectileBase::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void AProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
 	if (!bIsActive || !OtherActor)
 	{
@@ -250,9 +247,11 @@ void AProjectileBase::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedCo
 		return;
 	}
 
-	// Get hit location and normal
-	FVector HitLocation = bFromSweep ? FVector(SweepResult.ImpactNormal) : OtherActor->GetActorLocation();
-	FVector HitNormal = bFromSweep ? FVector(SweepResult.ImpactNormal) : -GetActorForwardVector();
+	UE_LOG(LogTemp, Log, TEXT("💥 Projectile hit___________ %s"), *OtherActor->GetName());
+
+	// Get hit location and normal from HitResult
+	FVector HitLocation = Hit.ImpactPoint;
+	FVector HitNormal = Hit.ImpactNormal;
 
 	// Apply damage
 	ApplyDamageToActor(OtherActor, HitLocation, HitNormal);
@@ -260,7 +259,7 @@ void AProjectileBase::OnProjectileBeginOverlap(UPrimitiveComponent* OverlappedCo
 	// Track hit
 	HitActors.Add(OtherActor);
 	HitCount++;
-
+	
 	// Spawn impact effects
 	SpawnImpactEffects(HitLocation, HitNormal);
 
@@ -332,15 +331,20 @@ bool AProjectileBase::ValidateHit(AActor* HitActor) const
 		return false;
 	}
 
-	// Check friendly fire
+	// Check friendly fire using SimulationManager team system
 	if (!bAllowFriendlyFire && OwnerActor)
 	{
-		// Simple team check: If actors are on same team, block hit
-		// You can implement more sophisticated team checking here via SimulationManager
-		if (HitActor->GetClass() == OwnerActor->GetClass())
+		// Get SimulationManager for proper team checking
+		if (UWorld* World = GetWorld())
 		{
-			// Same class = same team (simplified check)
-			return false;
+			if (ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode()))
+			{
+				// If actors are NOT enemies (same team or neutral), block hit
+				if (!SimManager->AreActorsEnemies(OwnerActor, HitActor))
+				{
+					return false;
+				}
+			}
 		}
 	}
 
@@ -351,19 +355,28 @@ void AProjectileBase::ApplyDamageToActor(AActor* HitActor, const FVector& HitLoc
 {
 	if (!HitActor)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ ApplyDamageToActor called with null HitActor"));
+		
 		return;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🔫 Applying damage to %s"), *HitActor->GetName());
 	}
 
 	// Calculate final damage
 	float FinalDamage = CalculateDamageWithFalloff(DistanceTraveled);
+
+	
 
 	// Find HealthComponent on hit actor
 	UHealthComponent* TargetHealth = HitActor->FindComponentByClass<UHealthComponent>();
 	if (TargetHealth)
 	{
 		// Apply damage via HealthComponent
+		
 		float ActualDamage = TargetHealth->TakeDamage(FinalDamage, InstigatorActor, OwnerActor, HitLocation, HitNormal);
-
+		
 		// Notify our owner's HealthComponent that we dealt damage
 		if (OwnerActor)
 		{
@@ -372,6 +385,14 @@ void AProjectileBase::ApplyDamageToActor(AActor* HitActor, const FVector& HitLoc
 			{
 				OwnerHealth->NotifyDamageDealt(HitActor, ActualDamage);
 			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("⚠️ Owner %s has no HealthComponent to notify damage dealt"), *OwnerActor->GetName());
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("⚠️ Projectile has no OwnerActor to notify damage dealt"));
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("💥 Projectile hit %s → Damage: %.1f (Distance: %.0fcm)"),
@@ -379,7 +400,7 @@ void AProjectileBase::ApplyDamageToActor(AActor* HitActor, const FVector& HitLoc
 	}
 	else
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("⚠️ Projectile hit %s (no HealthComponent)"), *HitActor->GetName());
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ Projectile hit %s (no HealthComponent)"), *HitActor->GetName());
 	}
 }
 
