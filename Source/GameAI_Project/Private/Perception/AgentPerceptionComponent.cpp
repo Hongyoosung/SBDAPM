@@ -4,6 +4,7 @@
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "Core/SimulationManagerGameMode.h"
+#include "Combat/HealthComponent.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
@@ -158,11 +159,20 @@ void UAgentPerceptionComponent::UpdateTrackedEnemies()
 	TArray<AActor*> PerceivedActors;
 	GetCurrentlyPerceivedActors(nullptr, PerceivedActors);
 
-	// Filter for enemies only
+	// Filter for enemies only (must be alive)
 	for (AActor* Actor : PerceivedActors)
 	{
 		if (IsActorEnemy(Actor))
 		{
+			// Skip dead enemies
+			UHealthComponent* HealthComp = Actor->FindComponentByClass<UHealthComponent>();
+			if (HealthComp && HealthComp->IsDead())
+			{
+				// Remove from reported enemies so they can be re-reported if respawned
+				ReportedEnemies.Remove(Actor);
+				continue;
+			}
+
 			TrackedEnemies.Add(Actor);
 		}
 	}

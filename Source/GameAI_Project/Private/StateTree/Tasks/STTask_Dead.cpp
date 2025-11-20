@@ -8,6 +8,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Animation/AnimInstance.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 EStateTreeRunStatus FSTTask_Dead::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -182,20 +184,39 @@ void FSTTask_Dead::DestroyActor(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	AAIController* AIController = InstanceData.Context.AIController;
+	APawn* Pawn = AIController ? AIController->GetPawn() : nullptr;
 	if (!Pawn)
 	{
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Destroying actor %s"), *Pawn->GetName());
+	UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Scheduling destruction for actor %s"), *Pawn->GetName());
 
-	// Unpossess first
-	if (InstanceData.Context.AIController)
+	// IMPORTANT: Defer destruction to next frame to avoid modifying StateTree while it's ticking
+	// This prevents the "Ensure condition failed: Exec.CurrentPhase == EStateTreeUpdatePhase::Unset" error
+	UWorld* World = Pawn->GetWorld();
+	if (World)
 	{
-		InstanceData.Context.AIController->UnPossess();
-	}
+		// Capture weak references to avoid issues if objects are already destroyed
+		TWeakObjectPtr<AAIController> WeakController = AIController;
+		TWeakObjectPtr<APawn> WeakPawn = Pawn;
 
-	// Destroy the pawn
-	Pawn->Destroy();
+		FTimerHandle TimerHandle;
+		World->GetTimerManager().SetTimerForNextTick([WeakController, WeakPawn]()
+		{
+			// Unpossess first (this triggers StopStateTree safely outside of tick)
+			if (WeakController.IsValid())
+			{
+				WeakController->UnPossess();
+			}
+
+			// Destroy the pawn
+			if (WeakPawn.IsValid())
+			{
+				UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Destroying actor %s"), *WeakPawn->GetName());
+				WeakPawn->Destroy();
+			}
+		});
+	}
 }

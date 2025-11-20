@@ -3,12 +3,59 @@
 #include "StateTree/Tasks/STTask_ExecuteRetreat.h"
 #include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Combat/WeaponComponent.h"
+#include "Combat/HealthComponent.h"
 #include "AIController.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
+
+namespace
+{
+	// Helper to check if target actor is valid and alive
+	bool IsTargetValid(AActor* Target)
+	{
+		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
+		{
+			return false;
+		}
+
+		// Check if target has health component and is alive
+		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
+		{
+			return HealthComp->IsAlive();
+		}
+
+		return true; // No health component, assume valid
+	}
+
+	// Helper to find nearest valid enemy from visible enemies
+	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
+	{
+		if (!FromPawn) return nullptr;
+
+		FVector MyLocation = FromPawn->GetActorLocation();
+		AActor* NearestEnemy = nullptr;
+		float NearestDistance = FLT_MAX;
+
+		for (AActor* Enemy : VisibleEnemies)
+		{
+			if (IsTargetValid(Enemy))
+			{
+				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
+				if (Distance < NearestDistance)
+				{
+					NearestDistance = Distance;
+					NearestEnemy = Enemy;
+				}
+			}
+		}
+
+		return NearestEnemy;
+	}
+}
 
 EStateTreeRunStatus FSTTask_ExecuteRetreat::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -354,8 +401,26 @@ void FSTTask_ExecuteRetreat::ProvideSuppressiveFire(FStateTreeExecutionContext& 
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.Context.PrimaryTarget || !InstanceData.Context.bWeaponReady)
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn)
 	{
+		return;
+	}
+
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
+
+	if (!InstanceData.Context.PrimaryTarget)
+	{
+		// No valid targets - clear focus
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->ClearFocus(EAIFocusPriority::Gameplay);
+		}
 		return;
 	}
 
@@ -365,6 +430,30 @@ void FSTTask_ExecuteRetreat::ProvideSuppressiveFire(FStateTreeExecutionContext& 
 		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
 	}
 
-	// Fire weapon (lower accuracy due to moving)
-	// TODO: Trigger weapon fire at reduced rate
+	// Perform LOS check
+	bool bHasLOS = false;
+	UWorld* World = Pawn->GetWorld();
+	if (World)
+	{
+		FHitResult HitResult;
+		FCollisionQueryParams QueryParams;
+		QueryParams.AddIgnoredActor(Pawn);
+
+		FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
+		FVector EndLoc = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+
+		bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
+		bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+	}
+
+	// Fire weapon while retreating (lower accuracy due to moving)
+	UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>();
+	if (WeaponComp && WeaponComp->CanFire() && bHasLOS)
+	{
+		// Fire without prediction for suppressive effect while moving
+		WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, false);
+		UE_LOG(LogTemp, Log, TEXT("[RETREAT TASK] '%s': Suppressive fire at '%s'"),
+			*Pawn->GetName(),
+			*InstanceData.Context.PrimaryTarget->GetName());
+	}
 }

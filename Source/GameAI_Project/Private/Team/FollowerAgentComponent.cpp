@@ -612,11 +612,33 @@ void UFollowerAgentComponent::DrawDebugInfo()
 
 	DrawDebugString(World, FollowerPos + FVector(0, 0, 120), StateText, nullptr, FColor::Cyan, 0.1f, true);
 
-	// Draw line to command target location
-	if (IsCommandValid() && !CurrentCommand.TargetLocation.IsZero())
+	// Draw line to command target (actor or location)
+	if (IsCommandValid())
 	{
-		DrawDebugLine(World, FollowerPos, CurrentCommand.TargetLocation, FColor::Yellow, false, 0.1f, 0, 2.0f);
-		DrawDebugSphere(World, CurrentCommand.TargetLocation, 50.0f, 8, FColor::Yellow, false, 0.1f);
+		// Check if target actor exists and is alive
+		if (CurrentCommand.TargetActor && IsValid(CurrentCommand.TargetActor))
+		{
+			// Check if target has health component and is alive
+			UHealthComponent* TargetHealth = CurrentCommand.TargetActor->FindComponentByClass<UHealthComponent>();
+			bool bTargetAlive = !TargetHealth || TargetHealth->IsAlive();
+
+			if (bTargetAlive)
+			{
+				FVector TargetPos = CurrentCommand.TargetActor->GetActorLocation();
+				DrawDebugLine(World, FollowerPos, TargetPos, FColor::Red, false, 0.1f, 0, 2.0f);
+				DrawDebugSphere(World, TargetPos, 50.0f, 8, FColor::Red, false, 0.1f);
+
+				// Draw target name
+				FString TargetName = FString::Printf(TEXT("Target: %s"), *CurrentCommand.TargetActor->GetName());
+				DrawDebugString(World, TargetPos + FVector(0, 0, 100), TargetName, nullptr, FColor::Red, 0.1f, true);
+			}
+		}
+		// Draw to target location if no valid actor
+		else if (!CurrentCommand.TargetLocation.IsZero())
+		{
+			DrawDebugLine(World, FollowerPos, CurrentCommand.TargetLocation, FColor::Yellow, false, 0.1f, 0, 2.0f);
+			DrawDebugSphere(World, CurrentCommand.TargetLocation, 50.0f, 8, FColor::Yellow, false, 0.1f);
+		}
 	}
 
 	// Draw line to team leader

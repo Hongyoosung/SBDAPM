@@ -100,10 +100,10 @@ float UHealthComponent::TakeDamage(float DamageAmount, AActor* Instigator, AActo
 			*GetOwner()->GetName(), ActualDamage, FTacticalRewards::TAKE_DAMAGE);
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("💥 %s took %.1f damage (%.1f mitigated) from %s → HP: %.1f/%.1f"),
+	/*UE_LOG(LogTemp, Warning, TEXT("💥 %s took %.1f damage (%.1f mitigated) from %s → HP: %.1f/%.1f"),
 		*GetOwner()->GetName(), ActualDamage, DamageAmount - MitigatedDamage,
 		Instigator ? *Instigator->GetName() : TEXT("Unknown"),
-		CurrentHealth, MaxHealth);
+		CurrentHealth, MaxHealth);*/
 
 	// Check for death
 	if (CurrentHealth <= 0.0f)

@@ -210,7 +210,7 @@ void AProjectileBase::Explode()
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("💥 Projectile exploded at %s"), *GetActorLocation().ToString());
+	//UE_LOG(LogTemp, Warning, TEXT("💥 Projectile exploded at %s"), *GetActorLocation().ToString());
 
 	SpawnImpactEffects(GetActorLocation(), FVector::UpVector);
 	DeactivateProjectile();
@@ -247,7 +247,6 @@ void AProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor*
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("💥 Projectile hit___________ %s"), *OtherActor->GetName());
 
 	// Get hit location and normal from HitResult
 	FVector HitLocation = Hit.ImpactPoint;
@@ -292,8 +291,8 @@ void AProjectileBase::OnLifetimeExpired()
 		return;
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("Projectile lifetime expired (%.1fs, %.0fcm traveled)"),
-		Lifetime, DistanceTraveled);
+	/*UE_LOG(LogTemp, Verbose, TEXT("Projectile lifetime expired (%.1fs, %.0fcm traveled)"),
+		Lifetime, DistanceTraveled);*/
 
 	OnProjectileExpired_Delegate.Broadcast();
 	DeactivateProjectile();
@@ -359,10 +358,6 @@ void AProjectileBase::ApplyDamageToActor(AActor* HitActor, const FVector& HitLoc
 		
 		return;
 	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("🔫 Applying damage to %s"), *HitActor->GetName());
-	}
 
 	// Calculate final damage
 	float FinalDamage = CalculateDamageWithFalloff(DistanceTraveled);
@@ -395,8 +390,8 @@ void AProjectileBase::ApplyDamageToActor(AActor* HitActor, const FVector& HitLoc
 			UE_LOG(LogTemp, Warning, TEXT("⚠️ Projectile has no OwnerActor to notify damage dealt"));
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("💥 Projectile hit %s → Damage: %.1f (Distance: %.0fcm)"),
-			*HitActor->GetName(), ActualDamage, DistanceTraveled);
+		/*UE_LOG(LogTemp, Log, TEXT("💥 Projectile hit %s → Damage: %.1f (Distance: %.0fcm)"),
+			*HitActor->GetName(), ActualDamage, DistanceTraveled);*/
 	}
 	else
 	{

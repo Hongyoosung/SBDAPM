@@ -4,6 +4,7 @@
 #include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Combat/WeaponComponent.h"
+#include "Combat/HealthComponent.h"
 #include "AIController.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Pawn.h"
@@ -11,6 +12,52 @@
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
 #include "RL/RLPolicyNetwork.h"
+#include "Navigation/PathFollowingComponent.h"
+
+namespace
+{
+	// Helper to check if target actor is valid and alive
+	bool IsTargetValid(AActor* Target)
+	{
+		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
+		{
+			return false;
+		}
+
+		// Check if target has health component and is alive
+		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
+		{
+			return HealthComp->IsAlive();
+		}
+
+		return true; // No health component, assume valid
+	}
+
+	// Helper to find nearest valid enemy from visible enemies
+	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
+	{
+		if (!FromPawn) return nullptr;
+
+		FVector MyLocation = FromPawn->GetActorLocation();
+		AActor* NearestEnemy = nullptr;
+		float NearestDistance = FLT_MAX;
+
+		for (AActor* Enemy : VisibleEnemies)
+		{
+			if (IsTargetValid(Enemy))
+			{
+				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
+				if (Distance < NearestDistance)
+				{
+					NearestDistance = Distance;
+					NearestEnemy = Enemy;
+				}
+			}
+		}
+
+		return NearestEnemy;
+	}
+}
 
 EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -159,6 +206,23 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 		return;
 	}
 
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		// Try to find a new target from visible enemies
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		if (NewTarget)
+		{
+			InstanceData.Context.PrimaryTarget = NewTarget;
+			UE_LOG(LogTemp, Log, TEXT("[ASSAULT TASK] '%s': Target died, switching to '%s'"),
+				*Pawn->GetName(), *NewTarget->GetName());
+		}
+		else
+		{
+			InstanceData.Context.PrimaryTarget = nullptr;
+		}
+	}
+
 	// Move toward target aggressively
 	if (InstanceData.Context.PrimaryTarget)
 	{
@@ -169,6 +233,12 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 		// Set high speed multiplier and apply to movement component
 		InstanceData.Context.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
 
+		// Apply speed multiplier to CharacterMovementComponent
+		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+		{
+			float BaseSpeed = 600.0f; // Default base speed
+			MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+		}
 
 		// Move directly toward target - only update if destination changed significantly
 		if (InstanceData.Context.AIController)
@@ -176,7 +246,18 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 			float DestinationDelta = FVector::Dist(InstanceData.Context.MovementDestination, TargetLocation);
 			if (DestinationDelta > 200.0f || InstanceData.Context.MovementDestination == FVector::ZeroVector)
 			{
-				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(TargetLocation, 100.0f);
+				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(TargetLocation, 50.0f);
+
+				// Log movement result for debugging
+				if (MoveResult == EPathFollowingRequestResult::Failed)
+				{
+					UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': MoveToLocation FAILED - NavMesh issue?"), *Pawn->GetName());
+				}
+				else if (MoveResult == EPathFollowingRequestResult::AlreadyAtGoal)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Already at goal (dist=%.1f)"), *Pawn->GetName(), Distance);
+				}
+
 				InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
 				InstanceData.Context.MovementDestination = TargetLocation;
 			}
@@ -280,8 +361,22 @@ void FSTTask_ExecuteAssault::ExecuteCautiousAdvance(FStateTreeExecutionContext& 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
+
 	// Advance more slowly, prefer cover
 	InstanceData.Context.MovementSpeedMultiplier = 1.0f;
+
+	// Apply speed to CharacterMovementComponent
+	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+	{
+		float BaseSpeed = 600.0f;
+		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+	}
 
 	if (InstanceData.Context.PrimaryTarget)
 	{
@@ -333,7 +428,16 @@ void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Co
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
-	if (!Pawn || !InstanceData.Context.PrimaryTarget) return;
+	if (!Pawn) return;
+
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
+
+	if (!InstanceData.Context.PrimaryTarget) return;
 
 	FVector CurrentLocation = Pawn->GetActorLocation();
 	FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
@@ -366,6 +470,13 @@ void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Co
 
 	InstanceData.Context.bIsMoving = true;
 	InstanceData.Context.MovementSpeedMultiplier = 1.2f; // Slightly faster for flanking
+
+	// Apply speed to CharacterMovementComponent
+	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+	{
+		float BaseSpeed = 600.0f;
+		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+	}
 }
 
 void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext& Context, float DeltaTime) const
@@ -373,7 +484,16 @@ void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext&
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
-	if (!Pawn || !InstanceData.Context.PrimaryTarget) return;
+	if (!Pawn) return;
+
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
+
+	if (!InstanceData.Context.PrimaryTarget) return;
 
 	float DistanceToTarget = InstanceData.Context.DistanceToPrimaryTarget;
 	float OptimalRange = InstanceData.OptimalEngagementRange;
@@ -490,6 +610,13 @@ void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Co
 	InstanceData.Context.bIsMoving = false;
 	InstanceData.Context.MovementSpeedMultiplier = 0.0f;
 
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
+
 	// Focus on target and fire
 	if (InstanceData.Context.PrimaryTarget)
 	{
@@ -556,6 +683,13 @@ void FSTTask_ExecuteAssault::ExecuteSeekCover(FStateTreeExecutionContext& Contex
 		}
 		InstanceData.Context.bIsMoving = true;
 		InstanceData.Context.MovementSpeedMultiplier = 1.3f; // Move quickly to cover
+
+		// Apply speed to CharacterMovementComponent
+		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+		{
+			float BaseSpeed = 600.0f;
+			MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+		}
 	}
 	else
 	{
@@ -570,6 +704,13 @@ void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& 
 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
+
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
 
 	FVector CurrentLocation = Pawn->GetActorLocation();
 	FVector RetreatDirection;
@@ -611,6 +752,13 @@ void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& 
 	InstanceData.Context.bIsMoving = true;
 	InstanceData.Context.MovementSpeedMultiplier = 1.2f;
 
+	// Apply speed to CharacterMovementComponent
+	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+	{
+		float BaseSpeed = 600.0f;
+		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+	}
+
 	// Fire while retreating if has LOS
 	if (InstanceData.Context.PrimaryTarget)
 	{
@@ -630,6 +778,13 @@ void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
+
+	// Validate and update primary target if needed
+	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	{
+		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		InstanceData.Context.PrimaryTarget = NewTarget;
+	}
 
 	// Minimal movement - stay in position or move slowly
 	InstanceData.Context.MovementSpeedMultiplier = 0.3f;

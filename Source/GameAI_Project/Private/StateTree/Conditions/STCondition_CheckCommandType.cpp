@@ -11,11 +11,11 @@ bool FSTCondition_CheckCommandType::TestCondition(FStateTreeExecutionContext& Co
 	const bool bIsCommandValid = InstanceData.bIsCommandValid;
 
 	// DEBUG: Log condition evaluation (Warning level for visibility)
-	/*UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] Evaluating: Valid=%d, Type=%s, Accepted=%d types, RequireValid=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] Evaluating: Valid=%d, Type=%s, Accepted=%d types, RequireValid=%d"),
 		bIsCommandValid,
 		*UEnum::GetValueAsString(CurrentCommandType),
 		InstanceData.AcceptedCommandTypes.Num(),
-		InstanceData.bRequireValidCommand);*/
+		InstanceData.bRequireValidCommand);
 
 	// Log accepted types for debugging
 	if (InstanceData.AcceptedCommandTypes.Num() > 0)
@@ -25,11 +25,11 @@ bool FSTCondition_CheckCommandType::TestCondition(FStateTreeExecutionContext& Co
 		{
 			AcceptedStr += UEnum::GetValueAsString(Type) + TEXT(", ");
 		}
-		//UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] Accepted types: [%s]"), *AcceptedStr);
+		UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] Accepted types: [%s]"), *AcceptedStr);
 	}
 	else
 	{
-		//UE_LOG(LogTemp, Error, TEXT("[CHECK COMMAND TYPE] No AcceptedCommandTypes configured!"));
+		UE_LOG(LogTemp, Error, TEXT("[CHECK COMMAND TYPE] No AcceptedCommandTypes configured!"));
 		return InstanceData.bInvertCondition;
 	}
 
@@ -44,12 +44,12 @@ bool FSTCondition_CheckCommandType::TestCondition(FStateTreeExecutionContext& Co
 	bool bMatches = InstanceData.AcceptedCommandTypes.Contains(CurrentCommandType);
 
 	bool bResult = InstanceData.bInvertCondition ? !bMatches : bMatches;
-	/*UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] %s (CommandType=%s, Matches=%d, Inverted=%d) -> Result=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[CHECK COMMAND TYPE] %s (CommandType=%s, Matches=%d, Inverted=%d) -> Result=%d"),
 		bResult ? TEXT("PASS") : TEXT("FAIL"),
 		*UEnum::GetValueAsString(CurrentCommandType),
 		bMatches,
 		InstanceData.bInvertCondition,
-		bResult);*/
+		bResult);
 
 	return bResult;
 }

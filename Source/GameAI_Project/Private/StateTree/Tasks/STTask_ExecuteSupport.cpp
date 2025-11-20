@@ -3,9 +3,58 @@
 #include "StateTree/Tasks/STTask_ExecuteSupport.h"
 #include "StateTree/FollowerStateTreeContext.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Combat/WeaponComponent.h"
+#include "Combat/HealthComponent.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Navigation/PathFollowingComponent.h"
+
+namespace
+{
+	// Helper to check if target actor is valid and alive
+	bool IsTargetValid(AActor* Target)
+	{
+		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
+		{
+			return false;
+		}
+
+		// Check if target has health component and is alive
+		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
+		{
+			return HealthComp->IsAlive();
+		}
+
+		return true; // No health component, assume valid
+	}
+
+	// Helper to find nearest valid enemy from visible enemies
+	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
+	{
+		if (!FromPawn) return nullptr;
+
+		FVector MyLocation = FromPawn->GetActorLocation();
+		AActor* NearestEnemy = nullptr;
+		float NearestDistance = FLT_MAX;
+
+		for (AActor* Enemy : VisibleEnemies)
+		{
+			if (IsTargetValid(Enemy))
+			{
+				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
+				if (Distance < NearestDistance)
+				{
+					NearestDistance = Distance;
+					NearestEnemy = Enemy;
+				}
+			}
+		}
+
+		return NearestEnemy;
+	}
+}
 
 EStateTreeRunStatus FSTTask_ExecuteSupport::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -18,13 +67,22 @@ EStateTreeRunStatus FSTTask_ExecuteSupport::EnterState(FStateTreeExecutionContex
 		return EStateTreeRunStatus::Failed;
 	}
 
+	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
+	FString TargetName = InstanceData.Context.PrimaryTarget ? InstanceData.Context.PrimaryTarget->GetName() : TEXT("None");
+	FString CommandTargetName = InstanceData.Context.CurrentCommand.TargetActor ? InstanceData.Context.CurrentCommand.TargetActor->GetName() : TEXT("None");
+
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [SUPPORT TASK] '%s': ENTERED support state - Target: %s, CommandTarget: %s, VisibleEnemies: %d, Tactic: %s"),
+		*PawnName,
+		*TargetName,
+		*CommandTargetName,
+		InstanceData.Context.VisibleEnemies.Num(),
+		*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction));
+
 	// Reset timers
 	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.Context.TimeInTacticalAction = 0.0f;
 	InstanceData.Context.ActionProgress = 0.0f;
-
-	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteSupport: Starting support with tactic: %d"),
-		static_cast<int32>(InstanceData.Context.CurrentTacticalAction));
 
 	return EStateTreeRunStatus::Running;
 }
@@ -91,7 +149,7 @@ void FSTTask_ExecuteSupport::ExitState(FStateTreeExecutionContext& Context, cons
 void FSTTask_ExecuteSupport::ExecuteTacticalAction(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
-
+	
 	switch (InstanceData.Context.CurrentTacticalAction)
 	{
 	case ETacticalAction::ProvideCoveringFire:
@@ -124,32 +182,89 @@ void FSTTask_ExecuteSupport::ExecuteProvideCoveringFire(FStateTreeExecutionConte
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
+
 	// Stay in position and provide covering fire
 	if (InstanceData.Context.AIController)
 	{
 		InstanceData.Context.AIController->StopMovement();
 	}
 
-	// Focus on primary target or sweep visible enemies
-	if (InstanceData.Context.PrimaryTarget && InstanceData.Context.bWeaponReady)
+	// Determine target - validate primary target first
+	AActor* CurrentTarget = nullptr;
+
+	if (IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		if (InstanceData.Context.AIController)
-		{
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
-		}
+		CurrentTarget = InstanceData.Context.PrimaryTarget;
 	}
 	else if (InstanceData.Context.VisibleEnemies.Num() > 0)
 	{
-		// Rotate through visible enemies to suppress area
-		int32 TargetIndex = static_cast<int32>(InstanceData.Context.TimeInTacticalAction) % InstanceData.Context.VisibleEnemies.Num();
-		if (InstanceData.Context.VisibleEnemies.IsValidIndex(TargetIndex) &&
-			InstanceData.Context.VisibleEnemies[TargetIndex])
+		// Primary target invalid/dead - find nearest valid enemy
+		CurrentTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+
+		// If still no valid target, rotate through visible enemies (they might not have health components)
+		if (!CurrentTarget)
 		{
-			if (InstanceData.Context.AIController)
+			int32 TargetIndex = static_cast<int32>(InstanceData.Context.TimeInTacticalAction) % InstanceData.Context.VisibleEnemies.Num();
+			if (InstanceData.Context.VisibleEnemies.IsValidIndex(TargetIndex))
 			{
-				InstanceData.Context.AIController->SetFocus(InstanceData.Context.VisibleEnemies[TargetIndex]);
+				AActor* CandidateTarget = InstanceData.Context.VisibleEnemies[TargetIndex];
+				if (CandidateTarget && CandidateTarget->IsValidLowLevel() && !CandidateTarget->IsPendingKillPending())
+				{
+					CurrentTarget = CandidateTarget;
+				}
 			}
 		}
+
+		// Update primary target to the new valid enemy
+		if (CurrentTarget)
+		{
+			InstanceData.Context.PrimaryTarget = CurrentTarget;
+		}
+	}
+
+	if (CurrentTarget)
+	{
+		// Focus on target
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->SetFocus(CurrentTarget);
+		}
+
+		// Perform LOS check
+		bool bHasLOS = false;
+		UWorld* World = Pawn->GetWorld();
+		if (World)
+		{
+			FHitResult HitResult;
+			FCollisionQueryParams QueryParams;
+			QueryParams.AddIgnoredActor(Pawn);
+
+			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = CurrentTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+
+			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
+			bHasLOS = !bHit || HitResult.GetActor() == CurrentTarget;
+		}
+
+		// Fire weapon at target
+		UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>();
+		if (WeaponComp && WeaponComp->CanFire() && bHasLOS)
+		{
+			WeaponComp->FireAtTarget(CurrentTarget, true);
+			UE_LOG(LogTemp, Log, TEXT("[SUPPORT TASK] '%s': Covering fire at '%s'"),
+				*Pawn->GetName(),
+				*CurrentTarget->GetName());
+		}
+	}
+	else
+	{
+		// No valid targets - clear focus and idle (support mission complete for now)
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->ClearFocus(EAIFocusPriority::Gameplay);
+		}
+		InstanceData.Context.PrimaryTarget = nullptr;
+		// Don't spam warnings - this is a normal state when all enemies are dead
 	}
 
 	InstanceData.Context.bIsMoving = false;
@@ -162,33 +277,83 @@ void FSTTask_ExecuteSupport::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
-	// Similar to covering fire but with higher volume, lower accuracy intent
-	// Stop movement
+	// Stop movement for suppression
 	if (InstanceData.Context.AIController)
 	{
 		InstanceData.Context.AIController->StopMovement();
 	}
 
-	// Prioritize suppressing multiple enemies
+	// Determine target - prioritize cycling through multiple valid enemies
+	AActor* CurrentTarget = nullptr;
+
 	if (InstanceData.Context.VisibleEnemies.Num() > 0)
 	{
-		// Rapidly cycle through targets for suppression
-		int32 TargetIndex = (static_cast<int32>(InstanceData.Context.TimeInTacticalAction * 2.0f)) % InstanceData.Context.VisibleEnemies.Num();
-		if (InstanceData.Context.VisibleEnemies.IsValidIndex(TargetIndex) &&
-			InstanceData.Context.VisibleEnemies[TargetIndex])
+		// Build list of valid enemies only
+		TArray<AActor*> ValidEnemies;
+		for (AActor* Enemy : InstanceData.Context.VisibleEnemies)
 		{
-			if (InstanceData.Context.AIController)
+			if (IsTargetValid(Enemy))
 			{
-				InstanceData.Context.AIController->SetFocus(InstanceData.Context.VisibleEnemies[TargetIndex]);
+				ValidEnemies.Add(Enemy);
 			}
 		}
+
+		if (ValidEnemies.Num() > 0)
+		{
+			// Rapidly cycle through valid targets for suppression
+			int32 TargetIndex = (static_cast<int32>(InstanceData.Context.TimeInTacticalAction * 2.0f)) % ValidEnemies.Num();
+			CurrentTarget = ValidEnemies[TargetIndex];
+		}
 	}
-	else if (InstanceData.Context.PrimaryTarget)
+
+	// Fall back to primary target if no visible enemies
+	if (!CurrentTarget && IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
+		CurrentTarget = InstanceData.Context.PrimaryTarget;
+	}
+
+	if (CurrentTarget)
+	{
+		// Focus on target
 		if (InstanceData.Context.AIController)
 		{
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			InstanceData.Context.AIController->SetFocus(CurrentTarget);
 		}
+
+		// Perform LOS check
+		bool bHasLOS = false;
+		UWorld* World = Pawn->GetWorld();
+		if (World)
+		{
+			FHitResult HitResult;
+			FCollisionQueryParams QueryParams;
+			QueryParams.AddIgnoredActor(Pawn);
+
+			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = CurrentTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+
+			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
+			bHasLOS = !bHit || HitResult.GetActor() == CurrentTarget;
+		}
+
+		// Fire weapon - suppressive fire (no prediction for area spray)
+		UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>();
+		if (WeaponComp && WeaponComp->CanFire() && bHasLOS)
+		{
+			WeaponComp->FireAtTarget(CurrentTarget, false); // No prediction for suppressive effect
+			UE_LOG(LogTemp, Log, TEXT("[SUPPORT TASK] '%s': Suppressive fire at '%s'"),
+				*Pawn->GetName(),
+				*CurrentTarget->GetName());
+		}
+	}
+	else
+	{
+		// No valid targets - clear focus
+		if (InstanceData.Context.AIController)
+		{
+			InstanceData.Context.AIController->ClearFocus(EAIFocusPriority::Gameplay);
+		}
+		InstanceData.Context.PrimaryTarget = nullptr;
 	}
 
 	InstanceData.Context.bIsMoving = false;
@@ -215,8 +380,21 @@ void FSTTask_ExecuteSupport::ExecuteReload(FStateTreeExecutionContext& Context, 
 		{
 			if (InstanceData.Context.AIController)
 			{
-				InstanceData.Context.AIController->MoveToLocation(
+				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(
 					InstanceData.Context.NearestCoverLocation, 50.0f);
+
+				// Log movement result
+				if (MoveResult == EPathFollowingRequestResult::Failed)
+				{
+					UE_LOG(LogTemp, Error, TEXT("[SUPPORT TASK] '%s': MoveToLocation for cover FAILED"), *Pawn->GetName());
+				}
+
+				// Apply speed for cover-seeking
+				if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+				{
+					float BaseSpeed = 600.0f;
+					MovementComp->MaxWalkSpeed = BaseSpeed * 1.3f; // Fast movement to cover
+				}
 			}
 			InstanceData.Context.bIsMoving = true;
 			return;

@@ -414,8 +414,11 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
         TeamObs.bFlanked ? TEXT("Yes") : TEXT("No"),
         TeamObs.DistanceToObjective);
 
-    // Rule-based command generation (placeholder for full MCTS)
-    // This implements simple tactical AI based on team situation
+    // Rule-based command generation with tactical diversity
+    // Assign different roles to followers based on team composition
+
+    int32 FollowerIndex = 0;
+    int32 NumFollowers = Followers.Num();
 
     for (AActor* Follower : Followers)
     {
@@ -432,7 +435,35 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
                 // Outnumbered and low health - retreat
                 Command.CommandType = EStrategicCommandType::Retreat;
                 Command.Priority = 9;
-                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - RETREAT (outnumbered, low health)"), *Follower->GetName());
+
+                // Assign nearest enemy as target (to retreat away from and suppress)
+                AActor* NearestEnemy = nullptr;
+                float NearestDistance = FLT_MAX;
+                FVector FollowerLocation = Follower->GetActorLocation();
+
+                for (AActor* Enemy : TeamObs.TrackedEnemies)
+                {
+                    if (Enemy && Enemy->IsValidLowLevel())
+                    {
+                        float Distance = FVector::Dist(FollowerLocation, Enemy->GetActorLocation());
+                        if (Distance < NearestDistance)
+                        {
+                            NearestDistance = Distance;
+                            NearestEnemy = Enemy;
+                        }
+                    }
+                }
+
+                if (NearestEnemy)
+                {
+                    Command.TargetActor = NearestEnemy;
+                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - RETREAT - Target: %s (Distance: %.1f)"),
+                        *Follower->GetName(), *NearestEnemy->GetName(), NearestDistance);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - RETREAT (no valid target found)"), *Follower->GetName());
+                }
             }
             else if (TeamObs.bFlanked)
             {
@@ -440,13 +471,137 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
                 Command.CommandType = EStrategicCommandType::Regroup;
                 Command.TargetLocation = TeamObs.TeamCentroid;
                 Command.Priority = 8;
-                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - REGROUP (flanked)"), *Follower->GetName());
+                UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - REGROUP (flanked)"), *Follower->GetName());
             }
             else if (TeamObs.AverageTeamHealth > 70.0f && !TeamObs.bOutnumbered)
             {
-                // Good health, not outnumbered - assault
-                Command.CommandType = EStrategicCommandType::Assault;
-                Command.Priority = 7;
+                // Good health, not outnumbered - diversify tactics
+                // Calculate role distribution based on team size and enemy count
+                float RoleRatio = static_cast<float>(FollowerIndex) / FMath::Max(1, NumFollowers - 1);
+
+                // Role assignment:
+                // - First ~50% assault (aggressive engagement)
+                // - Next ~30% support (suppression/assistance)
+                // - Last ~20% defend (cover/overwatch)
+                int32 NumAssault = FMath::CeilToInt(NumFollowers * 0.5f);
+                int32 NumSupport = FMath::CeilToInt(NumFollowers * 0.3f);
+
+                if (FollowerIndex < NumAssault)
+                {
+                    // ASSAULT role - engage enemies directly
+                    Command.CommandType = EStrategicCommandType::Assault;
+                    Command.Priority = 7;
+
+                    // Assign nearest enemy as target
+                    AActor* NearestEnemy = nullptr;
+                    float NearestDistance = FLT_MAX;
+                    FVector FollowerLocation = Follower->GetActorLocation();
+
+                    for (AActor* Enemy : TeamObs.TrackedEnemies)
+                    {
+                        if (Enemy && Enemy->IsValidLowLevel())
+                        {
+                            float Distance = FVector::Dist(FollowerLocation, Enemy->GetActorLocation());
+                            if (Distance < NearestDistance)
+                            {
+                                NearestDistance = Distance;
+                                NearestEnemy = Enemy;
+                            }
+                        }
+                    }
+
+                    if (NearestEnemy)
+                    {
+                        Command.TargetActor = NearestEnemy;
+                        Command.TargetLocation = NearestEnemy->GetActorLocation();
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - ASSAULT - Target: %s (Distance: %.1f)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers, *NearestEnemy->GetName(), NearestDistance);
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - ASSAULT (no valid target found)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers);
+                    }
+                }
+                else if (FollowerIndex < NumAssault + NumSupport)
+                {
+                    // SUPPORT role - provide fire support
+                    Command.CommandType = EStrategicCommandType::Support;
+                    Command.Priority = 6;
+                    Command.TargetLocation = TeamObs.TeamCentroid;
+
+                    // Assign nearest enemy as target for fire support
+                    AActor* NearestEnemy = nullptr;
+                    float NearestDistance = FLT_MAX;
+                    FVector FollowerLocation = Follower->GetActorLocation();
+
+                    for (AActor* Enemy : TeamObs.TrackedEnemies)
+                    {
+                        if (Enemy && Enemy->IsValidLowLevel())
+                        {
+                            float Distance = FVector::Dist(FollowerLocation, Enemy->GetActorLocation());
+                            if (Distance < NearestDistance)
+                            {
+                                NearestDistance = Distance;
+                                NearestEnemy = Enemy;
+                            }
+                        }
+                    }
+
+                    if (NearestEnemy)
+                    {
+                        Command.TargetActor = NearestEnemy;
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - SUPPORT - Target: %s (Distance: %.1f)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers, *NearestEnemy->GetName(), NearestDistance);
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - SUPPORT (no valid target found)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers);
+                    }
+                }
+                else
+                {
+                    // DEFEND role - take cover and provide overwatch
+                    Command.CommandType = EStrategicCommandType::TakeCover;
+                    Command.Priority = 6;
+
+                    // Assign nearest enemy as target for overwatch
+                    AActor* NearestEnemy = nullptr;
+                    float NearestDistance = FLT_MAX;
+                    FVector FollowerLocation = Follower->GetActorLocation();
+
+                    for (AActor* Enemy : TeamObs.TrackedEnemies)
+                    {
+                        if (Enemy && Enemy->IsValidLowLevel())
+                        {
+                            float Distance = FVector::Dist(FollowerLocation, Enemy->GetActorLocation());
+                            if (Distance < NearestDistance)
+                            {
+                                NearestDistance = Distance;
+                                NearestEnemy = Enemy;
+                            }
+                        }
+                    }
+
+                    if (NearestEnemy)
+                    {
+                        Command.TargetActor = NearestEnemy;
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - TAKE COVER - Target: %s (Distance: %.1f)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers, *NearestEnemy->GetName(), NearestDistance);
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s [%d/%d] - TAKE COVER (no valid target found)"),
+                            *Follower->GetName(), FollowerIndex + 1, NumFollowers);
+                    }
+                }
+            }
+            else
+            {
+                // Default combat - take cover and suppress
+                Command.CommandType = EStrategicCommandType::TakeCover;
+                Command.Priority = 6;
 
                 // Assign nearest enemy as target
                 AActor* NearestEnemy = nullptr;
@@ -469,21 +624,13 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
                 if (NearestEnemy)
                 {
                     Command.TargetActor = NearestEnemy;
-                    Command.TargetLocation = NearestEnemy->GetActorLocation();
-                    UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ASSAULT (healthy, advantage) - Target: %s (Distance: %.1f)"),
+                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - TAKE COVER - Target: %s (Distance: %.1f)"),
                         *Follower->GetName(), *NearestEnemy->GetName(), NearestDistance);
                 }
                 else
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - ASSAULT (no valid target found)"), *Follower->GetName());
+                    UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - TAKE COVER (no valid target found)"), *Follower->GetName());
                 }
-            }
-            else
-            {
-                // Default combat - take cover and suppress
-                Command.CommandType = EStrategicCommandType::TakeCover;
-                Command.Priority = 6;
-                UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - TAKE COVER (neutral combat)"), *Follower->GetName());
             }
         }
         else if (TeamObs.AverageTeamHealth < 50.0f)
@@ -491,14 +638,14 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
             // NO ENEMIES, LOW HEALTH - hold position and recover
             Command.CommandType = EStrategicCommandType::HoldPosition;
             Command.Priority = 5;
-            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - HOLD POSITION (recovering)"), *Follower->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - HOLD POSITION (recovering)"), *Follower->GetName());
         }
         else if (TeamObs.DistanceToObjective > 1000.0f)
         {
             // FAR FROM OBJECTIVE - advance
             Command.CommandType = EStrategicCommandType::Advance;
             Command.Priority = 5;
-            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - ADVANCE (toward objective)"), *Follower->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - ADVANCE (toward objective)"), *Follower->GetName());
         }
         else if (TeamObs.FormationCoherence < 0.5f)
         {
@@ -506,17 +653,18 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
             Command.CommandType = EStrategicCommandType::Regroup;
             Command.TargetLocation = TeamObs.TeamCentroid;
             Command.Priority = 4;
-            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - REGROUP (formation broken)"), *Follower->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - REGROUP (formation broken)"), *Follower->GetName());
         }
         else
         {
             // DEFAULT - patrol
             Command.CommandType = EStrategicCommandType::Patrol;
             Command.Priority = 3;
-            UE_LOG(LogTemp, Verbose, TEXT("MCTS: Follower %s - PATROL (default)"), *Follower->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: Follower %s - PATROL (default)"), *Follower->GetName());
         }
 
         Commands.Add(Follower, Command);
+        FollowerIndex++;
     }
 
     return Commands;
