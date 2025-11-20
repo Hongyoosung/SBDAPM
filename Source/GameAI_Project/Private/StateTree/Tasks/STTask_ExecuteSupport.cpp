@@ -10,51 +10,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "Utill/GameAIHelper.h"
 
-namespace
-{
-	// Helper to check if target actor is valid and alive
-	bool IsTargetValid(AActor* Target)
-	{
-		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
-		{
-			return false;
-		}
-
-		// Check if target has health component and is alive
-		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
-		{
-			return HealthComp->IsAlive();
-		}
-
-		return true; // No health component, assume valid
-	}
-
-	// Helper to find nearest valid enemy from visible enemies
-	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
-	{
-		if (!FromPawn) return nullptr;
-
-		FVector MyLocation = FromPawn->GetActorLocation();
-		AActor* NearestEnemy = nullptr;
-		float NearestDistance = FLT_MAX;
-
-		for (AActor* Enemy : VisibleEnemies)
-		{
-			if (IsTargetValid(Enemy))
-			{
-				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
-				if (Distance < NearestDistance)
-				{
-					NearestDistance = Distance;
-					NearestEnemy = Enemy;
-				}
-			}
-		}
-
-		return NearestEnemy;
-	}
-}
 
 EStateTreeRunStatus FSTTask_ExecuteSupport::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -192,14 +149,14 @@ void FSTTask_ExecuteSupport::ExecuteProvideCoveringFire(FStateTreeExecutionConte
 	// Determine target - validate primary target first
 	AActor* CurrentTarget = nullptr;
 
-	if (IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
 		CurrentTarget = InstanceData.Context.PrimaryTarget;
 	}
 	else if (InstanceData.Context.VisibleEnemies.Num() > 0)
 	{
 		// Primary target invalid/dead - find nearest valid enemy
-		CurrentTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		CurrentTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 
 		// If still no valid target, rotate through visible enemies (they might not have health components)
 		if (!CurrentTarget)
@@ -292,7 +249,7 @@ void FSTTask_ExecuteSupport::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 		TArray<AActor*> ValidEnemies;
 		for (AActor* Enemy : InstanceData.Context.VisibleEnemies)
 		{
-			if (IsTargetValid(Enemy))
+			if (UGameAIHelper::IsTargetValid(Enemy))
 			{
 				ValidEnemies.Add(Enemy);
 			}
@@ -307,7 +264,7 @@ void FSTTask_ExecuteSupport::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 	}
 
 	// Fall back to primary target if no visible enemies
-	if (!CurrentTarget && IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!CurrentTarget && UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
 		CurrentTarget = InstanceData.Context.PrimaryTarget;
 	}

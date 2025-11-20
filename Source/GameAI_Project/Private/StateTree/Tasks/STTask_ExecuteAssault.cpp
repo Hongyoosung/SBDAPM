@@ -13,51 +13,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "RL/RLPolicyNetwork.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "Utill/GameAIHelper.h"
 
-namespace
-{
-	// Helper to check if target actor is valid and alive
-	bool IsTargetValid(AActor* Target)
-	{
-		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
-		{
-			return false;
-		}
 
-		// Check if target has health component and is alive
-		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
-		{
-			return HealthComp->IsAlive();
-		}
-
-		return true; // No health component, assume valid
-	}
-
-	// Helper to find nearest valid enemy from visible enemies
-	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
-	{
-		if (!FromPawn) return nullptr;
-
-		FVector MyLocation = FromPawn->GetActorLocation();
-		AActor* NearestEnemy = nullptr;
-		float NearestDistance = FLT_MAX;
-
-		for (AActor* Enemy : VisibleEnemies)
-		{
-			if (IsTargetValid(Enemy))
-			{
-				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
-				if (Distance < NearestDistance)
-				{
-					NearestDistance = Distance;
-					NearestEnemy = Enemy;
-				}
-			}
-		}
-
-		return NearestEnemy;
-	}
-}
 
 EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -207,10 +165,10 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 	}
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
 		// Try to find a new target from visible enemies
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		if (NewTarget)
 		{
 			InstanceData.Context.PrimaryTarget = NewTarget;
@@ -362,9 +320,9 @@ void FSTTask_ExecuteAssault::ExecuteCautiousAdvance(FStateTreeExecutionContext& 
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 
@@ -431,9 +389,9 @@ void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Co
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 
@@ -487,9 +445,9 @@ void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext&
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 
@@ -611,9 +569,9 @@ void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Co
 	InstanceData.Context.MovementSpeedMultiplier = 0.0f;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 
@@ -706,9 +664,9 @@ void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& 
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 
@@ -780,9 +738,9 @@ void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 	}
 

@@ -19,45 +19,74 @@ void FSTEvaluator_UpdateObservation::TreeStart(FStateTreeExecutionContext& Conte
 
 	// Initialize time accumulator
 	InstanceData.TimeAccumulator = 0.0f;
+
+	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS EVALUATOR] TreeStart called - UpdateInterval=%.3f"),
+		InstanceData.UpdateInterval);
 }
 
 void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Check interval
-	InstanceData.TimeAccumulator += DeltaTime;
-	if (InstanceData.TimeAccumulator < InstanceData.UpdateInterval)
-	{
-		return;
-	}
-
-	InstanceData.TimeAccumulator = 0.0f;
-
 	// Validate context components (auto-bound from schema)
 	if (!InstanceData.Context.FollowerComponent || !InstanceData.Context.AIController)
 	{
+		static bool bLoggedOnce = false;
+		if (!bLoggedOnce)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Missing FollowerComponent or AIController!"));
+			bLoggedOnce = true;
+		}
 		return;
 	}
 
 	APawn* ControlledPawn = InstanceData.Context.AIController->GetPawn();
 	if (!ControlledPawn)
 	{
+		static bool bLoggedPawnOnce = false;
+		if (!bLoggedPawnOnce)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] AIController has no pawn!"));
+			bLoggedPawnOnce = true;
+		}
 		return;
 	}
 
-	// Get observation from follower component
-	InstanceData.Context.PreviousObservation = InstanceData.Context.CurrentObservation;
-	InstanceData.Context.CurrentObservation = InstanceData.Context.FollowerComponent->GetLocalObservation();
+	// Check interval - but still update critical combat data every tick
+	InstanceData.TimeAccumulator += DeltaTime;
+	bool bFullUpdate = (InstanceData.TimeAccumulator >= InstanceData.UpdateInterval);
 
-	// Update target tracking from perception system
-	ScanForEnemies(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+	// DEBUG: Log update frequency
+	static int32 TickCount = 0;
+	if (++TickCount % 60 == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': TimeAccum=%.3f, UpdateInterval=%.3f, bFullUpdate=%d"),
+			*ControlledPawn->GetName(), InstanceData.TimeAccumulator, InstanceData.UpdateInterval, bFullUpdate ? 1 : 0);
+	}
 
-	// Update combat state (LOS, under fire, etc.)
+	if (bFullUpdate)
+	{
+		InstanceData.TimeAccumulator = 0.0f;
+	}
+
+	// Full update (observations, perception, cover) - run at intervals
+	if (bFullUpdate)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': FULL UPDATE triggered"), *ControlledPawn->GetName());
+
+		// Get observation from follower component
+		InstanceData.Context.PreviousObservation = InstanceData.Context.CurrentObservation;
+		InstanceData.Context.CurrentObservation = InstanceData.Context.FollowerComponent->GetLocalObservation();
+
+		// Update target tracking from perception system
+		ScanForEnemies(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+
+		// Update cover state
+		DetectCover(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+	}
+
+	// CRITICAL: Update combat state EVERY tick (LOS, distance) - needed for firing
 	UpdateCombatState(InstanceData, ControlledPawn);
-
-	// Update cover state
-	DetectCover(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
 
 	// Update distance to primary target
 	if (InstanceData.Context.PrimaryTarget)
@@ -118,6 +147,10 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	// Get detected enemies from perception system
 	TArray<AActor*> DetectedEnemies = PerceptionComp->GetDetectedEnemies();
 
+	// DEBUG: Log perception results
+	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': Perception detected %d enemies"),
+		*ControlledPawn->GetName(), DetectedEnemies.Num());
+
 	// Update visible enemies list in context
 	InstanceData.Context.VisibleEnemies.Empty();
 	for (AActor* Enemy : DetectedEnemies)
@@ -125,7 +158,20 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 		if (Enemy)
 		{
 			InstanceData.Context.VisibleEnemies.Add(Enemy);
+			UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s':   - Adding enemy: %s"),
+				*ControlledPawn->GetName(), *Enemy->GetName());
 		}
+	}
+
+	// CRITICAL: Verify array was populated
+	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': VisibleEnemies array NOW has %d enemies (after population)"),
+		*ControlledPawn->GetName(), InstanceData.Context.VisibleEnemies.Num());
+
+	// Debug: Log what's in the array
+	for (AActor* Enemy : InstanceData.Context.VisibleEnemies)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s':   -> VisibleEnemies contains: %s"),
+			*ControlledPawn->GetName(), Enemy ? *Enemy->GetName() : TEXT("NULL"));
 	}
 
 	// Set primary target - PRIORITIZE command target over perception target

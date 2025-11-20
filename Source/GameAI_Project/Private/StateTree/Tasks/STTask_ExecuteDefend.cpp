@@ -10,51 +10,8 @@
 #include "GameFramework/Pawn.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Utill/GameAIHelper.h"
 
-namespace
-{
-	// Helper to check if target actor is valid and alive
-	bool IsTargetValid(AActor* Target)
-	{
-		if (!Target || !Target->IsValidLowLevel() || Target->IsPendingKillPending())
-		{
-			return false;
-		}
-
-		// Check if target has health component and is alive
-		if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
-		{
-			return HealthComp->IsAlive();
-		}
-
-		return true; // No health component, assume valid
-	}
-
-	// Helper to find nearest valid enemy from visible enemies
-	AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn)
-	{
-		if (!FromPawn) return nullptr;
-
-		FVector MyLocation = FromPawn->GetActorLocation();
-		AActor* NearestEnemy = nullptr;
-		float NearestDistance = FLT_MAX;
-
-		for (AActor* Enemy : VisibleEnemies)
-		{
-			if (IsTargetValid(Enemy))
-			{
-				float Distance = FVector::Dist(MyLocation, Enemy->GetActorLocation());
-				if (Distance < NearestDistance)
-				{
-					NearestDistance = Distance;
-					NearestEnemy = Enemy;
-				}
-			}
-		}
-
-		return NearestEnemy;
-	}
-}
 
 EStateTreeRunStatus FSTTask_ExecuteDefend::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -331,9 +288,9 @@ void FSTTask_ExecuteDefend::EngageThreats(FStateTreeExecutionContext& Context, f
 	}
 
 	// Validate and update primary target if needed
-	if (!IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
 	{
-		AActor* NewTarget = FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
 		InstanceData.Context.PrimaryTarget = NewTarget;
 
 		if (NewTarget)

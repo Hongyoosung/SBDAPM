@@ -21,6 +21,9 @@ void FSTEvaluator_SyncCommand::TreeStart(FStateTreeExecutionContext& Context) co
 		InstanceData.Context.bIsCommandValid = bCommandValid;
 		InstanceData.Context.TimeSinceCommand = TimeSinceCommand;
 
+		// Sync PrimaryTarget from command
+		InstanceData.Context.PrimaryTarget = CurrentCommand.TargetActor;
+
 		// Initialize tracking variable
 		InstanceData.LastCommandType = CurrentCommand.CommandType;
 
@@ -55,14 +58,19 @@ void FSTEvaluator_SyncCommand::Tick(FStateTreeExecutionContext& Context, float D
 	InstanceData.Context.bIsCommandValid = bNewCommandValid;
 	InstanceData.Context.TimeSinceCommand = NewTimeSinceCommand;
 
+
 	// Log command changes (Warning level for visibility)
 	if (NewCommand.CommandType != InstanceData.LastCommandType)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[SYNC COMMAND] 📝 Command changed: '%s' → '%s', Valid=%d, Time=%.2f"),
+		FString TargetInfo = NewCommand.TargetActor ?
+			FString::Printf(TEXT("Target: %s"), *NewCommand.TargetActor->GetName()) :
+			TEXT("Target: None");
+
+		UE_LOG(LogTemp, Warning, TEXT("[SYNC COMMAND] 📝 Command changed: '%s' → '%s', Valid=%d, %s"),
 			*UEnum::GetValueAsString(InstanceData.LastCommandType),
 			*UEnum::GetValueAsString(NewCommand.CommandType),
 			bNewCommandValid,
-			NewTimeSinceCommand);
+			*TargetInfo);
 
 		InstanceData.LastCommandType = NewCommand.CommandType;
 	}
