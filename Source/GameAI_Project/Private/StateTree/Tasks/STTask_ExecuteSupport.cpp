@@ -37,7 +37,6 @@ EStateTreeRunStatus FSTTask_ExecuteSupport::EnterState(FStateTreeExecutionContex
 		*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction));
 
 	// Reset timers
-	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.Context.TimeInTacticalAction = 0.0f;
 	InstanceData.Context.ActionProgress = 0.0f;
 
@@ -55,15 +54,7 @@ EStateTreeRunStatus FSTTask_ExecuteSupport::Tick(FStateTreeExecutionContext& Con
 	}
 
 	// Update timers
-	InstanceData.TimeSinceLastRLQuery += DeltaTime;
 	InstanceData.Context.TimeInTacticalAction += DeltaTime;
-
-	// Re-query RL policy if interval elapsed
-	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
-	{
-		// This would trigger a transition back to QueryRLPolicy state
-		InstanceData.TimeSinceLastRLQuery = 0.0f;
-	}
 
 	// Execute current tactical action
 	ExecuteTacticalAction(Context, DeltaTime);

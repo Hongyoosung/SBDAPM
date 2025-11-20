@@ -57,10 +57,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteMoveInstanceData
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
-	/** Query RL policy every N seconds (0 = only at state entry) */
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-	float RLQueryInterval = 5.0f;
-
 	/** Sprint speed multiplier */
 	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "1.0", ClampMax = "3.0"))
 	float SprintSpeedMultiplier = 2.0f;
@@ -84,10 +80,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteMoveInstanceData
 	//--------------------------------------------------------------------------
 	// RUNTIME STATE (managed by task)
 	//--------------------------------------------------------------------------
-
-	/** Time since last RL query */
-	UPROPERTY()
-	float TimeSinceLastRLQuery = 0.0f;
 
 	/** Total distance traveled */
 	UPROPERTY()

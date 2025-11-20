@@ -2,6 +2,7 @@
 
 #include "StateTree/Tasks/STTask_ExecuteAssault.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Combat/WeaponComponent.h"
 #include "Combat/HealthComponent.h"
@@ -21,26 +22,36 @@ EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContex
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	if (!InstanceData.StateTreeComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteAssault: StateTreeComp is null!"));
+		return EStateTreeRunStatus::Failed;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
 	// Validate inputs
-	if (!InstanceData.Context.FollowerComponent || !InstanceData.Context.AIController)
+	if (!SharedContext.FollowerComponent || !SharedContext.AIController)
 	{
 		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteAssault: Invalid inputs (missing component/controller)"));
 		return EStateTreeRunStatus::Failed;
 	}
 
-	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	APawn* Pawn = SharedContext.AIController->GetPawn();
 	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
-	FString TargetName = InstanceData.Context.PrimaryTarget ? InstanceData.Context.PrimaryTarget->GetName() : TEXT("None");
+	FString TargetName = SharedContext.PrimaryTarget ? SharedContext.PrimaryTarget->GetName() : TEXT("None");
 
-	UE_LOG(LogTemp, Warning, TEXT("🎯 [ASSAULT TASK] '%s': ENTERED assault state - Target: %s, Tactic: %s"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [ASSAULT TASK] '%s': ENTERED assault state - Target: %s, Tactic: %s, Health: %.1f%%, VisibleEnemies: %d (SHARED Context addr: %p)"),
 		*PawnName,
 		*TargetName,
-		*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction));
+		*UEnum::GetValueAsString(SharedContext.CurrentTacticalAction),
+		SharedContext.CurrentObservation.AgentHealth,
+		SharedContext.CurrentObservation.VisibleEnemyCount,
+		&SharedContext);
 
 	// Reset timers
-	InstanceData.TimeSinceLastRLQuery = 0.0f;
-	InstanceData.Context.TimeInTacticalAction = 0.0f;
-	InstanceData.Context.ActionProgress = 0.0f;
+	SharedContext.TimeInTacticalAction = 0.0f;
+	SharedContext.ActionProgress = 0.0f;
 
 	return EStateTreeRunStatus::Running;
 }
@@ -48,49 +59,25 @@ EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContex
 EStateTreeRunStatus FSTTask_ExecuteAssault::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	// Check if should abort
-	if (!InstanceData.Context.bIsAlive || !InstanceData.Context.bIsCommandValid)
+	if (!SharedContext.bIsAlive || !SharedContext.bIsCommandValid)
 	{
 		return EStateTreeRunStatus::Succeeded;
 	}
 
 	// Update timers
-	InstanceData.TimeSinceLastRLQuery += DeltaTime;
-	InstanceData.Context.TimeInTacticalAction += DeltaTime;
-
-	// Re-query RL policy if interval elapsed
-	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
-	{
-		InstanceData.TimeSinceLastRLQuery = 0.0f;
-
-		// Query RL policy for new tactical action
-		if (InstanceData.Context.TacticalPolicy && InstanceData.Context.TacticalPolicy->IsReady())
-		{
-			ETacticalAction NewAction = InstanceData.Context.TacticalPolicy->SelectAction(InstanceData.Context.CurrentObservation);
-
-			if (NewAction != InstanceData.Context.CurrentTacticalAction)
-			{
-				APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
-				UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteAssault: '%s' changed tactic from '%s' to '%s'"),
-					Pawn ? *Pawn->GetName() : TEXT("Unknown"),
-					*UEnum::GetValueAsString(InstanceData.Context.CurrentTacticalAction),
-					*UEnum::GetValueAsString(NewAction));
-
-				InstanceData.Context.CurrentTacticalAction = NewAction;
-				InstanceData.Context.TimeInTacticalAction = 0.0f;
-			}
-		}
-	}
+	SharedContext.TimeInTacticalAction += DeltaTime;
 
 	// Execute current tactical action
 	ExecuteTacticalAction(Context, DeltaTime);
 
 	// Calculate and provide reward
 	float Reward = CalculateAssaultReward(Context, DeltaTime);
-	if (Reward != 0.0f && InstanceData.Context.FollowerComponent)
+	if (Reward != 0.0f && SharedContext.FollowerComponent)
 	{
-		InstanceData.Context.FollowerComponent->ProvideReward(Reward, false);
+		SharedContext.FollowerComponent->ProvideReward(Reward, false);
 	}
 
 	return EStateTreeRunStatus::Running;
@@ -99,16 +86,18 @@ EStateTreeRunStatus FSTTask_ExecuteAssault::Tick(FStateTreeExecutionContext& Con
 void FSTTask_ExecuteAssault::ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteAssault: Exiting assault (time in action: %.1fs)"),
-		InstanceData.Context.TimeInTacticalAction);
+		SharedContext.TimeInTacticalAction);
 }
 
 void FSTTask_ExecuteAssault::ExecuteTacticalAction(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	switch (InstanceData.Context.CurrentTacticalAction)
+	switch (SharedContext.CurrentTacticalAction)
 	{
 	case ETacticalAction::AggressiveAssault:
 		ExecuteAggressiveAssault(Context, DeltaTime);
@@ -156,8 +145,9 @@ void FSTTask_ExecuteAssault::ExecuteTacticalAction(FStateTreeExecutionContext& C
 void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] AggressiveAssault: No pawn!"));
@@ -165,60 +155,56 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 	}
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
 		// Try to find a new target from visible enemies
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
 		if (NewTarget)
 		{
-			InstanceData.Context.PrimaryTarget = NewTarget;
+			SharedContext.PrimaryTarget = NewTarget;
 			UE_LOG(LogTemp, Log, TEXT("[ASSAULT TASK] '%s': Target died, switching to '%s'"),
 				*Pawn->GetName(), *NewTarget->GetName());
 		}
 		else
 		{
-			InstanceData.Context.PrimaryTarget = nullptr;
+			SharedContext.PrimaryTarget = nullptr;
 		}
 	}
 
 	// Move toward target aggressively
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
 		FVector CurrentLocation = Pawn->GetActorLocation();
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 		float Distance = FVector::Dist(CurrentLocation, TargetLocation);
 
 		// Set high speed multiplier and apply to movement component
-		InstanceData.Context.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
+		SharedContext.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
 
 		// Apply speed multiplier to CharacterMovementComponent
 		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 		{
 			float BaseSpeed = 600.0f; // Default base speed
-			MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+			MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 		}
 
-		// Move directly toward target - only update if destination changed significantly
-		if (InstanceData.Context.AIController)
+		// Move directly toward target
+		if (SharedContext.AIController)
 		{
-			float DestinationDelta = FVector::Dist(InstanceData.Context.MovementDestination, TargetLocation);
-			if (DestinationDelta > 200.0f || InstanceData.Context.MovementDestination == FVector::ZeroVector)
+			EPathFollowingRequestResult::Type MoveResult = SharedContext.AIController->MoveToLocation(TargetLocation, 50.0f);
+
+			// Log movement result for debugging
+			if (MoveResult == EPathFollowingRequestResult::Failed)
 			{
-				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(TargetLocation, 50.0f);
-
-				// Log movement result for debugging
-				if (MoveResult == EPathFollowingRequestResult::Failed)
-				{
-					UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': MoveToLocation FAILED - NavMesh issue?"), *Pawn->GetName());
-				}
-				else if (MoveResult == EPathFollowingRequestResult::AlreadyAtGoal)
-				{
-					UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Already at goal (dist=%.1f)"), *Pawn->GetName(), Distance);
-				}
-
-				InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
-				InstanceData.Context.MovementDestination = TargetLocation;
+				UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': MoveToLocation FAILED - NavMesh issue?"), *Pawn->GetName());
 			}
+			else if (MoveResult == EPathFollowingRequestResult::AlreadyAtGoal)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Already at goal (dist=%.1f)"), *Pawn->GetName(), Distance);
+			}
+
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
+			SharedContext.MovementDestination = TargetLocation;
 		}
 		else
 		{
@@ -246,7 +232,7 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 				QueryParams
 			);
 
-			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+			bHasLOS = !bHit || HitResult.GetActor() == SharedContext.PrimaryTarget;
 
 			// Debug: draw LOS line
 			DrawDebugLine(World, StartLoc, EndLoc, bHasLOS ? FColor::Green : FColor::Red, false, 0.1f, 0, 2.0f);
@@ -266,10 +252,10 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 			{
 				if (bHasLOS)
 				{
-					WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+					WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 					UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': FIRING at target '%s'"),
 						*Pawn->GetName(),
-						*InstanceData.Context.PrimaryTarget->GetName());
+						*SharedContext.PrimaryTarget->GetName());
 				}
 				else
 				{
@@ -289,21 +275,63 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 				*Pawn->GetName());
 		}
 
-		InstanceData.Context.bIsMoving = true;
-		InstanceData.Context.MovementDestination = TargetLocation;
+		SharedContext.bIsMoving = true;
+		SharedContext.MovementDestination = TargetLocation;
 	}
-	else if (InstanceData.Context.CurrentCommand.TargetLocation != FVector::ZeroVector)
+	else if (SharedContext.CurrentCommand.TargetLocation != FVector::ZeroVector)
 	{
-		// No target, move to command location
-		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No PrimaryTarget, moving to command location"),
-			*Pawn->GetName());
+		// No target, check if we should move to command location
+		FVector CurrentLocation = Pawn->GetActorLocation();
+		float DistanceToCommandLocation = FVector::Dist(CurrentLocation, SharedContext.CurrentCommand.TargetLocation);
 
-		if (InstanceData.Context.AIController)
+		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': No PrimaryTarget - DistanceToCommandLoc=%.1f"),
+			*Pawn->GetName(), DistanceToCommandLocation);
+
+		// Only move if we're not already near the command location
+		if (DistanceToCommandLocation > 150.0f)
 		{
-			InstanceData.Context.AIController->MoveToLocation(
-				InstanceData.Context.CurrentCommand.TargetLocation, 100.0f);
+			// Set movement speed
+			SharedContext.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
+			if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
+			{
+				float BaseSpeed = 600.0f;
+				MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
+			}
+
+			if (SharedContext.AIController)
+			{
+				// Check if NavMesh exists at target location
+				UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(Pawn->GetWorld());
+				FNavLocation NavLoc;
+				bool bOnNavMesh = NavSys && NavSys->ProjectPointToNavigation(
+					SharedContext.CurrentCommand.TargetLocation, NavLoc, FVector(500.0f, 500.0f, 500.0f));
+
+				if (!bOnNavMesh)
+				{
+					UE_LOG(LogTemp, Error, TEXT("[ASSAULT TASK] '%s': Target location NOT on NavMesh! CommandLoc=%s"),
+						*Pawn->GetName(), *SharedContext.CurrentCommand.TargetLocation.ToString());
+				}
+
+				EPathFollowingRequestResult::Type MoveResult = SharedContext.AIController->MoveToLocation(
+					SharedContext.CurrentCommand.TargetLocation, 50.0f);  // Reduced acceptance radius
+
+				UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Moving to command location (result: %d, OnNavMesh: %d)"),
+					*Pawn->GetName(), (int32)MoveResult, bOnNavMesh ? 1 : 0);
+			}
+			SharedContext.bIsMoving = true;
 		}
-		InstanceData.Context.bIsMoving = true;
+		else
+		{
+			// Already at command location, stop and wait for new target
+			if (SharedContext.AIController)
+			{
+				SharedContext.AIController->StopMovement();
+			}
+			SharedContext.bIsMoving = false;
+
+			UE_LOG(LogTemp, Warning, TEXT("[ASSAULT TASK] '%s': Already near command location (%.1f units), holding position"),
+				*Pawn->GetName(), DistanceToCommandLocation);
+		}
 	}
 	else
 	{
@@ -315,44 +343,45 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 void FSTTask_ExecuteAssault::ExecuteCautiousAdvance(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
 	// Advance more slowly, prefer cover
-	InstanceData.Context.MovementSpeedMultiplier = 1.0f;
+	SharedContext.MovementSpeedMultiplier = 1.0f;
 
 	// Apply speed to CharacterMovementComponent
 	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 	{
 		float BaseSpeed = 600.0f;
-		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+		MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 	}
 
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
 		FVector CurrentLocation = Pawn->GetActorLocation();
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 		FVector DirectionToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
 
 		// If too close and not in cover, seek cover first
-		if (InstanceData.Context.DistanceToPrimaryTarget < InstanceData.OptimalEngagementRange &&
-			!InstanceData.Context.bInCover)
+		if (SharedContext.DistanceToPrimaryTarget < InstanceData.OptimalEngagementRange &&
+			!SharedContext.bInCover)
 		{
 			// Find cover between current position and target
-			if (InstanceData.Context.NearestCoverLocation != FVector::ZeroVector)
+			if (SharedContext.NearestCoverLocation != FVector::ZeroVector)
 			{
-				if (InstanceData.Context.AIController)
+				if (SharedContext.AIController)
 				{
-					InstanceData.Context.AIController->MoveToLocation(
-						InstanceData.Context.NearestCoverLocation, 50.0f);
+					SharedContext.AIController->MoveToLocation(
+						SharedContext.NearestCoverLocation, 50.0f);
 				}
 				return;
 			}
@@ -361,44 +390,45 @@ void FSTTask_ExecuteAssault::ExecuteCautiousAdvance(FStateTreeExecutionContext& 
 		// Advance toward target, stopping periodically
 		FVector AdvanceDestination = CurrentLocation + DirectionToTarget * 300.0f; // 3m advance
 
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->MoveToLocation(AdvanceDestination, 100.0f);
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->MoveToLocation(AdvanceDestination, 100.0f);
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 
 		// Fire weapon at target if in cover or has LOS
 		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
 		{
-			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS &&
-				(InstanceData.Context.bInCover || !InstanceData.Context.bIsMoving))
+			if (WeaponComp->CanFire() && SharedContext.bHasLOS &&
+				(SharedContext.bInCover || !SharedContext.bIsMoving))
 			{
-				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+				WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 			}
 		}
 
-		InstanceData.Context.bIsMoving = true;
+		SharedContext.bIsMoving = true;
 	}
 }
 
 void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Context, float DeltaTime, bool bFlankLeft) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
-	if (!InstanceData.Context.PrimaryTarget) return;
+	if (!SharedContext.PrimaryTarget) return;
 
 	FVector CurrentLocation = Pawn->GetActorLocation();
-	FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+	FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 	FVector DirectionToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
 
 	// Calculate perpendicular flank direction
@@ -411,49 +441,50 @@ void FSTTask_ExecuteAssault::ExecuteFlankManeuver(FStateTreeExecutionContext& Co
 	// Combine forward and flank movement (45-degree angle)
 	FVector FlankDestination = CurrentLocation + (DirectionToTarget * 500.0f) + (FlankDirection * 500.0f);
 
-	if (InstanceData.Context.AIController)
+	if (SharedContext.AIController)
 	{
-		InstanceData.Context.AIController->MoveToLocation(FlankDestination, 100.0f);
-		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+		SharedContext.AIController->MoveToLocation(FlankDestination, 100.0f);
+		SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 	}
 
 	// Fire while flanking if has LOS
 	if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
 	{
-		if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+		if (WeaponComp->CanFire() && SharedContext.bHasLOS)
 		{
-			WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 		}
 	}
 
-	InstanceData.Context.bIsMoving = true;
-	InstanceData.Context.MovementSpeedMultiplier = 1.2f; // Slightly faster for flanking
+	SharedContext.bIsMoving = true;
+	SharedContext.MovementSpeedMultiplier = 1.2f; // Slightly faster for flanking
 
 	// Apply speed to CharacterMovementComponent
 	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 	{
 		float BaseSpeed = 600.0f;
-		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+		MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 	}
 }
 
 void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
-	if (!InstanceData.Context.PrimaryTarget) return;
+	if (!SharedContext.PrimaryTarget) return;
 
-	float DistanceToTarget = InstanceData.Context.DistanceToPrimaryTarget;
+	float DistanceToTarget = SharedContext.DistanceToPrimaryTarget;
 	float OptimalRange = InstanceData.OptimalEngagementRange;
 
 	// Kite: maintain optimal distance while engaging
@@ -461,49 +492,49 @@ void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext&
 	{
 		// Too close, back away
 		FVector CurrentLocation = Pawn->GetActorLocation();
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 		FVector AwayDirection = (CurrentLocation - TargetLocation).GetSafeNormal();
 		FVector RetreatDestination = CurrentLocation + AwayDirection * 300.0f; // 3m retreat
 
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->MoveToLocation(RetreatDestination, 50.0f);
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->MoveToLocation(RetreatDestination, 50.0f);
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 
-		InstanceData.Context.bIsMoving = true;
+		SharedContext.bIsMoving = true;
 	}
 	else if (DistanceToTarget > OptimalRange * 1.2f)
 	{
 		// Too far, advance
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->MoveToLocation(TargetLocation, OptimalRange);
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->MoveToLocation(TargetLocation, OptimalRange);
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 
-		InstanceData.Context.bIsMoving = true;
+		SharedContext.bIsMoving = true;
 	}
 	else
 	{
 		// At optimal range, stop and engage
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->StopMovement();
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->StopMovement();
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 
-		InstanceData.Context.bIsMoving = false;
+		SharedContext.bIsMoving = false;
 	}
 
 	// Fire weapon at target (prioritize firing at optimal range)
 	if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
 	{
-		if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+		if (WeaponComp->CanFire() && SharedContext.bHasLOS)
 		{
-			WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+			WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 		}
 	}
 }
@@ -511,17 +542,18 @@ void FSTTask_ExecuteAssault::ExecuteMaintainDistance(FStateTreeExecutionContext&
 float FSTTask_ExecuteAssault::CalculateAssaultReward(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	float Reward = 0.0f;
 
 	// Reward for closing distance to target
-	if (InstanceData.Context.PrimaryTarget && InstanceData.Context.bIsMoving)
+	if (SharedContext.PrimaryTarget && SharedContext.bIsMoving)
 	{
 		// Check if moving toward target
-		APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+		APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 		if (Pawn)
 		{
-			FVector ToTarget = InstanceData.Context.PrimaryTarget->GetActorLocation() - Pawn->GetActorLocation();
+			FVector ToTarget = SharedContext.PrimaryTarget->GetActorLocation() - Pawn->GetActorLocation();
 			FVector Velocity = Pawn->GetVelocity();
 
 			if (FVector::DotProduct(ToTarget.GetSafeNormal(), Velocity.GetSafeNormal()) > 0.0f)
@@ -532,20 +564,20 @@ float FSTTask_ExecuteAssault::CalculateAssaultReward(FStateTreeExecutionContext&
 	}
 
 	// Reward for maintaining line of sight
-	if (InstanceData.Context.bHasLOS && InstanceData.Context.PrimaryTarget)
+	if (SharedContext.bHasLOS && SharedContext.PrimaryTarget)
 	{
 		Reward += 1.5f * DeltaTime; // +1.5 per second with LOS
 	}
 
 	// Reward for following assault command
-	if (InstanceData.Context.bIsCommandValid)
+	if (SharedContext.bIsCommandValid)
 	{
 		Reward += FTacticalRewards::FOLLOW_COMMAND * DeltaTime;
 	}
 
 	// Penalty for being under fire without cover during cautious advance
-	if (InstanceData.Context.CurrentTacticalAction == ETacticalAction::CautiousAdvance &&
-		InstanceData.Context.bUnderFire && !InstanceData.Context.bInCover)
+	if (SharedContext.CurrentTacticalAction == ETacticalAction::CautiousAdvance &&
+		SharedContext.bUnderFire && !SharedContext.bInCover)
 	{
 		Reward -= 0.2f * DeltaTime; // -0.2 per second exposed during cautious advance
 	}
@@ -556,29 +588,30 @@ float FSTTask_ExecuteAssault::CalculateAssaultReward(FStateTreeExecutionContext&
 void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Stop movement and hold position
-	if (InstanceData.Context.AIController)
+	if (SharedContext.AIController)
 	{
-		InstanceData.Context.AIController->StopMovement();
+		SharedContext.AIController->StopMovement();
 	}
-	InstanceData.Context.bIsMoving = false;
-	InstanceData.Context.MovementSpeedMultiplier = 0.0f;
+	SharedContext.bIsMoving = false;
+	SharedContext.MovementSpeedMultiplier = 0.0f;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
 	// Focus on target and fire
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
-		InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+		SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 
 		// Perform LOS check
 		bool bHasLOS = false;
@@ -590,10 +623,10 @@ void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Co
 			QueryParams.AddIgnoredActor(Pawn);
 
 			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
-			FVector EndLoc = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = SharedContext.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
 
 			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
-			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+			bHasLOS = !bHit || HitResult.GetActor() == SharedContext.PrimaryTarget;
 		}
 
 		// Fire weapon at target
@@ -601,7 +634,7 @@ void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Co
 		{
 			if (WeaponComp->CanFire() && bHasLOS)
 			{
-				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+				WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 			}
 		}
 	}
@@ -610,43 +643,44 @@ void FSTTask_ExecuteAssault::ExecuteDefensiveHold(FStateTreeExecutionContext& Co
 void FSTTask_ExecuteAssault::ExecuteSeekCover(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// If already in cover, hold and fire
-	if (InstanceData.Context.bInCover)
+	if (SharedContext.bInCover)
 	{
 		ExecuteDefensiveHold(Context, DeltaTime);
 		return;
 	}
 
 	// Move to nearest cover
-	if (InstanceData.Context.NearestCoverLocation != FVector::ZeroVector)
+	if (SharedContext.NearestCoverLocation != FVector::ZeroVector)
 	{
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			float DestinationDelta = FVector::Dist(InstanceData.Context.MovementDestination, InstanceData.Context.NearestCoverLocation);
-			if (DestinationDelta > 100.0f || InstanceData.Context.MovementDestination == FVector::ZeroVector)
+			float DestinationDelta = FVector::Dist(SharedContext.MovementDestination, SharedContext.NearestCoverLocation);
+			if (DestinationDelta > 100.0f || SharedContext.MovementDestination == FVector::ZeroVector)
 			{
-				InstanceData.Context.AIController->MoveToLocation(InstanceData.Context.NearestCoverLocation, 50.0f);
-				InstanceData.Context.MovementDestination = InstanceData.Context.NearestCoverLocation;
+				SharedContext.AIController->MoveToLocation(SharedContext.NearestCoverLocation, 50.0f);
+				SharedContext.MovementDestination = SharedContext.NearestCoverLocation;
 			}
 
 			// Keep focus on target while moving to cover
-			if (InstanceData.Context.PrimaryTarget)
+			if (SharedContext.PrimaryTarget)
 			{
-				InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+				SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 			}
 		}
-		InstanceData.Context.bIsMoving = true;
-		InstanceData.Context.MovementSpeedMultiplier = 1.3f; // Move quickly to cover
+		SharedContext.bIsMoving = true;
+		SharedContext.MovementSpeedMultiplier = 1.3f; // Move quickly to cover
 
 		// Apply speed to CharacterMovementComponent
 		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 		{
 			float BaseSpeed = 600.0f;
-			MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+			MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 		}
 	}
 	else
@@ -659,36 +693,37 @@ void FSTTask_ExecuteAssault::ExecuteSeekCover(FStateTreeExecutionContext& Contex
 void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
 	FVector CurrentLocation = Pawn->GetActorLocation();
 	FVector RetreatDirection;
 
 	// Calculate retreat direction (away from target or toward spawn)
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 		RetreatDirection = (CurrentLocation - TargetLocation).GetSafeNormal();
 
 		// Keep focus on target while retreating
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 	}
 	else
 	{
 		// Retreat toward spawn/command location
-		FVector SpawnLocation = InstanceData.Context.CurrentCommand.TargetLocation;
+		FVector SpawnLocation = SharedContext.CurrentCommand.TargetLocation;
 		if (SpawnLocation != FVector::ZeroVector)
 		{
 			RetreatDirection = (SpawnLocation - CurrentLocation).GetSafeNormal();
@@ -702,29 +737,29 @@ void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& 
 	// Move in retreat direction
 	FVector RetreatDestination = CurrentLocation + RetreatDirection * 500.0f;
 
-	if (InstanceData.Context.AIController)
+	if (SharedContext.AIController)
 	{
-		InstanceData.Context.AIController->MoveToLocation(RetreatDestination, 100.0f);
+		SharedContext.AIController->MoveToLocation(RetreatDestination, 100.0f);
 	}
 
-	InstanceData.Context.bIsMoving = true;
-	InstanceData.Context.MovementSpeedMultiplier = 1.2f;
+	SharedContext.bIsMoving = true;
+	SharedContext.MovementSpeedMultiplier = 1.2f;
 
 	// Apply speed to CharacterMovementComponent
 	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 	{
 		float BaseSpeed = 600.0f;
-		MovementComp->MaxWalkSpeed = BaseSpeed * InstanceData.Context.MovementSpeedMultiplier;
+		MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 	}
 
 	// Fire while retreating if has LOS
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
 		if (UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>())
 		{
-			if (WeaponComp->CanFire() && InstanceData.Context.bHasLOS)
+			if (WeaponComp->CanFire() && SharedContext.bHasLOS)
 			{
-				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, true);
+				WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 			}
 		}
 	}
@@ -733,26 +768,27 @@ void FSTTask_ExecuteAssault::ExecuteTacticalRetreat(FStateTreeExecutionContext& 
 void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn) return;
 
 	// Validate and update primary target if needed
-	if (!UGameAIHelper::IsTargetValid(InstanceData.Context.PrimaryTarget))
+	if (!UGameAIHelper::IsTargetValid(SharedContext.PrimaryTarget))
 	{
-		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(InstanceData.Context.VisibleEnemies, Pawn);
-		InstanceData.Context.PrimaryTarget = NewTarget;
+		AActor* NewTarget = UGameAIHelper::FindNearestValidEnemy(SharedContext.VisibleEnemies, Pawn);
+		SharedContext.PrimaryTarget = NewTarget;
 	}
 
 	// Minimal movement - stay in position or move slowly
-	InstanceData.Context.MovementSpeedMultiplier = 0.3f;
+	SharedContext.MovementSpeedMultiplier = 0.3f;
 
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
 		// Focus on target
-		if (InstanceData.Context.AIController)
+		if (SharedContext.AIController)
 		{
-			InstanceData.Context.AIController->SetFocus(InstanceData.Context.PrimaryTarget);
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
 		}
 
 		// Perform LOS check
@@ -765,10 +801,10 @@ void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 			QueryParams.AddIgnoredActor(Pawn);
 
 			FVector StartLoc = Pawn->GetActorLocation() + FVector(0, 0, 80.0f);
-			FVector EndLoc = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+			FVector EndLoc = SharedContext.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
 
 			bool bHit = World->LineTraceSingleByChannel(HitResult, StartLoc, EndLoc, ECC_Visibility, QueryParams);
-			bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+			bHasLOS = !bHit || HitResult.GetActor() == SharedContext.PrimaryTarget;
 		}
 
 		// Fire rapidly at target area (suppressive fire - less accurate but more volume)
@@ -777,30 +813,30 @@ void FSTTask_ExecuteAssault::ExecuteSuppressiveFire(FStateTreeExecutionContext& 
 			if (WeaponComp->CanFire() && bHasLOS)
 			{
 				// Fire with prediction disabled for suppressive effect (spray area)
-				WeaponComp->FireAtTarget(InstanceData.Context.PrimaryTarget, false);
+				WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, false);
 			}
 		}
 
 		// Slight movement to find better angle if no LOS
-		if (!bHasLOS && InstanceData.Context.AIController)
+		if (!bHasLOS && SharedContext.AIController)
 		{
 			FVector CurrentLocation = Pawn->GetActorLocation();
-			FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+			FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 			FVector ToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
 			FVector SideStep = FVector::CrossProduct(ToTarget, FVector::UpVector) * 200.0f;
 
 			// Alternate side to find LOS
-			if (FMath::Fmod(InstanceData.Context.TimeInTacticalAction, 2.0f) < 1.0f)
+			if (FMath::Fmod(SharedContext.TimeInTacticalAction, 2.0f) < 1.0f)
 			{
 				SideStep *= -1.0f;
 			}
 
-			InstanceData.Context.AIController->MoveToLocation(CurrentLocation + SideStep, 50.0f);
-			InstanceData.Context.bIsMoving = true;
+			SharedContext.AIController->MoveToLocation(CurrentLocation + SideStep, 50.0f);
+			SharedContext.bIsMoving = true;
 		}
 		else
 		{
-			InstanceData.Context.bIsMoving = false;
+			SharedContext.bIsMoving = false;
 		}
 	}
 }

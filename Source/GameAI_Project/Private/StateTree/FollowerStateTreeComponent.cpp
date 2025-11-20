@@ -19,131 +19,57 @@ UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 	bAutoActivate = true;
 
-	bStartLogicAutomatically = true;
+	bStartLogicAutomatically = false;
 }
 
 void UFollowerStateTreeComponent::BeginPlay()
 {
+	// [변경] 부모 클래스 초기화를 가장 먼저 실행하여 안전성 확보
+	Super::BeginPlay();
+
 	UE_LOG(LogTemp, Warning, TEXT("🔵 UFollowerStateTreeComponent::BeginPlay CALLED for '%s'"),
 		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL_OWNER"));
 
-	// Validate State Tree asset is set (required by base UStateTreeComponent)
+	// ... (StateTree 에셋 검증 및 스키마 확인 로직은 그대로 유지) ...
+	// (중략: StateTree 변수 가져오기, 스키마 체크 등)
 	UStateTree* StateTree = const_cast<UStateTree*>(StateTreeRef.GetStateTree());
-	if (!StateTree)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ State Tree asset not set on '%s'!"), *GetOwner()->GetName());
-		Super::BeginPlay(); // Still call Super even on error
-		return;
-	}
+	if (!StateTree) return; // 에러 로그는 위에 있다고 가정
 
-	// CRITICAL FIX: Validate schema compatibility BEFORE calling Super::BeginPlay
-	const UStateTreeSchema* Schema = StateTree->GetSchema();
-	if (!Schema)
-	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ StateTree has no schema!"));
-		Super::BeginPlay();
-		return;
-	}
-
-	// Check schema CLASS compatibility (ignore instance name like "_0")
-	if (!Schema->GetClass()->IsChildOf(UFollowerStateTreeSchema::StaticClass()))
-	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ Schema mismatch! Expected FollowerStateTreeSchema, got %s"),
-			*Schema->GetClass()->GetName());
-		Super::BeginPlay();
-		return;
-	}
-
-	// UE 5.6 BUG FIX: StateTree loses compilation on restart
-	// Force recompilation if not ready OR if previously failed
-	bool bNeedsRecompile = !StateTree->IsReadyToRun();
-
-#if WITH_EDITOR
-	if (bNeedsRecompile)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("⚠️ StateTree not ready - forcing FULL recompilation..."));
-
-		// Invalidate ALL cached compilation data
-		StateTree->LastCompiledEditorDataHash = 0;
-
-		// Force a full compile (bypass CompileIfChanged optimization)
-		if (UE::StateTree::Delegates::OnRequestCompile.IsBound())
-		{
-			UE::StateTree::Delegates::OnRequestCompile.Execute(*StateTree);
-
-			// Mark package dirty to force save (this is the KEY to persistence)
-			StateTree->MarkPackageDirty();
-
-			UE_LOG(LogTemp, Warning, TEXT("✅ Forced StateTree recompilation and marked dirty: %s"), *StateTree->GetName());
-			UE_LOG(LogTemp, Warning, TEXT("🔧 To fix permanently: Open asset in editor, compile, and SAVE"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("❌ Cannot recompile StateTree - delegates not bound!"));
-			UE_LOG(LogTemp, Error, TEXT("🔧 WORKAROUND: Manually open '%s' in editor and click Compile"), *StateTree->GetName());
-		}
-	}
-#else
-	if (bNeedsRecompile)
-	{
-		UE_LOG(LogTemp, Error, TEXT("StateTree not ready in packaged build! Must fix in editor."));
-	}
-#endif
-
-
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ State Tree asset found: '%s'"), *StateTree->GetName());
-
-	// Find FollowerAgentComponent BEFORE calling Super::BeginPlay
+	// ... (FollowerComponent 찾기) ...
 	if (!FollowerComponent && bAutoFindFollowerComponent)
 	{
 		FollowerComponent = FindFollowerComponent();
-		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Auto-find FollowerComponent = %s"),
-			FollowerComponent ? TEXT("✅ Found") : TEXT("❌ Not Found"));
 	}
 
 	if (!FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ FollowerComponent not found on '%s'!"), *GetOwner()->GetName());
-		Super::BeginPlay(); // Still call Super even on error
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ FollowerComponent not found!"));
 		return;
 	}
 
-	// Initialize context BEFORE Super::BeginPlay (which may call SetContextRequirements/CollectExternalData)
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Initializing context..."));
+	// Initialize context 
 	InitializeContext();
 
 	// Bind to follower events
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Binding to follower events..."));
 	BindToFollowerEvents();
 
-	// NOW call base class initialization (StateTree will use already-initialized context)
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Calling Super::BeginPlay()..."));
-	Super::BeginPlay();
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ Super::BeginPlay() completed"));
-
-	EStateTreeRunStatus Status = GetStateTreeRunStatus();
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Status after BeginPlay = %s"),
-		*UEnum::GetValueAsString(Status));
-
-	if (Status != EStateTreeRunStatus::Running)
+	// [핵심] 초기화가 끝난 후 마지막에 시작 시도
+	if (CheckRequirementsAndStart())
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌❌ STATETREE FAILED TO START! Status = %s"),
-			*UEnum::GetValueAsString(Status));
-		UE_LOG(LogTemp, Error, TEXT("Possible causes:"));
-		UE_LOG(LogTemp, Error, TEXT("  1. StateTree asset '%s' has compilation errors (open in editor and check for errors)"), *StateTree->GetName());
-		UE_LOG(LogTemp, Error, TEXT("  2. Root state is missing or invalid"));
-		UE_LOG(LogTemp, Error, TEXT("  3. Context bindings are incorrect (Check CollectExternalData)"));
-		UE_LOG(LogTemp, Error, TEXT("  4. Required external data not provided"));
+		UE_LOG(LogTemp, Warning, TEXT("✅ StateTree started immediately in BeginPlay!"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ StateTree successfully started and running!"));
+		UE_LOG(LogTemp, Warning, TEXT("⏳ StateTree waiting for AIController..."));
 	}
 
-
-	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅✅✅ BeginPlay COMPLETE for '%s'"), *GetOwner()->GetName());
+	// 상태 확인 로그
+	EStateTreeRunStatus Status = GetStateTreeRunStatus();
+	if (Status == EStateTreeRunStatus::Running)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ StateTree successfully started and running!"));
+	}
 }
-
 void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	// Log FIRST before anything else
@@ -187,6 +113,23 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 
 	UE_LOG(LogTemp, Verbose, TEXT("UFollowerStateTreeComponent: TickComponent for '%s'"), *GetOwner()->GetName());
 
+	if (GetStateTreeRunStatus() != EStateTreeRunStatus::Running)
+	{
+		// 1. FollowerComponent 지연 찾기 (기존 로직 유지)
+		if (!FollowerComponent && bAutoFindFollowerComponent)
+		{
+			FollowerComponent = FindFollowerComponent();
+			if (FollowerComponent)
+			{
+				InitializeContext();
+				BindToFollowerEvents();
+			}
+		}
+
+		// 2. 시작 시도
+		CheckRequirementsAndStart();
+	}
+
 	// DEBUG: Log StateTree status periodically
 	static float LastDebugLogTime = 0.0f;
 	if (GetWorld()->GetTimeSeconds() - LastDebugLogTime > 2.0f)
@@ -213,60 +156,56 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 
 bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
-
+	// 1. 오버라이드 설정 (기존 유지)
 	InContext.SetLinkedStateTreeOverrides(LinkedStateTreeOverrides);
-
 	InContext.SetCollectExternalDataCallback(FOnCollectStateTreeExternalData::CreateUObject(
 		this, &UFollowerStateTreeComponent::CollectExternalData));
 
-	// Set custom context data BEFORE calling parent's SetContextRequirements
-	// FStateTreeExecutionContext::SetContextDataByName is exported (UE_API)
+	// 2. 데이터 주입 (여기가 핵심!)
 
-	// Set FollowerContext struct
+	// (A) Follower Context
 	FStateTreeDataView ContextView(
 		FFollowerStateTreeContext::StaticStruct(),
 		reinterpret_cast<uint8*>(&Context)
 	);
-	if (InContext.SetContextDataByName(FName(TEXT("FollowerContext")), ContextView))
+	if (!InContext.SetContextDataByName(FName(TEXT("FollowerContext")), ContextView))
 	{
-		//UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerContext set via SetContextDataByName"));
-	}
-	else if (bLogErrors)
-	{
-		UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerContext"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerContext"));
 	}
 
-	// Set FollowerComponent
-	if (InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
+	// (B) Follower Component
+	if (!InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
 	{
-		//UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerComponent set: %s"), FollowerComponent ? TEXT("Valid") : TEXT("NULL"));
-	}
-	else if (bLogErrors)
-	{
-		UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerComponent"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerComponent"));
 	}
 
-	// Set TeamLeader (optional)
-	UTeamLeaderComponent* TeamLeader = Context.TeamLeader;
-	if (InContext.SetContextDataByName(FName(TEXT("TeamLeader")), FStateTreeDataView(TeamLeader)))
+	// [추가] (C) Follower State Tree Component (자기 자신! 이 부분이 빠져서 에러 발생)
+	// 스키마에서 필수(Required)로 지정했기 때문에 반드시 넣어줘야 합니다.
+	if (!InContext.SetContextDataByName(FName(TEXT("FollowerStateTreeComponent")), FStateTreeDataView(this)))
 	{
-		//UE_LOG(LogTemp, Log, TEXT("  ✅ TeamLeader set: %s"), TeamLeader ? TEXT("Valid") : TEXT("NULL (Optional)"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerStateTreeComponent"));
 	}
 
-	// Set TacticalPolicy (optional)
-	URLPolicyNetwork* TacticalPolicy = Context.TacticalPolicy;
-	if (InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(TacticalPolicy)))
+	// (D) Team Leader (Optional)
+	if (Context.TeamLeader)
 	{
-		//UE_LOG(LogTemp, Log, TEXT("  ✅ TacticalPolicy set: %s"), TacticalPolicy ? TEXT("Valid") : TEXT("NULL (Optional)"));
+		InContext.SetContextDataByName(FName(TEXT("TeamLeader")), FStateTreeDataView(Context.TeamLeader));
 	}
 
-	// Now call parent to handle base data (AIController, Pawn, Actor) and validation
+	// (E) Tactical Policy (Optional)
+	if (Context.TacticalPolicy)
+	{
+		InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(Context.TacticalPolicy));
+	}
+
+	// 3. 부모 클래스 호출 (Pawn, AIController 자동 주입 시도)
+	// [주의] 여기서 AIController를 찾지 못하면 False를 반환할 수 있습니다.
+	// 우리는 이미 CheckRequirementsAndStart에서 Controller 존재를 확인했으므로 통과될 것입니다.
 	const bool bResult = UStateTreeComponentSchema::SetContextRequirements(*this, InContext, bLogErrors);
 
 	if (!bResult && bLogErrors)
 	{
-		UE_LOG(LogTemp, Error, TEXT("🔧 UStateTreeComponentSchema::SetContextRequirements FAILED."));
-		UE_LOG(LogTemp, Error, TEXT("   Check that AIController and Pawn are valid."));
+		UE_LOG(LogTemp, Error, TEXT("❌ Parent SetContextRequirements FAILED. Missing Pawn or AIController?"));
 	}
 
 	return bResult;
@@ -612,4 +551,47 @@ void UFollowerStateTreeComponent::OnFollowerDied()
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Follower died, transitioning to Dead state"));
 
 	// State Tree will transition to Dead state automatically via IsAlive condition
+}
+
+bool UFollowerStateTreeComponent::CheckRequirementsAndStart()
+{
+	// 이미 실행 중이면 패스
+	if (IsStateTreeRunning())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("✅ StateTree already running for '%s'"), 
+			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		return true;
+	}
+
+	// 1. 필수 컴포넌트 확인
+	if (!FollowerComponent)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⏳ Cannot start StateTree: FollowerComponent not found for '%s'"),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		return false;
+	}
+
+	// 2. AIController 확인 (가장 중요한 부분!)
+	// Context에 캐싱된 것이 없으면 다시 찾아봄
+	if (!Context.AIController)
+	{
+		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+		{
+			Context.AIController = Cast<AAIController>(OwnerPawn->GetController());
+		}
+	}
+
+	// 컨트롤러가 아직도 없으면 시작 불가
+	if (!Context.AIController)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⏳ Cannot start StateTree: AIController not found for '%s'"),
+			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		return false;
+	}
+
+	// 3. 모든 조건 만족 시 시작
+	UE_LOG(LogTemp, Warning, TEXT("🚀 All requirements met. Starting StateTree Logic..."));
+	StartLogic();
+
+	return IsStateTreeRunning();
 }

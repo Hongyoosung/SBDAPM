@@ -102,7 +102,8 @@ bool UFollowerStateTreeSchema::IsClassAllowed(const UClass* InClass) const
 			InClass->IsChildOf(APawn::StaticClass()) ||
 			InClass->IsChildOf(UFollowerAgentComponent::StaticClass()) ||
 			InClass->IsChildOf(UTeamLeaderComponent::StaticClass()) ||
-			InClass->IsChildOf(URLPolicyNetwork::StaticClass()))
+			InClass->IsChildOf(URLPolicyNetwork::StaticClass()) ||
+			InClass->IsChildOf(UFollowerStateTreeComponent::StaticClass()))
 		{
 			return true;
 		}
@@ -136,60 +137,61 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 
 TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
 {
-	// UE 5.6 CRITICAL FIX: Use PERSISTENT static storage
-	// The returned TConstArrayView MUST point to stable memory across ALL calls
-	// If the array moves/reallocates, base class validation fails
-	static TArray<FStateTreeExternalDataDesc> InContextDataDescs;
+	// [중요] TConstArrayView를 리턴해야 하므로, 데이터는 함수가 끝나도 메모리에 남아있어야 합니다.
+	// static을 사용하여 한 번만 초기화하고 메모리를 유지합니다.
+	static TArray<FStateTreeExternalDataDesc> CachedDescs;
 
-	// Only initialize once - subsequent calls return same array
-	static bool bInitialized = false;
-	if (!bInitialized)
+	if (CachedDescs.Num() == 0)
 	{
-		bInitialized = true;
-
-		// Get parent descriptors (AIController, Pawn, etc.) from UStateTreeComponentSchema
+		// 1. 부모 클래스(UStateTreeComponentSchema)의 데이터 가져오기 (Pawn, AIController 등)
 		TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
-		InContextDataDescs.Reserve(ParentDescs.Num() + 4); // Reserve space to prevent reallocation
-		InContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
+		CachedDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
 
-		UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeSchema::GetContextDataDescs - Added %d parent descriptors"), ParentDescs.Num());
+		// 2. 커스텀 데이터 추가 (반드시 고정된 GUID 사용)
 
-		// UE 5.6 FIX: Use deterministic GUIDs based on descriptor names
-		// These MUST be stable across editor restarts to preserve bindings
-
-		// Primary context struct - provided via CollectExternalData callback
+		// (1) Follower Context (Struct)
 		FStateTreeExternalDataDesc ContextDesc;
 		ContextDesc.Name = FName(TEXT("FollowerContext"));
 		ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
 		ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+		// 절대 변경하지 말 것 (기존 에셋과의 연결 고리)
 		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788);
-		InContextDataDescs.Add(ContextDesc);
+		CachedDescs.Add(ContextDesc);
 
+		// (2) Follower Agent Component
 		FStateTreeExternalDataDesc FollowerDesc;
 		FollowerDesc.Name = FName(TEXT("FollowerComponent"));
 		FollowerDesc.Struct = UFollowerAgentComponent::StaticClass();
 		FollowerDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-		FollowerDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60002, 0x11223344, 0x55667788); // Deterministic GUID
-		InContextDataDescs.Add(FollowerDesc);
+		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60002, 0x11223344, 0x55667788);
+		CachedDescs.Add(FollowerDesc);
 
-		FStateTreeExternalDataDesc TeamLeaderDesc;
-		TeamLeaderDesc.Name = FName(TEXT("TeamLeader"));
-		TeamLeaderDesc.Struct = UTeamLeaderComponent::StaticClass();
-		TeamLeaderDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		TeamLeaderDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60003, 0x11223344, 0x55667788); // Deterministic GUID
-		InContextDataDescs.Add(TeamLeaderDesc);
+		// (3) Follower State Tree Component (Self)
+		FStateTreeExternalDataDesc SelfDesc;
+		SelfDesc.Name = FName(TEXT("FollowerStateTreeComponent"));
+		SelfDesc.Struct = UFollowerStateTreeComponent::StaticClass();
+		SelfDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+		SelfDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60005, 0x11223344, 0x55667788);
+		CachedDescs.Add(SelfDesc);
 
-		FStateTreeExternalDataDesc TacticalPolicyDesc;
-		TacticalPolicyDesc.Name = FName(TEXT("TacticalPolicy"));
-		TacticalPolicyDesc.Struct = URLPolicyNetwork::StaticClass();
-		TacticalPolicyDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		TacticalPolicyDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60004, 0x11223344, 0x55667788); // Deterministic GUID
-		InContextDataDescs.Add(TacticalPolicyDesc);
+		// (4) Team Leader (Optional)
+		FStateTreeExternalDataDesc LeaderDesc;
+		LeaderDesc.Name = FName(TEXT("TeamLeader"));
+		LeaderDesc.Struct = UTeamLeaderComponent::StaticClass();
+		LeaderDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		LeaderDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60003, 0x11223344, 0x55667788);
+		CachedDescs.Add(LeaderDesc);
 
-		UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeSchema::GetContextDataDescs - Initialized %d total descriptors"), InContextDataDescs.Num());
+		// (5) Tactical Policy (Optional)
+		FStateTreeExternalDataDesc PolicyDesc;
+		PolicyDesc.Name = FName(TEXT("TacticalPolicy"));
+		PolicyDesc.Struct = URLPolicyNetwork::StaticClass();
+		PolicyDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		PolicyDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60004, 0x11223344, 0x55667788);
+		CachedDescs.Add(PolicyDesc);
 	}
 
-	return InContextDataDescs;
+	return CachedDescs;
 }
 
 void UFollowerStateTreeSchema::SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const

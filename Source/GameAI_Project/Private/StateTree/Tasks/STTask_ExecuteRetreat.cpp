@@ -37,7 +37,6 @@ EStateTreeRunStatus FSTTask_ExecuteRetreat::EnterState(FStateTreeExecutionContex
 	InstanceData.RetreatDestination = CalculateRetreatDestination(Context);
 	InstanceData.TotalDistanceRetreated = 0.0f;
 	InstanceData.TimeInRetreat = 0.0f;
-	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.bHasReachedSafeDistance = false;
 
 	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteRetreat: Starting retreat to %s"), *InstanceData.RetreatDestination.ToString());
@@ -56,15 +55,7 @@ EStateTreeRunStatus FSTTask_ExecuteRetreat::Tick(FStateTreeExecutionContext& Con
 	}
 
 	// Update timers
-	InstanceData.TimeSinceLastRLQuery += DeltaTime;
 	InstanceData.TimeInRetreat += DeltaTime;
-
-	// Re-query RL policy if interval elapsed
-	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
-	{
-		InstanceData.TimeSinceLastRLQuery = 0.0f;
-		// Re-querying is handled by evaluator or separate task
-	}
 
 	// Update distances
 	APawn* Pawn = InstanceData.Context.AIController->GetPawn();

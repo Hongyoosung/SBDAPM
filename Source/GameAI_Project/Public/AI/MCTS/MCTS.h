@@ -6,6 +6,7 @@
 #include "UObject/NoExportTypes.h"
 #include "Observation/ObservationElement.h"
 #include "AI/MCTS/MCTSNode.h"
+#include "AI/MCTS/TeamMCTSNode.h"
 #include "MCTS.generated.h"
 
 struct FTeamObservation;
@@ -68,16 +69,58 @@ private:
     //--------------------------------------------------------------------------
 
     /**
-     * Calculate team-level reward for a given team observation
+     * Run full MCTS tree search with selection, expansion, simulation, backpropagation
+     * @param TeamObs - Current team observation
+     * @param Followers - List of followers
+     * @return Best command assignment found
+     */
+    TMap<AActor*, struct FStrategicCommand> RunTeamMCTSTreeSearch(
+        const FTeamObservation& TeamObs,
+        const TArray<AActor*>& Followers
+    );
+
+    /**
+     * MCTS Selection Phase: Traverse tree using UCT until leaf node
+     */
+    UTeamMCTSNode* SelectNode(UTeamMCTSNode* Node);
+
+    /**
+     * MCTS Expansion Phase: Create child node with untried action
+     */
+    UTeamMCTSNode* ExpandNode(UTeamMCTSNode* Node, const TArray<AActor*>& Followers);
+
+    /**
+     * MCTS Simulation Phase: Rollout from node to estimate reward
+     */
+    float SimulateNode(UTeamMCTSNode* Node, const FTeamObservation& TeamObs);
+
+    /**
+     * Generate possible command combinations for expansion
+     * Uses smart sampling to avoid exponential explosion (11^N combinations)
+     */
+    TArray<TMap<AActor*, FStrategicCommand>> GenerateCommandCombinations(
+        const TArray<AActor*>& Followers,
+        const FTeamObservation& TeamObs,
+        int32 MaxCombinations = 10
+    ) const;
+
+    /**
+     * Calculate base team-level reward (no command-specific bonuses)
      * Considers team health, formation, objectives, combat effectiveness
      */
     float CalculateTeamReward(const FTeamObservation& TeamObs) const;
 
     /**
-     * Generate strategic commands for followers based on team observation
-     * Uses simple rule-based heuristics (placeholder for full MCTS implementation)
+     * Calculate team-level reward for a given command assignment (with synergy bonuses)
+     * Considers team health, formation, objectives, combat effectiveness, and command synergies
      */
-    TMap<AActor*, struct FStrategicCommand> GenerateStrategicCommands(
+    float CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, FStrategicCommand>& Commands) const;
+
+    /**
+     * FALLBACK: Generate strategic commands using rule-based heuristics
+     * Used when MCTS tree search is disabled or fails
+     */
+    TMap<AActor*, struct FStrategicCommand> GenerateStrategicCommandsHeuristic(
         const FTeamObservation& TeamObs,
         const TArray<AActor*>& Followers
     ) const;
@@ -100,6 +143,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
     float ExplorationParameter;
 
+    /** Enable full MCTS tree search (if false, uses fast heuristics) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
+    bool bUseTreeSearch;
+
+    /** Maximum command combinations to generate per expansion */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
+    int32 MaxCombinationsPerExpansion;
+
 
 private:
     //--------------------------------------------------------------------------
@@ -115,4 +166,14 @@ private:
     FObservationElement CurrentObservation;
 
     uint32 TreeDepth;
+
+    //--------------------------------------------------------------------------
+    // TEAM-LEVEL STATE (New)
+    //--------------------------------------------------------------------------
+    /** Root node of team MCTS tree */
+    UPROPERTY()
+    TObjectPtr<UTeamMCTSNode> TeamRootNode;
+
+    /** Cached team observation for simulation */
+    FTeamObservation CachedTeamObservation;
 };

@@ -62,6 +62,7 @@ void URLPolicyNetwork::UnloadPolicy()
 
 ETacticalAction URLPolicyNetwork::SelectAction(const FObservationElement& Observation)
 {
+	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Selecting action for observation"));
 	if (!bIsInitialized)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Not initialized, returning default action"));
@@ -72,7 +73,7 @@ ETacticalAction URLPolicyNetwork::SelectAction(const FObservationElement& Observ
 	if (bEnableExploration && FMath::FRand() < Config.Epsilon)
 	{
 		ETacticalAction RandomAction = GetRandomAction();
-		UE_LOG(LogTemp, Verbose, TEXT("URLPolicyNetwork: Exploring - selected random action: %s"),
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Exploring - selected random action: %s"),
 			*GetActionName(RandomAction));
 		return RandomAction;
 	}
@@ -83,7 +84,7 @@ ETacticalAction URLPolicyNetwork::SelectAction(const FObservationElement& Observ
 	// Select greedy action
 	ETacticalAction SelectedAction = GetGreedyAction(Probabilities);
 
-	UE_LOG(LogTemp, Verbose, TEXT("URLPolicyNetwork: Exploiting - selected action: %s (prob: %.3f)"),
+	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Exploiting - selected action: %s (prob: %.3f)"),
 		*GetActionName(SelectedAction),
 		Probabilities[ActionToIndex(SelectedAction)]);
 
@@ -397,6 +398,7 @@ ETacticalAction URLPolicyNetwork::SelectActionRuleBased(const FObservationElemen
 
 TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElement& Observation)
 {
+	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Using rule-based action selection"));
 	// Initialize probabilities (16 actions)
 	TArray<float> Probabilities;
 	Probabilities.Init(0.1f, 16);  // Small baseline probability for all actions
@@ -420,6 +422,7 @@ TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElem
 		Probabilities[ActionToIndex(ETacticalAction::TacticalRetreat)] += 5.0f;
 		Probabilities[ActionToIndex(ETacticalAction::SeekCover)] += 4.0f;
 		Probabilities[ActionToIndex(ETacticalAction::DefensiveHold)] += 2.0f;
+		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 1 triggered: Low health (%.1f%%) → Retreat/Cover/DefensiveHold"), Health);
 	}
 
 	// Rule 2: No cover and enemies visible → Seek cover
@@ -438,10 +441,11 @@ TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElem
 		Probabilities[ActionToIndex(ETacticalAction::FlankRight)] += 2.0f;
 	}
 
-	// Rule 4: Enemies very close → Hold position or retreat
+	// Rule 4: Enemies very close → Aggressive tactics (changed from defensive)
 	if (NearestEnemyDistance < 200.0f)
 	{
-		Probabilities[ActionToIndex(ETacticalAction::DefensiveHold)] += 5.0f;
+		Probabilities[ActionToIndex(ETacticalAction::AggressiveAssault)] += 5.0f;  // Changed from DefensiveHold
+		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 4 triggered: Enemy very close (%.1f units) → AggressiveAssault"), NearestEnemyDistance);
 		if (Health < 50.0f)
 		{
 			Probabilities[ActionToIndex(ETacticalAction::TacticalRetreat)] += 4.0f;
@@ -454,6 +458,7 @@ TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElem
 		Probabilities[ActionToIndex(ETacticalAction::Patrol)] += 3.0f;
 		Probabilities[ActionToIndex(ETacticalAction::CautiousAdvance)] += 2.0f;
 		Probabilities[ActionToIndex(ETacticalAction::Hold)] += 2.0f;
+		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 5 triggered: No enemies visible → Patrol/CautiousAdvance/Hold"));
 	}
 
 	// Rule 6: Multiple enemies → Seek cover + suppressive fire

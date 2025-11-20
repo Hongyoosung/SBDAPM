@@ -35,7 +35,6 @@ EStateTreeRunStatus FSTTask_ExecuteDefend::EnterState(FStateTreeExecutionContext
 	}
 
 	// Reset timers
-	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.TimeInDefensivePosition = 0.0f;
 
 	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteDefend: Starting defense at %s"), *InstanceData.DefendPosition.ToString());
@@ -54,16 +53,7 @@ EStateTreeRunStatus FSTTask_ExecuteDefend::Tick(FStateTreeExecutionContext& Cont
 	}
 
 	// Update timers
-	InstanceData.TimeSinceLastRLQuery += DeltaTime;
 	InstanceData.TimeInDefensivePosition += DeltaTime;
-
-	// Re-query RL policy if interval elapsed
-	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
-	{
-		// This would trigger a transition back to QueryRLPolicy state
-		// For now, we execute with current tactical action
-		InstanceData.TimeSinceLastRLQuery = 0.0f;
-	}
 
 	// Execute current tactical action
 	ExecuteTacticalAction(Context, DeltaTime);

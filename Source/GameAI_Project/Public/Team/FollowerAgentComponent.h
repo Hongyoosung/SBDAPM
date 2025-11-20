@@ -165,11 +165,6 @@ public:
 	//--------------------------------------------------------------------------
 	// REINFORCEMENT LEARNING
 	//--------------------------------------------------------------------------
-
-	/** Query RL policy for tactical action */
-	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
-	ETacticalAction QueryRLPolicy();
-
 	/** Get action probabilities from RL policy */
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	TArray<float> GetRLActionProbabilities();

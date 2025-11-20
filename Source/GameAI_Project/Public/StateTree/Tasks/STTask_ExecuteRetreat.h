@@ -58,10 +58,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteRetreatInstanceData
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
-	/** Query RL policy every N seconds (0 = only at state entry) */
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-	float RLQueryInterval = 2.0f;
-
 	/** Minimum safe distance from threats (cm) */
 	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "1000.0", ClampMax = "5000.0"))
 	float MinSafeDistance = 2500.0f;
@@ -85,10 +81,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteRetreatInstanceData
 	//--------------------------------------------------------------------------
 	// RUNTIME STATE (managed by task)
 	//--------------------------------------------------------------------------
-
-	/** Time since last RL query */
-	UPROPERTY()
-	float TimeSinceLastRLQuery = 0.0f;
 
 	/** Time in retreat */
 	UPROPERTY()

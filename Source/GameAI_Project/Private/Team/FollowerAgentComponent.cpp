@@ -466,31 +466,6 @@ FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 // REINFORCEMENT LEARNING
 //------------------------------------------------------------------------------
 
-ETacticalAction UFollowerAgentComponent::QueryRLPolicy()
-{
-	if (!bUseRLPolicy || !TacticalPolicy)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': RL policy not available, returning default action"),
-			*GetOwner()->GetName());
-		return ETacticalAction::DefensiveHold;
-	}
-
-	// Get current observation
-	FObservationElement CurrentObs = GetLocalObservation();
-
-	// Query policy for action
-	ETacticalAction SelectedAction = TacticalPolicy->SelectAction(CurrentObs);
-
-	// Store for experience collection
-	PreviousObservation = CurrentObs;
-	LastTacticalAction = SelectedAction;
-	TimeSinceLastTacticalAction = 0.0f;  // Reset timer when new action is selected
-
-	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': RL policy selected action: %s"),
-		*GetOwner()->GetName(), *URLPolicyNetwork::GetActionName(SelectedAction));
-
-	return SelectedAction;
-}
 
 TArray<float> UFollowerAgentComponent::GetRLActionProbabilities()
 {

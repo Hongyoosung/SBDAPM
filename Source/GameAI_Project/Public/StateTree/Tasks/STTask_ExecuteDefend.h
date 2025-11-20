@@ -59,10 +59,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteDefendInstanceData
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
-	/** Query RL policy every N seconds (0 = only at state entry) */
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-	float RLQueryInterval = 3.0f;
-
 	/** Maximum distance from defend location (cm) */
 	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "100.0", ClampMax = "3000.0"))
 	float MaxDefendRadius = 1000.0f;
@@ -86,10 +82,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteDefendInstanceData
 	//--------------------------------------------------------------------------
 	// RUNTIME STATE (managed by task)
 	//--------------------------------------------------------------------------
-
-	/** Time since last RL query */
-	UPROPERTY()
-	float TimeSinceLastRLQuery = 0.0f;
 
 	/** Time in defensive position */
 	UPROPERTY()

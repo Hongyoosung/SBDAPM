@@ -27,12 +27,6 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteSupportInstanceData
 
 	UPROPERTY(EditAnywhere, Category = "Context")
 	FFollowerStateTreeContext Context;
-
-	UPROPERTY(EditAnywhere, Category = "Config")
-	float RLQueryInterval = 3.0f;
-
-	UPROPERTY()
-	float TimeSinceLastRLQuery = 0.0f;
 };
 
 USTRUCT(meta = (DisplayName = "Execute Support"))

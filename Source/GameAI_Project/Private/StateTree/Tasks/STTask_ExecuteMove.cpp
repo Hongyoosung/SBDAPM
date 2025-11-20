@@ -33,7 +33,6 @@ EStateTreeRunStatus FSTTask_ExecuteMove::EnterState(FStateTreeExecutionContext& 
 	InstanceData.LastPosition = Pawn->GetActorLocation();
 	InstanceData.bHasReachedDestination = false;
 	InstanceData.TotalDistanceTraveled = 0.0f;
-	InstanceData.TimeSinceLastRLQuery = 0.0f;
 	InstanceData.CurrentWaypointIndex = 0;
 
 	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteMove: Starting movement to %s (Command: %s)"),
@@ -54,15 +53,7 @@ EStateTreeRunStatus FSTTask_ExecuteMove::Tick(FStateTreeExecutionContext& Contex
 	}
 
 	// Update timers
-	InstanceData.TimeSinceLastRLQuery += DeltaTime;
 	InstanceData.Context.TimeInTacticalAction += DeltaTime;
-
-	// Re-query RL policy if interval elapsed
-	if (InstanceData.RLQueryInterval > 0.0f && InstanceData.TimeSinceLastRLQuery >= InstanceData.RLQueryInterval)
-	{
-		InstanceData.TimeSinceLastRLQuery = 0.0f;
-		// Note: Re-querying is handled by evaluator or separate task
-	}
 
 	// Track distance traveled
 	APawn* Pawn = InstanceData.Context.AIController->GetPawn();

@@ -6,7 +6,10 @@
 #include "StateTreeTaskBase.h"
 #include "RL/RLTypes.h"
 #include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTreeExecutionTypes.h"
 #include "STTask_QueryRLPolicy.generated.h"
+
+class UFollowerStateTreeComponent;
 
 
 /**
@@ -41,15 +44,12 @@ struct GAMEAI_PROJECT_API FSTTask_QueryRLPolicyInstanceData
 	GENERATED_BODY()
 
 	//--------------------------------------------------------------------------
-	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
+	// EXTERNAL DATA BINDING (UE 5.6 - binds to StateTree component)
 	//--------------------------------------------------------------------------
 
-	/**
-	 * Shared context struct - automatically bound by StateTree
-	 * Contains all agent state, commands, observations, and components
-	 */
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
+	/** StateTree component reference - provides access to shared context */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UFollowerStateTreeComponent> StateTreeComp;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION

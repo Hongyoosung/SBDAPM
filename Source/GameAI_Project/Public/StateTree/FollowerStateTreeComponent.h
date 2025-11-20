@@ -81,9 +81,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "State Tree")
 	void InitializeContext();
 
-	/** Get State Tree context */
+	/** Get State Tree context (by value - Blueprint safe) */
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FFollowerStateTreeContext GetContext() const { return Context; }
+
+	/** Get SHARED State Tree context reference (C++ only - for tasks to share data) */
+	FFollowerStateTreeContext& GetSharedContext() { return Context; }
+	const FFollowerStateTreeContext& GetSharedContext() const { return Context; }
 
 	/** Update context from follower component */
 	UFUNCTION(BlueprintCallable, Category = "State Tree")
@@ -119,6 +123,8 @@ protected:
 
 	/** Handle follower death */
 	void OnFollowerDied();
+
+	bool CheckRequirementsAndStart();
 
 
 public:

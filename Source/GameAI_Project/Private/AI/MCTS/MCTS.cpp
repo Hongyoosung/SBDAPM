@@ -5,8 +5,14 @@
 
 UMCTS::UMCTS()
     : MaxSimulations(500)
-    , DiscountFactor(0.95f), ExplorationParameter(1.41f)
-    , RootNode(nullptr), CurrentNode(nullptr), TreeDepth(0)
+    , DiscountFactor(0.95f)
+    , ExplorationParameter(1.41f)
+    , bUseTreeSearch(false)
+    , MaxCombinationsPerExpansion(10)
+    , RootNode(nullptr)
+    , CurrentNode(nullptr)
+    , TreeDepth(0)
+    , TeamRootNode(nullptr)
 {
 }
 
@@ -336,21 +342,19 @@ TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTS(
     const FTeamObservation& TeamObservation,
     const TArray<AActor*>& Followers)
 {
-    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level search for %d followers"), Followers.Num());
+    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level search for %d followers (TreeSearch: %s)"),
+        Followers.Num(), bUseTreeSearch ? TEXT("ENABLED") : TEXT("DISABLED"));
 
-    // TODO: Implement full MCTS tree search for team-level action space
-    // Current implementation uses rule-based heuristics as placeholder
-    //
-    // Full implementation would:
-    // 1. Create root node with current team observation
-    // 2. For each simulation:
-    //    a. Selection: UCT-based node selection
-    //    b. Expansion: Generate child nodes for command combinations
-    //    c. Simulation: Evaluate team reward
-    //    d. Backpropagation: Update node statistics
-    // 3. Select best command combination based on visit counts/rewards
-
-    return GenerateStrategicCommands(TeamObservation, Followers);
+    if (bUseTreeSearch)
+    {
+        // Use full MCTS tree search
+        return RunTeamMCTSTreeSearch(TeamObservation, Followers);
+    }
+    else
+    {
+        // Use fast heuristic-based command generation
+        return GenerateStrategicCommandsHeuristic(TeamObservation, Followers);
+    }
 }
 
 
@@ -400,7 +404,7 @@ float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs) const
 }
 
 
-TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
+TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommandsHeuristic(
     const FTeamObservation& TeamObs,
     const TArray<AActor*>& Followers) const
 {
@@ -417,10 +421,18 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
     // Rule-based command generation with tactical diversity
     // Assign different roles to followers based on team composition
 
-    int32 FollowerIndex = 0;
-    int32 NumFollowers = Followers.Num();
+    // Shuffle followers to randomize role assignment
+    TArray<AActor*> ShuffledFollowers = Followers;
+    for (int32 i = ShuffledFollowers.Num() - 1; i > 0; --i)
+    {
+        int32 j = FMath::RandRange(0, i);
+        ShuffledFollowers.Swap(i, j);
+    }
 
-    for (AActor* Follower : Followers)
+    int32 FollowerIndex = 0;
+    int32 NumFollowers = ShuffledFollowers.Num();
+
+    for (AActor* Follower : ShuffledFollowers)
     {
         if (!Follower) continue;
 
@@ -668,4 +680,261 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommands(
     }
 
     return Commands;
+}
+
+
+//==============================================================================
+// MCTS TREE SEARCH IMPLEMENTATION
+//==============================================================================
+
+TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTSTreeSearch(
+    const FTeamObservation& TeamObs,
+    const TArray<AActor*>& Followers)
+{
+    UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS TREE SEARCH: Starting for %d followers (%d simulations)"),
+        Followers.Num(), MaxSimulations);
+
+    // Cache observation for simulation phase
+    CachedTeamObservation = TeamObs;
+
+    // Create root node with empty command assignment
+    TeamRootNode = NewObject<UTeamMCTSNode>(this);
+    TMap<AActor*, FStrategicCommand> InitialCommands;
+    TeamRootNode->Initialize(nullptr, InitialCommands);
+
+    // Generate initial untried actions for root
+    TeamRootNode->UntriedActions = GenerateCommandCombinations(Followers, TeamObs, MaxCombinationsPerExpansion);
+
+    UE_LOG(LogTemp, Display, TEXT("🌲 MCTS: Root initialized with %d possible combinations"),
+        TeamRootNode->UntriedActions.Num());
+
+    // Run MCTS simulations
+    for (int32 i = 0; i < MaxSimulations; ++i)
+    {
+        // 1. SELECTION: Traverse tree using UCT
+        UTeamMCTSNode* LeafNode = SelectNode(TeamRootNode);
+
+        // 2. EXPANSION: Add child node if not terminal
+        UTeamMCTSNode* NodeToSimulate = LeafNode;
+        if (!LeafNode->IsTerminal() && LeafNode->VisitCount > 0)
+        {
+            NodeToSimulate = ExpandNode(LeafNode, Followers);
+            if (!NodeToSimulate)
+            {
+                NodeToSimulate = LeafNode; // Expansion failed, use leaf
+            }
+        }
+
+        // 3. SIMULATION: Estimate reward
+        float Reward = SimulateNode(NodeToSimulate, TeamObs);
+
+        // 4. BACKPROPAGATION: Update node statistics
+        NodeToSimulate->Backpropagate(Reward);
+
+        if (i % 100 == 0)
+        {
+            UE_LOG(LogTemp, Verbose, TEXT("🌲 MCTS: Simulation %d/%d - Reward: %.1f"),
+                i, MaxSimulations, Reward);
+        }
+    }
+
+    // Select best child based on visit count (most explored = most promising)
+    UTeamMCTSNode* BestChild = nullptr;
+    int32 MaxVisits = 0;
+
+    for (UTeamMCTSNode* Child : TeamRootNode->Children)
+    {
+        if (Child && Child->VisitCount > MaxVisits)
+        {
+            MaxVisits = Child->VisitCount;
+            BestChild = Child;
+        }
+    }
+
+    if (BestChild)
+    {
+        float AvgReward = BestChild->TotalReward / FMath::Max(1, BestChild->VisitCount);
+        UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS TREE SEARCH: Best child found (Visits: %d, Avg Reward: %.1f)"),
+            MaxVisits, AvgReward);
+        return BestChild->GetCommands();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS TREE SEARCH: No children expanded! Falling back to heuristics"));
+        return GenerateStrategicCommandsHeuristic(TeamObs, Followers);
+    }
+}
+
+
+UTeamMCTSNode* UMCTS::SelectNode(UTeamMCTSNode* Node)
+{
+    // Traverse tree using UCT until reaching a leaf node
+    while (!Node->IsTerminal())
+    {
+        if (!Node->IsFullyExpanded())
+        {
+            // Node has untried actions, return it for expansion
+            return Node;
+        }
+        else
+        {
+            // Node is fully expanded, select best child using UCT
+            Node = Node->SelectBestChild(ExplorationParameter);
+            if (!Node)
+            {
+                UE_LOG(LogTemp, Error, TEXT("SelectNode: SelectBestChild returned nullptr!"));
+                break;
+            }
+        }
+    }
+
+    return Node;
+}
+
+
+UTeamMCTSNode* UMCTS::ExpandNode(UTeamMCTSNode* Node, const TArray<AActor*>& Followers)
+{
+    if (Node->UntriedActions.Num() == 0)
+    {
+        // Generate new actions if none available
+        Node->UntriedActions = GenerateCommandCombinations(
+            Followers,
+            CachedTeamObservation,
+            MaxCombinationsPerExpansion
+        );
+    }
+
+    return Node->Expand(Followers);
+}
+
+
+float UMCTS::SimulateNode(UTeamMCTSNode* Node, const FTeamObservation& TeamObs)
+{
+    // Fast rollout: evaluate reward for this command assignment
+    TMap<AActor*, FStrategicCommand> Commands = Node->GetCommands();
+
+    // If no commands assigned yet, use heuristic
+    if (Commands.Num() == 0)
+    {
+        return CalculateTeamReward(TeamObs) * 0.5f; // Base reward
+    }
+
+    // Calculate reward based on command synergy and team state
+    return CalculateTeamReward(TeamObs, Commands);
+}
+
+
+TArray<TMap<AActor*, FStrategicCommand>> UMCTS::GenerateCommandCombinations(
+    const TArray<AActor*>& Followers,
+    const FTeamObservation& TeamObs,
+    int32 MaxCombinations) const
+{
+    TArray<TMap<AActor*, FStrategicCommand>> Combinations;
+
+    // Available command types (strategic level)
+    TArray<EStrategicCommandType> PossibleCommands = {
+        EStrategicCommandType::Assault,
+        EStrategicCommandType::TakeCover,
+        EStrategicCommandType::Support,
+        EStrategicCommandType::Retreat,
+        EStrategicCommandType::Advance,
+        EStrategicCommandType::HoldPosition
+    };
+
+    // Generate diverse command combinations using sampling
+    for (int32 i = 0; i < MaxCombinations; ++i)
+    {
+        TMap<AActor*, FStrategicCommand> Combo;
+
+        for (AActor* Follower : Followers)
+        {
+            if (!Follower) continue;
+
+            // Pick random command type
+            int32 RandomIndex = FMath::RandRange(0, PossibleCommands.Num() - 1);
+            EStrategicCommandType CommandType = PossibleCommands[RandomIndex];
+
+            FStrategicCommand Command;
+            Command.CommandType = CommandType;
+            Command.Priority = 7;
+
+            // Assign target if enemies available
+            if (TeamObs.TrackedEnemies.Num() > 0)
+            {
+
+                TArray<AActor*> TrackedEnemiesArray = TeamObs.TrackedEnemies.Array();
+
+                int32 EnemyIndex = FMath::RandRange(0, TrackedEnemiesArray.Num() - 1);
+
+                // 3. TArray에서 타겟을 가져옵니다.
+                Command.TargetActor = TrackedEnemiesArray[EnemyIndex];
+
+                if (Command.TargetActor)
+                {
+                    Command.TargetLocation = Command.TargetActor->GetActorLocation();
+                }
+            }
+
+            Combo.Add(Follower, Command);
+        }
+
+        Combinations.Add(Combo);
+    }
+
+    UE_LOG(LogTemp, Verbose, TEXT("Generated %d command combinations for %d followers"),
+        Combinations.Num(), Followers.Num());
+
+    return Combinations;
+}
+
+
+float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, FStrategicCommand>& Commands) const
+{
+    // Base team reward
+    float BaseReward = CalculateTeamReward(TeamObs);
+
+    // Command synergy bonuses
+    float SynergyBonus = 0.0f;
+
+    // Count command types
+    TMap<EStrategicCommandType, int32> CommandCounts;
+    for (const auto& Pair : Commands)
+    {
+        CommandCounts.FindOrAdd(Pair.Value.CommandType, 0)++;
+    }
+
+    int32 TotalFollowers = Commands.Num();
+
+    // Bonus for tactical diversity (avoid all-assault or all-defend)
+    if (CommandCounts.Num() >= 2)
+    {
+        SynergyBonus += 20.0f; // +20 for having multiple tactics
+    }
+
+    // Bonus for balanced composition in combat
+    if (TeamObs.TotalVisibleEnemies > 0)
+    {
+        int32 AssaultCount = CommandCounts.FindRef(EStrategicCommandType::Assault);
+        int32 SupportCount = CommandCounts.FindRef(EStrategicCommandType::Support);
+        int32 DefendCount = CommandCounts.FindRef(EStrategicCommandType::TakeCover);
+
+        // Reward having frontline + support + defense mix
+        if (AssaultCount > 0 && (SupportCount > 0 || DefendCount > 0))
+        {
+            SynergyBonus += 30.0f; // +30 for combined arms
+        }
+    }
+
+    // Penalty for poor situational choices
+    if (TeamObs.bOutnumbered && CommandCounts.FindRef(EStrategicCommandType::Assault) == TotalFollowers)
+    {
+        SynergyBonus -= 50.0f; // -50 for all-assault when outnumbered
+    }
+
+    if (TeamObs.AverageTeamHealth < 40.0f && CommandCounts.FindRef(EStrategicCommandType::Retreat) == 0)
+    {
+        SynergyBonus -= 30.0f; // -30 for not retreating when low health
+    }
+
+    return BaseReward + SynergyBonus;
 }

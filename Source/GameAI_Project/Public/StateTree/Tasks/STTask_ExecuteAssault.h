@@ -6,7 +6,10 @@
 #include "StateTreeTaskBase.h"
 #include "RL/RLTypes.h"
 #include "StateTree/FollowerStateTreeSchema.h"
+#include "StateTreeExecutionTypes.h"
 #include "STTask_ExecuteAssault.generated.h"
+
+class UFollowerStateTreeComponent;
 
 
 /**
@@ -30,20 +33,15 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteAssaultInstanceData
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
+	/** StateTree component reference - provides access to shared context */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UFollowerStateTreeComponent> StateTreeComp;
 
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "0.0", ClampMax = "10.0"))
-	float RLQueryInterval = 3.0f;
-
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "1.0", ClampMax = "2.0"))
+	UPROPERTY(EditAnywhere, Category = "Parameter", meta = (ClampMin = "1.0", ClampMax = "2.0"))
 	float AggressiveSpeedMultiplier = 1.5f;
 
-	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "500.0", ClampMax = "3000.0"))
+	UPROPERTY(EditAnywhere, Category = "Parameter", meta = (ClampMin = "500.0", ClampMax = "3000.0"))
 	float OptimalEngagementRange = 1500.0f;
-
-	UPROPERTY()
-	float TimeSinceLastRLQuery = 0.0f;
 };
 
 USTRUCT(meta = (DisplayName = "Execute Assault"))

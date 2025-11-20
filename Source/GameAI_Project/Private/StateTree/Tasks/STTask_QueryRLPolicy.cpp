@@ -2,6 +2,7 @@
 
 #include "StateTree/Tasks/STTask_QueryRLPolicy.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "RL/RLPolicyNetwork.h"
 #include "Team/FollowerAgentComponent.h"
 #include "AIController.h"
@@ -11,12 +12,20 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	if (!InstanceData.StateTreeComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("STTask_QueryRLPolicy: StateTreeComp is null!"));
+		return EStateTreeRunStatus::Failed;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
 	// Reset timer state
 	InstanceData.TimeSinceLastQuery = 0.0f;
 	InstanceData.bHasQueriedOnce = false;
 
 	// Validate context components
-	if (!InstanceData.Context.FollowerComponent)
+	if (!SharedContext.FollowerComponent)
 	{
 		UE_LOG(LogTemp, Error, TEXT("STTask_QueryRLPolicy: FollowerComponent is null in context"));
 		return EStateTreeRunStatus::Failed;
@@ -25,23 +34,29 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 	// Query the policy immediately on entry
 	ETacticalAction SelectedAction = QueryPolicy(Context);
 
-	// Write selected action to context (so other tasks can read it)
-	InstanceData.Context.CurrentTacticalAction = SelectedAction;
-	InstanceData.Context.TimeInTacticalAction = 0.0f;
+	// Write selected action to SHARED context (so other tasks can read it)
+	SharedContext.CurrentTacticalAction = SelectedAction;
+	SharedContext.TimeInTacticalAction = 0.0f;
 	InstanceData.bHasQueriedOnce = true;
+
+	// ALWAYS log to diagnose binding issue
+	UE_LOG(LogTemp, Warning, TEXT("🔍 [QUERY RL] '%s': WROTE action to SHARED context: %s (Context addr: %p)"),
+		*SharedContext.FollowerComponent->GetOwner()->GetName(),
+		*UEnum::GetValueAsString(SelectedAction),
+		&SharedContext);
 
 	// Log if enabled
 	if (InstanceData.bLogActionSelection)
 	{
 		UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Selected action '%s' for '%s'"),
 			*UEnum::GetValueAsString(SelectedAction),
-			*InstanceData.Context.FollowerComponent->GetOwner()->GetName());
+			*SharedContext.FollowerComponent->GetOwner()->GetName());
 	}
 
 	// Draw debug if enabled
-	if (InstanceData.bDrawDebugInfo && InstanceData.Context.FollowerComponent->GetOwner())
+	if (InstanceData.bDrawDebugInfo && SharedContext.FollowerComponent->GetOwner())
 	{
-		AActor* Owner = InstanceData.Context.FollowerComponent->GetOwner();
+		AActor* Owner = SharedContext.FollowerComponent->GetOwner();
 		FVector Location = Owner->GetActorLocation();
 		FString ActionName = UEnum::GetValueAsString(SelectedAction);
 		DrawDebugString(Owner->GetWorld(), Location + FVector(0, 0, 100),
@@ -61,6 +76,7 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 EStateTreeRunStatus FSTTask_QueryRLPolicy::Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	// Accumulate time
 	InstanceData.TimeSinceLastQuery += DeltaTime;
@@ -73,8 +89,8 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::Tick(FStateTreeExecutionContext& Cont
 		// Query the policy
 		ETacticalAction SelectedAction = QueryPolicy(Context);
 
-		// Update context
-		InstanceData.Context.CurrentTacticalAction = SelectedAction;
+		// Update SHARED context
+		SharedContext.CurrentTacticalAction = SelectedAction;
 		// Note: Don't reset TimeInTacticalAction here - let execution tasks track that
 
 		// Log if enabled
@@ -82,13 +98,13 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::Tick(FStateTreeExecutionContext& Cont
 		{
 			UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Re-queried action '%s' for '%s'"),
 				*UEnum::GetValueAsString(SelectedAction),
-				*InstanceData.Context.FollowerComponent->GetOwner()->GetName());
+				*SharedContext.FollowerComponent->GetOwner()->GetName());
 		}
 
 		// Draw debug if enabled
-		if (InstanceData.bDrawDebugInfo && InstanceData.Context.FollowerComponent->GetOwner())
+		if (InstanceData.bDrawDebugInfo && SharedContext.FollowerComponent->GetOwner())
 		{
-			AActor* Owner = InstanceData.Context.FollowerComponent->GetOwner();
+			AActor* Owner = SharedContext.FollowerComponent->GetOwner();
 			FVector Location = Owner->GetActorLocation();
 			FString ActionName = UEnum::GetValueAsString(SelectedAction);
 			DrawDebugString(Owner->GetWorld(), Location + FVector(0, 0, 100),
@@ -108,16 +124,21 @@ void FSTTask_QueryRLPolicy::ExitState(FStateTreeExecutionContext& Context, const
 ETacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	// Check if using RL policy
-	if (InstanceData.bUseRLPolicy && InstanceData.Context.TacticalPolicy && InstanceData.Context.TacticalPolicy->IsReady())
+	if (InstanceData.bUseRLPolicy && SharedContext.TacticalPolicy && SharedContext.TacticalPolicy->IsReady())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("STTask_QueryRLPolicy: Querying RL policy for '%s'"),
+			*SharedContext.FollowerComponent->GetOwner()->GetName());
 		// Query RL policy network using current observation from context
-		ETacticalAction SelectedAction = InstanceData.Context.TacticalPolicy->SelectAction(InstanceData.Context.CurrentObservation);
+		ETacticalAction SelectedAction = SharedContext.TacticalPolicy->SelectAction(SharedContext.CurrentObservation);
 		return SelectedAction;
 	}
 	else
 	{
+		UE_LOG(LogTemp, Warning, TEXT("STTask_QueryRLPolicy: RL policy not used or not ready for '%s', falling back to rule-based action"),
+			*SharedContext.FollowerComponent->GetOwner()->GetName());
 		// Fallback to rule-based
 		return GetFallbackAction(Context);
 	}
@@ -126,17 +147,18 @@ ETacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& C
 ETacticalAction FSTTask_QueryRLPolicy::GetFallbackAction(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	// Simple rule-based fallback based on command type from context
-	switch (InstanceData.Context.CurrentCommand.CommandType)
+	switch (SharedContext.CurrentCommand.CommandType)
 	{
 	case EStrategicCommandType::Assault:
-		return InstanceData.Context.CurrentObservation.AgentHealth > 0.5f
+		return SharedContext.CurrentObservation.AgentHealth > 0.5f
 			? ETacticalAction::AggressiveAssault
 			: ETacticalAction::CautiousAdvance;
 
 	case EStrategicCommandType::Defend:
-		return InstanceData.Context.bInCover
+		return SharedContext.bInCover
 			? ETacticalAction::DefensiveHold
 			: ETacticalAction::SeekCover;
 
