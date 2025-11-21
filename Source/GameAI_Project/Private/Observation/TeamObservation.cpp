@@ -158,6 +158,82 @@ FTeamObservation FTeamObservation::BuildFromTeam(
         TeamObs.TeamCentroid = Sum / TeamMembers.Num();
     }
 
+    // ============================================================================
+    // FORMATION COHERENCE CALCULATION
+    // ============================================================================
+    // Measures tactical spacing quality based on inter-agent distances
+    // Optimal spacing: 400-800cm (close enough to support, far enough to avoid clustering)
+    // Penalizes: < 200cm (too close, vulnerable to AoE) or > 1500cm (too spread, no mutual support)
+    // ============================================================================
+
+    if (TeamMembers.Num() >= 2)
+    {
+        float TotalScore = 0.0f;
+        int32 PairCount = 0;
+        float TotalDistance = 0.0f;
+
+        // Calculate pairwise distances and score each pair
+        for (int32 i = 0; i < TeamMembers.Num(); ++i)
+        {
+            AActor* Agent1 = TeamMembers[i];
+            if (!Agent1) continue;
+
+            for (int32 j = i + 1; j < TeamMembers.Num(); ++j)
+            {
+                AActor* Agent2 = TeamMembers[j];
+                if (!Agent2) continue;
+
+                float Distance = FVector::Dist(Agent1->GetActorLocation(), Agent2->GetActorLocation());
+                TotalDistance += Distance;
+
+                // Score this pair's spacing (0.0 = bad, 1.0 = optimal)
+                float PairScore = 0.0f;
+
+                // Optimal range: 400-800cm → score = 1.0
+                if (Distance >= 400.0f && Distance <= 800.0f)
+                {
+                    PairScore = 1.0f;
+                }
+                // Too close: < 400cm → score decreases (0.0 at ~68cm collision boundary)
+                else if (Distance < 400.0f)
+                {
+                    // Linear falloff from 400cm (score=1.0) to 68cm (score=0.0)
+                    PairScore = FMath::Clamp((Distance - 68.0f) / (400.0f - 68.0f), 0.0f, 1.0f);
+                }
+                // Too spread: > 800cm → score decreases (0.0 at 2000cm)
+                else if (Distance > 800.0f)
+                {
+                    // Linear falloff from 800cm (score=1.0) to 2000cm (score=0.0)
+                    PairScore = FMath::Clamp(1.0f - ((Distance - 800.0f) / 1200.0f), 0.0f, 1.0f);
+                }
+
+                TotalScore += PairScore;
+                PairCount++;
+            }
+        }
+
+        // Average score across all pairs
+        if (PairCount > 0)
+        {
+            TeamObs.FormationCoherence = TotalScore / PairCount;
+
+            // Also calculate formation spread (max distance between any two agents)
+            TeamObs.FormationSpread = TotalDistance / PairCount; // Average pairwise distance
+
+            // Log formation quality for diagnosis
+            UE_LOG(LogTemp, Log, TEXT("[FORMATION QUALITY] AvgDistance: %.1f cm, Coherence: %.3f (%.1f pairs scored, optimal: 400-800cm)"),
+                TeamObs.FormationSpread,
+                TeamObs.FormationCoherence,
+                static_cast<float>(PairCount));
+        }
+    }
+    else if (TeamMembers.Num() == 1)
+    {
+        // Single agent: perfect coherence (no spacing issues)
+        TeamObs.FormationCoherence = 1.0f;
+        TeamObs.FormationSpread = 0.0f;
+    }
+
     // Track enemies
     TeamObs.TotalVisibleEnemies = KnownEnemies.Num();
     TeamObs.TrackedEnemies.Append(KnownEnemies);

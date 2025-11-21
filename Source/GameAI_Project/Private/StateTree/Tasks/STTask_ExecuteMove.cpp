@@ -9,6 +9,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
+#include "Util/GameAIHelper.h"
 
 EStateTreeRunStatus FSTTask_ExecuteMove::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
@@ -329,19 +330,24 @@ void FSTTask_ExecuteMove::MoveToLocation(FStateTreeExecutionContext& Context, co
 
 	if (!InstanceData.Context.AIController) return;
 
-	// Move to destination
-	InstanceData.Context.AIController->MoveToLocation(Destination, InstanceData.WaypointAcceptanceRadius);
+	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	if (!Pawn) return;
+
+	// Apply formation offset for movement positioning
+	FVector FormationOffset = UGameAIHelper::CalculateFormationOffset(
+		Pawn,
+		InstanceData.Context.FollowerComponent,
+		InstanceData.Context.CurrentCommand.CommandType);
+
+	FVector AdjustedDestination = Destination + FormationOffset;
+
+	// Move to adjusted destination
+	InstanceData.Context.AIController->MoveToLocation(AdjustedDestination, InstanceData.WaypointAcceptanceRadius);
 
 	// Adjust movement speed via CharacterMovementComponent (if available)
-	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
-	if (Pawn)
+	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 	{
-		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
-		{
-			// Note: This modifies max walk speed directly
-			// You may want to store original speed and restore in ExitState
-			float BaseSpeed = 600.0f; // Default UE character speed
-			MovementComp->MaxWalkSpeed = BaseSpeed * SpeedMultiplier;
-		}
+		float BaseSpeed = 600.0f; // Default UE character speed
+		MovementComp->MaxWalkSpeed = BaseSpeed * SpeedMultiplier;
 	}
 }

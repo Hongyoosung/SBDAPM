@@ -4,6 +4,7 @@
 #include "StateTree/FollowerStateTreeContext.h"
 #include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Team/TeamLeaderComponent.h"
 #include "Combat/WeaponComponent.h"
 #include "Combat/HealthComponent.h"
 #include "AIController.h"
@@ -14,8 +15,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "RL/RLPolicyNetwork.h"
 #include "Navigation/PathFollowingComponent.h"
-#include "Utill/GameAIHelper.h"
-
+#include "Util/GameAIHelper.h"
 
 
 EStateTreeRunStatus FSTTask_ExecuteAssault::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
@@ -176,7 +176,24 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 	{
 		FVector CurrentLocation = Pawn->GetActorLocation();
 		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
-		float Distance = FVector::Dist(CurrentLocation, TargetLocation);
+
+		// ============================================================================
+		// FORMATION OFFSET: Apply tactical spacing to prevent clustering
+		// ============================================================================
+		FVector FormationOffset = UGameAIHelper::CalculateFormationOffset(
+			Pawn,
+			SharedContext.FollowerComponent,
+			EStrategicCommandType::Assault);
+
+		FVector AdjustedTarget = TargetLocation + FormationOffset;
+		float Distance = FVector::Dist(CurrentLocation, AdjustedTarget);
+
+		UE_LOG(LogTemp, Warning, TEXT("[ASSAULT] '%s': Target=%s, BasePos=%s, Offset=%s, FinalPos=%s"),
+			*Pawn->GetName(),
+			*SharedContext.PrimaryTarget->GetName(),
+			*TargetLocation.ToCompactString(),
+			*FormationOffset.ToCompactString(),
+			*AdjustedTarget.ToCompactString());
 
 		// Set high speed multiplier and apply to movement component
 		SharedContext.MovementSpeedMultiplier = InstanceData.AggressiveSpeedMultiplier;
@@ -188,10 +205,10 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 			MovementComp->MaxWalkSpeed = BaseSpeed * SharedContext.MovementSpeedMultiplier;
 		}
 
-		// Move directly toward target
+		// Move to adjusted target with formation offset
 		if (SharedContext.AIController)
 		{
-			EPathFollowingRequestResult::Type MoveResult = SharedContext.AIController->MoveToLocation(TargetLocation, 50.0f);
+			EPathFollowingRequestResult::Type MoveResult = SharedContext.AIController->MoveToLocation(AdjustedTarget, 50.0f);
 
 			// Log movement result for debugging
 			if (MoveResult == EPathFollowingRequestResult::Failed)
@@ -204,7 +221,7 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 			}
 
 			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
-			SharedContext.MovementDestination = TargetLocation;
+			SharedContext.MovementDestination = AdjustedTarget;
 		}
 		else
 		{
@@ -276,7 +293,7 @@ void FSTTask_ExecuteAssault::ExecuteAggressiveAssault(FStateTreeExecutionContext
 		}
 
 		SharedContext.bIsMoving = true;
-		SharedContext.MovementDestination = TargetLocation;
+		SharedContext.MovementDestination = AdjustedTarget;
 	}
 	else if (SharedContext.CurrentCommand.TargetLocation != FVector::ZeroVector)
 	{

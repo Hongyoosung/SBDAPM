@@ -339,4 +339,7 @@ private:
 	int32 TotalCommandsIssued = 0;
 	int32 TotalEnemiesEliminated = 0;
 	int32 TotalFollowersLost = 0;
+
+	/** Time since last formation distance log (for proximity diagnosis) */
+	float TimeSinceLastFormationLog = 0.0f;
 };

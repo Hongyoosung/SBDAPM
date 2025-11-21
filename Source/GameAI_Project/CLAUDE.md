@@ -22,6 +22,8 @@ Followers (N agents) → RL Policy + State Tree → Tactical execution
 
 ### 1. Team Leader (`Team/TeamLeaderComponent.h/cpp`)
 - Event-driven MCTS (async, 500-1000 simulations)
+- **Pure MCTS tree search** - Full selection/expansion/simulation/backpropagation
+- **Research baseline available** - `GenerateStrategicCommandsHeuristic()` for comparison
 - Issues strategic commands to followers
 - Aggregates team observations (40 + N×71 features)
 - Runs on background thread (50-100ms, non-blocking)
@@ -128,6 +130,8 @@ struct FMyConditionInstanceData {
 - **Command Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers → State Transitions ✅
 - **Perception system** - Enemy detection, team filtering, auto-reporting ✅
 - **Combat system** - Health/Weapon components, RL reward integration, observation population ✅
+- **State Tree Execution** - Tasks executing properly, agents performing actions ✅
+- **MCTS Decision Making** - Team-level strategic commands working, random actions at simulation start ✅
 - **Comprehensive logging** - Color-coded debug system ✅
 - Enhanced observation system (71+40 features)
 - Team architecture (Leader, Follower, Communication)
@@ -136,19 +140,22 @@ struct FMyConditionInstanceData {
 - StateTree components for all follower states (Assault, Defend, Support, Move, Retreat)
 - EQS cover system (Generator, Test, Context)
 - Simulation Manager GameMode (team registration, enemy tracking)
-- BehaviorTree (LEGACY - deprecated in favor of StateTree)
 
-**⚠️ Current Issue:**
-- **Execution Gap** - Agents receive Assault commands and transition states, but don't execute (no movement/firing)
-- Root causes: No target assignment, ExecuteAssault task incomplete, possible StateTree asset gaps
-- See `next_step.md` for detailed execution pipeline plan
+**⚠️ Current Investigation:**
+- **Agent Proximity Issue** - During initial simulation, agents tend to be too close to each other
+- Potential causes:
+  - No formation spacing logic (FormationCoherence reward exists but no spatial enforcement)
+  - MCTS may assign similar target locations to all team members
+  - Random early actions lack spreading/positioning tactics
+  - Natural convergence (both teams move toward objectives/enemies)
+- See `next_step.md` for investigation plan
 
 **🔄 Next Steps (see next_step.md):**
-1. **Fix ExecuteAssault Task** - Implement movement toward target + weapon firing in STTask_ExecuteAssault
-2. **Target Assignment** - Team Leader assigns nearest enemy when issuing Assault commands
-3. **StateTree Asset Validation** - Verify ST_FollowerBehavior has proper task bindings
-4. **Movement Integration** - AIController MoveTo commands in assault execution
-5. **End-to-End Combat Test** - Full loop: Perception → MCTS → Commands → Movement → Firing → Damage → Rewards
+1. **Investigate Agent Proximity** - Determine if task logic forces clustering or if it's natural early-learning behavior
+2. **Formation Spacing** - Add formation maintenance logic to prevent agent clustering
+3. **Action Diversity Analysis** - Verify MCTS generates varied commands (not all agents doing same action)
+4. **Tactical Positioning** - Implement spreading/flanking behaviors in MCTS rollout policy
+5. **Observation Features** - Add inter-agent distance to observations for formation awareness
 
 **📋 Planned:**
 - Distributed training (Ray RLlib integration)

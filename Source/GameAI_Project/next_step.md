@@ -1,15 +1,27 @@
-# Next Steps: Agent Execution Pipeline - COMPLETE DIAGNOSIS
+# Next Steps: Agent Proximity & Formation Analysis
 
-## State Tree Structure (Current)
+## Current Status Summary
+
+**✅ WORKING:**
+- MCTS team-level strategic planning (~34ms per decision)
+- State Tree task execution (Assault, Defend, Support, Move, Retreat)
+- Combat system (movement, firing, damage, rewards)
+- Random actions at simulation start (exploration phase)
+- Command pipeline from perception to execution
+
+**⚠️ CURRENT ISSUE:**
+During initial simulation, agents tend to be too close to each other. This raises the question:
+- Is there task logic forcing agents to cluster?
+- Or is this natural behavior during early learning/random exploration?
+
+## State Tree Structure (Current - Working)
 ```
 Root
 ├── Dead State (condition: !IsAlive)
-│   └── (no tasks)
 ├── Idle State (condition: CommandType == Idle)
-│   └── Task: Hold position (2s success delay)
 ├── Assault State (condition: CommandType == Assault)
-│   ├── Task 1: STTask_QueryRLPolicy
-│   └── Task 2: STTask_ExecuteAssault
+│   ├── Task 1: STTask_QueryRLPolicy → Selects tactical action
+│   └── Task 2: STTask_ExecuteAssault → Executes movement + firing
 ├── Defend State (condition: CommandType == Defend/HoldPosition/TakeCover)
 │   ├── Task 1: STTask_QueryRLPolicy
 │   └── Task 2: STTask_ExecuteDefend
@@ -23,231 +35,230 @@ Root
     ├── Task 1: STTask_QueryRLPolicy
     └── Task 2: STTask_ExecuteMove
 
-Evaluators (tick every frame):
-- STEvaluator_SyncCommand (Priority: High) - Syncs CurrentCommand from FollowerAgentComponent
-- STEvaluator_UpdateObservation (Priority: Medium) - Updates observation data
-
-Transitions:
-- Each state has transitions TO all other 6 states
-- Transition conditions match target state's entry condition
-- Example: Assault → Defend transition when CommandType changes to Defend
+Evaluators: STEvaluator_SyncCommand, STEvaluator_UpdateObservation
+Transitions: All states can transition to any other state based on command changes
 ```
 
-## Diagnostic Plan
+## Agent Proximity Investigation Plan
 
-### Phase 1: State Transition Diagnosis (PRIORITY)
-**Goal:** Understand why agents stay in initial command state
+### Phase 1: Agent Spacing Analysis (PRIORITY)
+**Goal:** Understand why agents cluster together during initial simulation
 
-1. **Add logging to STEvaluator_SyncCommand::Tick()**
-   - Log `Context.CurrentCommand.Type` before and after sync
-   - Log `FollowerAgent->GetCurrentCommand().Type`
-   - Verify evaluator actually updates context
+**Hypotheses to Test:**
+1. **MCTS assigns same/similar targets to all agents** → All agents converge on same location
+2. **No formation spacing enforcement** → Agents ignore teammate positions
+3. **Random actions lack spatial awareness** → Early exploration doesn't include spreading tactics
+4. **Natural convergence** → Both teams moving toward objectives creates unavoidable clustering
+5. **Task logic forces proximity** → ExecuteAssault/Move tasks have inherent clustering behavior
 
-2. **Add logging to state transition conditions**
-   - Log `STCondition_CheckCommandType::TestCondition()` results
-   - Show: Expected vs Actual command type
-   - Identify if conditions fail or never evaluated
+**Investigation Steps:**
 
-3. **Verify TeamLeaderComponent command updates**
-   - Log when leader issues NEW command to same follower
-   - Check if `FollowerAgentComponent::CurrentCommand` actually updates
-   - Confirm MCTS decisions vary over time
+1. **Log MCTS Command Assignments** (`Team/TeamLeaderComponent.cpp`)
+   ```cpp
+   // After MCTS decision, log each agent's target location
+   for (const auto& Pair : Commands)
+   {
+       AActor* Agent = Pair.Key;
+       FVector TargetLoc = Pair.Value.TargetLocation;
+       UE_LOG(LogTemp, Warning, TEXT("[MCTS] Agent '%s': Command=%s, TargetLoc=%s"),
+           *Agent->GetName(), *UEnum::GetValueAsString(Pair.Value.CommandType), *TargetLoc.ToString());
+   }
+   ```
+   - Check if all agents get same target location
+   - Verify MCTS generates diverse positioning
 
-**Expected Findings:**
-- Either: SyncCommand evaluator doesn't update context
-- Or: Transition conditions never trigger
-- Or: Leader never issues different commands to same agent
+2. **Log Agent Positions and Inter-Agent Distances** (`FollowerAgentComponent.cpp` or `TeamLeaderComponent.cpp`)
+   ```cpp
+   // Log every 2 seconds
+   for (AActor* Agent1 : TeamAgents)
+   {
+       for (AActor* Agent2 : TeamAgents)
+       {
+           if (Agent1 != Agent2)
+           {
+               float Distance = FVector::Dist(Agent1->GetActorLocation(), Agent2->GetActorLocation());
+               UE_LOG(LogTemp, Log, TEXT("[FORMATION] Distance '%s' <-> '%s': %.1f cm"),
+                   *Agent1->GetName(), *Agent2->GetName(), Distance);
+           }
+       }
+   }
+   ```
+   - Identify if agents start apart and converge, or start close
+   - Track minimum inter-agent distance over time
 
-### Phase 2: Movement Diagnosis
-**Goal:** Understand why MoveTo calls don't result in locomotion
+3. **Analyze Task Movement Logic** (Code review - no changes needed)
+   - `STTask_ExecuteAssault.cpp:194` - `MoveToLocation(TargetLocation, 50.0f)`
+   - `STTask_ExecuteMove.cpp` - Check destination calculation
+   - Question: Do tasks consider ally positions when moving?
+   - Current: Tasks only consider target/enemy positions, not teammates
 
-1. **Add logging to STTask_ExecuteAssault::Tick()**
-   - Log `AIController->MoveToLocation()` calls with target location
-   - Log `AIController->GetMoveStatus()`
-   - Log character velocity after MoveTo
-
-2. **Verify AIController setup**
-   - Check Blueprint: Does follower use AIController or PlayerController?
-   - Verify: `bUseControllerRotationYaw` settings
-   - Check: Character Movement Component exists and configured
-
-3. **Verify NavMesh**
-   - Check level has RecastNavMesh-Default
-   - Press 'P' in editor to visualize NavMesh coverage
-   - Verify target locations are on NavMesh
-
-4. **Check task execution flow**
-   - Log `EnterState()`, `Tick()`, `ExitState()` calls
-   - Verify Tick() returns `EStateTreeRunStatus::Running` (not Succeeded/Failed prematurely)
-
-**Expected Findings:**
-- AIController is nullptr
-- Or: No NavMesh in level
-- Or: Task exits immediately (not running)
-- Or: MoveTo called but pathfinding fails
-
-### Phase 3: MCTS Command Variety
-**Goal:** Understand why only Assault/Support appear
-
-1. **Log MCTS rollout action selection**
-   - File: `MCTS/MCTSNode.cpp` in `Rollout()` or action selection
-   - Show: All available actions and their probabilities
-   - Identify if other actions (Defend, Retreat) have zero probability
-
-2. **Log observation features during MCTS**
-   - Check team observation values during decision time
-   - Verify: Enemy distance, health, ammo vary between simulations
-   - Identify if observations are identical every run
-
-3. **Check action space definition**
-   - Verify `ECommandType` enum includes all 7+ types
-   - Check MCTS maps to full action space (not hardcoded subset)
+4. **Check MCTS Reward Function** (`MCTS/MCTS.cpp:39-82`)
+   - `FormationCoherence` exists in reward (line 46)
+   - BUT: Does FormationCoherence encourage tight clustering or spacing?
+   - Verify: What is the actual value of `TeamObs.FormationCoherence`?
+   - Add logging: `UE_LOG(LogTemp, Warning, TEXT("[MCTS] FormationCoherence=%.2f"), TeamObs.FormationCoherence);`
 
 **Expected Findings:**
-- MCTS rollout policy heavily biased toward Assault/Support
-- Or: Observations don't vary (deterministic inputs → deterministic outputs)
-- Or: Action space mapping incomplete
+- Likely: MCTS assigns similar target locations to all agents (e.g., all target same enemy)
+- Likely: FormationCoherence may encourage clustering (high coherence = tight formation)
+- Likely: No explicit spatial separation logic exists in task execution
 
 
 ## Implementation Order
 
-### 1. STATE TRANSITIONS (CRITICAL - BLOCKS ALL ELSE)
-**Files:**
-- `StateTree/Evaluators/STEvaluator_SyncCommand.cpp`
-- `StateTree/Conditions/STCondition_CheckCommandType.cpp`
-- `Team/FollowerAgentComponent.cpp`
+### 1. LOGGING FOR PROXIMITY DIAGNOSIS (IMMEDIATE)
+**Goal:** Gather data to understand clustering behavior
 
-**Actions:**
-1. Add comprehensive logging (see Phase 1 above)
-2. Run simulation, observe if:
-   - Commands actually change in FollowerAgentComponent
-   - SyncCommand evaluator updates context
-   - Transition conditions trigger
-3. Fix identified issue (likely: context not updating, or conditions not evaluating)
+**Files to Modify:**
+1. `Team/TeamLeaderComponent.cpp` - Log MCTS command assignments with target locations
+2. `Team/TeamLeaderComponent.cpp` or `FollowerAgentComponent.cpp` - Log inter-agent distances
+3. `MCTS/MCTS.cpp` - Log FormationCoherence value in CalculateTeamReward()
 
 **Success Criteria:**
 ```
-[SYNC CMD] Agent 0: Syncing command Assault → Defend
-[TRANSITION] Agent 0: Assault State → Defend State (CommandType changed)
-[STATE TREE] Agent 0: Entered Defend State
+[MCTS] Agent 'BP_Follower_0': Command=Assault, TargetLoc=(1200, -300, 100)
+[MCTS] Agent 'BP_Follower_1': Command=Assault, TargetLoc=(1180, -320, 100)  ← Similar location!
+[MCTS] Agent 'BP_Follower_2': Command=Support, TargetLoc=(1150, -280, 100)  ← Also close!
+[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_1': 180.0 cm  ← Too close!
+[MCTS] FormationCoherence=0.85 (reward component: +42.5)
 ```
 
-### 2. MOVEMENT EXECUTION
-**Files:**
-- `StateTree/Tasks/STTask_ExecuteAssault.cpp`
-- `StateTree/Tasks/STTask_ExecuteMove.cpp`
-- Blueprint: `BP_TestFollowerAgent`
+### 2. ROOT CAUSE ANALYSIS (AFTER LOGGING)
+**Based on logs, identify the root cause:**
 
-**Actions:**
-1. Add movement logging (see Phase 2 above)
-2. Verify AIController setup in Blueprint
-3. Check NavMesh coverage in level
-4. Fix identified issue (likely: no AIController, or task flow broken)
+**Scenario A: MCTS assigns same target to all agents**
+- **Solution:** Add target diversity to MCTS expansion
+- Modify `TeamMCTSNode::Expand()` to ensure varied target assignments
+- Add penalty for multiple agents targeting same location
 
-**Success Criteria:**
+**Scenario B: FormationCoherence encourages tight clustering**
+- **Solution:** Redefine FormationCoherence calculation
+- Change from "stay close together" to "maintain optimal spacing"
+- Optimal spacing: 400-800cm between allies (close enough to support, far enough to avoid AoE)
+
+**Scenario C: Task logic lacks spatial awareness**
+- **Solution:** Add formation offset to task movement
+- Modify `STTask_ExecuteAssault::ExecuteAggressiveAssault()` to add per-agent offset
+- Example: Agent 0 → target directly, Agent 1 → target + 300cm left, Agent 2 → target + 300cm right
+
+**Scenario D: Natural convergence (both teams meet)**
+- **Solution:** Add initial positioning spread
+- Modify spawn locations or initial commands to spread agents horizontally
+- Add "Move" commands at start to position agents before engaging
+
+### 3. FORMATION SPACING IMPLEMENTATION (AFTER ROOT CAUSE IDENTIFIED)
+**Goal:** Implement solution based on root cause analysis
+
+**Option 1: MCTS-Level Target Diversification**
+```cpp
+// In TeamMCTSNode.cpp or MCTS.cpp
+// When generating command combinations, ensure target diversity:
+TArray<FVector> UsedTargetLocations;
+for (AActor* Follower : Followers)
+{
+    FVector BaseTarget = GetPrimaryEnemyLocation();
+    FVector Offset = CalculateFormationOffset(Follower, UsedTargetLocations);
+    Commands.Add(Follower, FStrategicCommand(Assault, BaseTarget + Offset));
+    UsedTargetLocations.Add(BaseTarget + Offset);
+}
 ```
-[ASSAULT TASK] Agent 0: Moving to target at (1200, -300, 100)
-[AI CONTROLLER] Agent 0: MoveStatus = InProgress, Velocity = (450, 0, 0)
-[MOVEMENT] Agent 0: Distance to target = 850 units
+
+**Option 2: Task-Level Formation Offset**
+```cpp
+// In STTask_ExecuteAssault.cpp
+FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
+FVector FormationOffset = CalculateFormationOffset(Pawn, SharedContext.FollowerComponent);
+FVector AdjustedTarget = TargetLocation + FormationOffset;
+SharedContext.AIController->MoveToLocation(AdjustedTarget, 50.0f);
 ```
 
-### 3. MCTS COMMAND DIVERSITY
-**Files:**
-- `MCTS/MCTSNode.cpp` (rollout policy)
-- `Team/TeamLeaderComponent.cpp` (observation building)
-
-**Actions:**
-1. Log action probabilities during rollout (see Phase 3 above)
-2. Log observation variance between runs
-3. Add randomness to rollout if deterministic
-4. Verify observation features vary with game state
-
-**Success Criteria:**
-```
-[MCTS] Rollout actions: Assault(0.35), Defend(0.25), Support(0.20), Retreat(0.10), Move(0.10)
-[MCTS] Agent 0: Selected Defend (previously was Assault)
-[MCTS] Agent 1: Selected Retreat (health low, enemies close)
+**Option 3: Observation-Based Learning (RL learns spacing)**
+```cpp
+// In ObservationElement.cpp - Add new feature
+// "NearestAllyDistance" - Distance to nearest teammate
+// RL policy will learn to maintain optimal spacing via rewards
+Feature.NearestAllyDistance = CalculateNearestAllyDistance() / 3000.0f; // Normalize to 0-1
 ```
 
 
 ## Testing Checklist
 
-### Phase 1: State Transitions
-- [ ] FollowerAgentComponent CurrentCommand updates when leader issues new commands
-- [ ] STEvaluator_SyncCommand updates StateTree context every tick
-- [ ] STCondition_CheckCommandType evaluates correctly for all command types
-- [ ] State transitions occur when CurrentCommand.Type changes (e.g., Assault → Defend)
-- [ ] Agents execute different commands over time (not stuck on initial command)
+### Phase 1: Proximity Diagnosis (Current Focus)
+- [ ] Log MCTS command assignments (verify target location diversity)
+- [ ] Log inter-agent distances every 2 seconds
+- [ ] Log FormationCoherence values in MCTS reward calculation
+- [ ] Identify if agents start spread and converge, or start clustered
+- [ ] Determine root cause: MCTS assignments, task logic, or natural convergence
 
-### Phase 2: Movement
-- [ ] AIController exists and is assigned to follower actors
-- [ ] NavMesh covers play area (visualize with 'P' key in editor)
-- [ ] STTask_ExecuteAssault calls AIController->MoveToLocation()
-- [ ] Character velocity changes after MoveTo call
-- [ ] Agent physically moves toward target location
-- [ ] Movement completes or continues until target reached
+### Phase 2: Formation Spacing Implementation (After Diagnosis)
+- [ ] Implement chosen solution (MCTS diversification, task offset, or RL observation)
+- [ ] Verify agents maintain 400-800cm spacing from teammates
+- [ ] Ensure formation doesn't break combat effectiveness
+- [ ] Test with 2, 3, and 4 agent teams
 
-### Phase 3: Command Diversity
-- [ ] MCTS generates Defend commands (not just Assault/Support)
-- [ ] MCTS generates Retreat commands
-- [ ] MCTS generates Move/Patrol commands
-- [ ] Command assignments vary between simulation runs
-- [ ] Same agent receives different commands across runs (not deterministic)
-- [ ] Observation features vary between MCTS decisions
+### Phase 3: Tactical Behavior Validation
+- [ ] MCTS generates diverse commands (Assault, Defend, Support, Retreat, Move)
+- [ ] Agents spread out during initial positioning
+- [ ] Agents maintain formation while advancing/retreating
+- [ ] Flanking maneuvers work correctly (agents take different angles)
+- [ ] Support agents position behind assault agents
 
-### Integration Test
-- [ ] Full loop: Perception → MCTS → Command → State Transition → Movement → Combat → Damage → Rewards
-- [ ] Multiple agents coordinate (one assaults, one supports)
-- [ ] Agents respond to dynamic threats (switch from Assault to Retreat when health low)
+### Integration Test (Already Working - Verify Maintained)
+- [x] Full loop: Perception → MCTS → Command → State Transition → Movement → Combat → Damage → Rewards
+- [x] Multiple agents coordinate (MCTS assigns different roles)
+- [ ] Agents respond to dynamic threats with formation awareness
+- [ ] Agents don't cluster when multiple targets available
 
 ## Files to Modify (Priority Order)
 
-### Critical Path (Phase 1):
-1. `StateTree/Evaluators/STEvaluator_SyncCommand.cpp` - Add logging, verify context update
-2. `StateTree/Conditions/STCondition_CheckCommandType.cpp` - Add logging, verify evaluation
-3. `Team/FollowerAgentComponent.cpp` - Log CurrentCommand changes
-4. `Team/TeamLeaderComponent.cpp` - Log when issuing new commands to same follower
+### Immediate: Proximity Diagnosis Logging
+1. `Team/TeamLeaderComponent.cpp` - Log MCTS command assignments with target locations
+2. `Team/TeamLeaderComponent.cpp` - Log inter-agent distances (or add to FollowerAgentComponent)
+3. `MCTS/MCTS.cpp` - Log FormationCoherence value in CalculateTeamReward()
 
-### Movement (Phase 2):
-5. `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Add movement/firing logs
-6. `StateTree/Tasks/STTask_ExecuteMove.cpp` - Add movement logs
-7. Blueprint: `BP_TestFollowerAgent` - Verify AIController setup
+### After Diagnosis: Formation Spacing Implementation
+4. `MCTS/MCTS.cpp` or `TeamMCTSNode.cpp` - Add target diversification (if root cause A)
+5. `Observation/TeamObservation.h/cpp` - Redefine FormationCoherence calculation (if root cause B)
+6. `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Add formation offset (if root cause C)
+7. `StateTree/Tasks/STTask_ExecuteMove.cpp` - Add formation offset (if root cause C)
+8. Level Blueprint or spawn logic - Spread initial positions (if root cause D)
 
-### Command Diversity (Phase 3):
-8. `MCTS/MCTSNode.cpp` - Log rollout action selection, add randomness if needed
-9. `Team/TeamLeaderComponent.cpp` - Log observation variance
+### Optional: Observation Enhancement
+9. `Observation/ObservationElement.h/cpp` - Add NearestAllyDistance feature
+10. `RL/RLPolicyNetwork.cpp` - Retrain with new observation feature
 
 ## Success Criteria
 
-### Minimal Success (Phase 1 + 2):
+### Phase 1: Diagnosis Complete (Data Gathered)
 ```
-[TEAM LEADER] Issuing Assault to Agent 0, target: Enemy_1
-[FOLLOWER] Agent 0: Command updated Idle → Assault
-[SYNC CMD] Agent 0: Syncing command to StateTree context (Assault)
-[TRANSITION] Agent 0: Idle State → Assault State
-[ASSAULT TASK] Agent 0: EnterState, Target = Enemy_1 at (1200, -300, 100)
-[ASSAULT TASK] Agent 0: Tick - Moving to target, distance = 1500
-[AI CONTROLLER] Agent 0: MoveToLocation called, path found
-[MOVEMENT] Agent 0: Velocity = (450, 120, 0), moving toward target
-
-... 3 seconds later ...
-
-[TEAM LEADER] Issuing Defend to Agent 0, target: CoverPoint_5
-[FOLLOWER] Agent 0: Command updated Assault → Defend
-[SYNC CMD] Agent 0: Syncing command to StateTree context (Defend)
-[TRANSITION] Agent 0: Assault State → Defend State
-[DEFEND TASK] Agent 0: EnterState, moving to cover at (800, 500, 100)
+[MCTS] Agent 'BP_Follower_0': Command=Assault, TargetLoc=(1200, -300, 100)
+[MCTS] Agent 'BP_Follower_1': Command=Support, TargetLoc=(800, -280, 105)   ← Different target!
+[MCTS] Agent 'BP_Follower_2': Command=Assault, TargetLoc=(1180, -500, 98)  ← Spread out!
+[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_1': 520.0 cm  ← Good spacing!
+[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_2': 450.0 cm  ← Good spacing!
+[MCTS] FormationCoherence=0.75 (reward component: +37.5)
 ```
 
-### Full Success (All Phases):
+### Phase 2: Formation Spacing Working
 ```
-[MCTS] Rollout: Available actions = {Assault, Defend, Support, Retreat, Move}
-[MCTS] Agent 0: Selected Assault (prob=0.40), Agent 1: Selected Support (prob=0.25)
-[ASSAULT TASK] Agent 0: Firing at Enemy_1 (distance: 850, in range)
-[SUPPORT TASK] Agent 1: Firing at Enemy_1 (supporting Agent 0)
+[FORMATION] T=0s: Team spread = 0cm (just spawned)
+[FORMATION] T=2s: Team spread = 450cm (moving to positions)
+[FORMATION] T=5s: Team spread = 620cm (engaged, maintaining formation)
+[FORMATION] T=10s: Team spread = 550cm (flanking, good spacing maintained)
 
-... next MCTS decision (different commands) ...
-[MCTS] Agent 0: Selected Retreat (health low), Agent 1: Selected Defend (hold position)
-[TRANSITION] Agent 0: Assault State → Retreat State
-[RETREAT TASK] Agent 0: Moving to safe location (900, 800, 100)
+[ASSAULT TASK] Agent 0: Moving to target with formation offset = (0, 0, 0)
+[ASSAULT TASK] Agent 1: Moving to target with formation offset = (-300, 200, 0)  ← Offset!
+[SUPPORT TASK] Agent 2: Moving to support position with formation offset = (0, -400, 0)  ← Behind!
+```
+
+### Phase 3: Full Tactical Behavior
+```
+[MCTS] Decision: 3 agents, 5 possible commands, diverse assignments
+[MCTS] Agent 0: Assault (target: Enemy_1 at front)
+[MCTS] Agent 1: Assault + FlankLeft (target: Enemy_1, offset left)
+[MCTS] Agent 2: Support (target: cover position behind Agent 0)
+
+[FORMATION] Inter-agent distances: 450-700cm (optimal range maintained)
+[COMBAT] Agent 0 firing from front, Agent 1 firing from flank, Agent 2 suppressing
+[COMBAT] Enemies flanked, no friendly clustering, good tactical spread
 ```

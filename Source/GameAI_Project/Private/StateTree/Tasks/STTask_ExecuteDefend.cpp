@@ -10,7 +10,7 @@
 #include "GameFramework/Pawn.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Utill/GameAIHelper.h"
+#include "Util/GameAIHelper.h"
 
 
 EStateTreeRunStatus FSTTask_ExecuteDefend::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
@@ -264,7 +264,18 @@ void FSTTask_ExecuteDefend::MoveToDefensivePosition(FStateTreeExecutionContext& 
 
 	if (!InstanceData.Context.AIController) return;
 
-	InstanceData.Context.AIController->MoveToLocation(Destination, 50.0f); // 50cm acceptance radius
+	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	if (!Pawn) return;
+
+	// Apply formation offset for defensive positioning
+	FVector FormationOffset = UGameAIHelper::CalculateFormationOffset(
+		Pawn,
+		InstanceData.Context.FollowerComponent,
+		InstanceData.Context.CurrentCommand.CommandType);
+
+	FVector AdjustedDestination = Destination + FormationOffset;
+
+	InstanceData.Context.AIController->MoveToLocation(AdjustedDestination, 50.0f); // 50cm acceptance radius
 }
 
 void FSTTask_ExecuteDefend::EngageThreats(FStateTreeExecutionContext& Context, float AccuracyModifier) const

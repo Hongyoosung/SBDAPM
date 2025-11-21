@@ -2,7 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Team/TeamTypes.h"
 #include "GameAIHelper.generated.h"
+
+class UFollowerAgentComponent;
 
 /**
  * AI 및 StateTree 로직에서 공통으로 사용하는 헬퍼 함수 모음
@@ -20,4 +23,13 @@ public:
 	// 보이는 적들 중 가장 가까운 적 찾기
 	UFUNCTION(BlueprintCallable, Category = "Game AI")
 	static AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn);
+
+	// Formation offset 계산 (팀 내 에이전트 간 간격 유지)
+	// Calculates spatial offset to prevent agents from clustering at same target
+	// Maintains 400-800cm optimal spacing between teammates
+	UFUNCTION(BlueprintCallable, Category = "Game AI")
+	static FVector CalculateFormationOffset(
+		AActor* Agent,
+		UFollowerAgentComponent* FollowerComponent,
+		EStrategicCommandType CommandType);
 };

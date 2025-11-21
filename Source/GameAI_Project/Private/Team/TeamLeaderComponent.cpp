@@ -41,6 +41,58 @@ void UTeamLeaderComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		CurrentTeamObservation = BuildTeamObservation();
 	}
 
+	// ============================================================================
+	// PROXIMITY DIAGNOSIS: Log inter-agent distances every 2 seconds
+	// ============================================================================
+	TimeSinceLastFormationLog += DeltaTime;
+	if (TimeSinceLastFormationLog >= 2.0f)
+	{
+		TimeSinceLastFormationLog = 0.0f;
+
+		TArray<AActor*> AliveFollowers = GetAliveFollowers();
+		if (AliveFollowers.Num() >= 2)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[FORMATION] '%s': Inter-agent distances (%d agents):"), *TeamName, AliveFollowers.Num());
+
+			// Calculate all pairwise distances
+			float MinDistance = FLT_MAX;
+			float MaxDistance = 0.0f;
+			float TotalDistance = 0.0f;
+			int32 PairCount = 0;
+
+			for (int32 i = 0; i < AliveFollowers.Num(); ++i)
+			{
+				AActor* Agent1 = AliveFollowers[i];
+				if (!Agent1) continue;
+
+				for (int32 j = i + 1; j < AliveFollowers.Num(); ++j)
+				{
+					AActor* Agent2 = AliveFollowers[j];
+					if (!Agent2) continue;
+
+					float Distance = FVector::Dist(Agent1->GetActorLocation(), Agent2->GetActorLocation());
+
+					UE_LOG(LogTemp, Warning, TEXT("[FORMATION]   '%s' <-> '%s': %.1f cm"),
+						*Agent1->GetName(),
+						*Agent2->GetName(),
+						Distance);
+
+					MinDistance = FMath::Min(MinDistance, Distance);
+					MaxDistance = FMath::Max(MaxDistance, Distance);
+					TotalDistance += Distance;
+					PairCount++;
+				}
+			}
+
+			if (PairCount > 0)
+			{
+				float AvgDistance = TotalDistance / PairCount;
+				UE_LOG(LogTemp, Warning, TEXT("[FORMATION] '%s': Distance stats - Min: %.1f cm, Max: %.1f cm, Avg: %.1f cm"),
+					*TeamName, MinDistance, MaxDistance, AvgDistance);
+			}
+		}
+	}
+
 	// Draw debug info if enabled
 	if (bEnableDebugDrawing)
 	{
@@ -499,6 +551,25 @@ void UTeamLeaderComponent::OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCo
 		UE_LOG(LogTemp, Display, TEXT("   - %s: %d followers"),
 			*UEnum::GetValueAsString(CountPair.Key),
 			CountPair.Value);
+	}
+
+	// ============================================================================
+	// PROXIMITY DIAGNOSIS: Log each agent's command with target location
+	// ============================================================================
+	UE_LOG(LogTemp, Warning, TEXT("[MCTS ASSIGNMENTS] '%s': Detailed command assignments:"), *TeamName);
+	for (const auto& Pair : NewCommands)
+	{
+		AActor* Agent = Pair.Key;
+		const FStrategicCommand& Command = Pair.Value;
+
+		FString TargetActorName = Command.TargetActor ? Command.TargetActor->GetName() : TEXT("None");
+		FString LocationStr = Command.TargetLocation.ToString();
+
+		UE_LOG(LogTemp, Warning, TEXT("[MCTS] Agent '%s': Command=%s, TargetLoc=%s, TargetActor=%s"),
+			*Agent->GetName(),
+			*UEnum::GetValueAsString(Command.CommandType),
+			*LocationStr,
+			*TargetActorName);
 	}
 
 	// Issue commands to followers

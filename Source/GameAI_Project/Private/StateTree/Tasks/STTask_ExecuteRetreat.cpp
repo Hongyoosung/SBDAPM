@@ -11,7 +11,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
-#include "Utill/GameAIHelper.h"
+#include "Util/GameAIHelper.h"
 
 
 EStateTreeRunStatus FSTTask_ExecuteRetreat::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
@@ -331,17 +331,24 @@ void FSTTask_ExecuteRetreat::MoveToRetreatDestination(FStateTreeExecutionContext
 
 	if (!InstanceData.Context.AIController) return;
 
-	InstanceData.Context.AIController->MoveToLocation(Destination, 100.0f); // 1m acceptance radius
+	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	if (!Pawn) return;
+
+	// Apply formation offset for retreat positioning
+	FVector FormationOffset = UGameAIHelper::CalculateFormationOffset(
+		Pawn,
+		InstanceData.Context.FollowerComponent,
+		EStrategicCommandType::Retreat);
+
+	FVector AdjustedDestination = Destination + FormationOffset;
+
+	InstanceData.Context.AIController->MoveToLocation(AdjustedDestination, 100.0f); // 1m acceptance radius
 
 	// Adjust movement speed
-	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
-	if (Pawn)
+	if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
 	{
-		if (UCharacterMovementComponent* MovementComp = Pawn->FindComponentByClass<UCharacterMovementComponent>())
-		{
-			float BaseSpeed = 600.0f;
-			MovementComp->MaxWalkSpeed = BaseSpeed * SpeedMultiplier;
-		}
+		float BaseSpeed = 600.0f;
+		MovementComp->MaxWalkSpeed = BaseSpeed * SpeedMultiplier;
 	}
 }
 

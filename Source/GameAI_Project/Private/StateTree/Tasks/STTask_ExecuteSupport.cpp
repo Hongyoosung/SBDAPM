@@ -10,7 +10,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Navigation/PathFollowingComponent.h"
-#include "Utill/GameAIHelper.h"
+#include "Util/GameAIHelper.h"
 
 
 EStateTreeRunStatus FSTTask_ExecuteSupport::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
@@ -328,8 +328,16 @@ void FSTTask_ExecuteSupport::ExecuteReload(FStateTreeExecutionContext& Context, 
 		{
 			if (InstanceData.Context.AIController)
 			{
+				// Apply formation offset when moving to cover during support
+				FVector FormationOffset = UGameAIHelper::CalculateFormationOffset(
+					Pawn,
+					InstanceData.Context.FollowerComponent,
+					EStrategicCommandType::Support);
+
+				FVector AdjustedCoverLocation = InstanceData.Context.NearestCoverLocation + FormationOffset;
+
 				EPathFollowingRequestResult::Type MoveResult = InstanceData.Context.AIController->MoveToLocation(
-					InstanceData.Context.NearestCoverLocation, 50.0f);
+					AdjustedCoverLocation, 50.0f);
 
 				// Log movement result
 				if (MoveResult == EPathFollowingRequestResult::Failed)

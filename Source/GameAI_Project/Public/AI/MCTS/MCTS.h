@@ -5,11 +5,10 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "Observation/ObservationElement.h"
-#include "AI/MCTS/MCTSNode.h"
 #include "AI/MCTS/TeamMCTSNode.h"
+#include "Observation/TeamObservation.h"
 #include "MCTS.generated.h"
 
-struct FTeamObservation;
 
 UCLASS()
 class GAMEAI_PROJECT_API UMCTS : public UObject
@@ -18,15 +17,6 @@ class GAMEAI_PROJECT_API UMCTS : public UObject
 
 public:
     UMCTS();
-
-    //--------------------------------------------------------------------------
-    // LEGACY SINGLE-AGENT INTERFACE (Backward Compatibility)
-    //--------------------------------------------------------------------------
-    void InitializeMCTS();
-    void InitializeCurrentNodeLocate();
-    void RunMCTS();
-    void Backpropagate();
-
 
     //--------------------------------------------------------------------------
     // TEAM-LEVEL INTERFACE (New Architecture)
@@ -53,19 +43,7 @@ public:
 
 private:
     //--------------------------------------------------------------------------
-    // SINGLE-AGENT METHODS (Legacy)
-    //--------------------------------------------------------------------------
-    UMCTSNode* SelectChildNode();
-    void Expand();
-    float CalculateImmediateReward(UMCTSNode* Node) const;
-    bool ShouldTerminate() const;
-    float CalculateNodeScore(UMCTSNode* Node) const;
-    float CalculateObservationSimilarity(const FObservationElement&, const FObservationElement&) const;
-    float CalculateDynamicExplorationParameter() const;
-    FObservationElement GetCurrentObservation();
-
-    //--------------------------------------------------------------------------
-    // TEAM-LEVEL METHODS (New)
+    // TEAM-LEVEL METHODS
     //--------------------------------------------------------------------------
 
     /**
@@ -82,17 +60,17 @@ private:
     /**
      * MCTS Selection Phase: Traverse tree using UCT until leaf node
      */
-    UTeamMCTSNode* SelectNode(UTeamMCTSNode* Node);
+    TSharedPtr<FTeamMCTSNode> SelectNode(TSharedPtr<FTeamMCTSNode> Node);
 
     /**
      * MCTS Expansion Phase: Create child node with untried action
      */
-    UTeamMCTSNode* ExpandNode(UTeamMCTSNode* Node, const TArray<AActor*>& Followers);
+    TSharedPtr<FTeamMCTSNode> ExpandNode(TSharedPtr<FTeamMCTSNode> Node, const TArray<AActor*>& Followers);
 
     /**
      * MCTS Simulation Phase: Rollout from node to estimate reward
      */
-    float SimulateNode(UTeamMCTSNode* Node, const FTeamObservation& TeamObs);
+    float SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation& TeamObs);
 
     /**
      * Generate possible command combinations for expansion
@@ -117,8 +95,9 @@ private:
     float CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, FStrategicCommand>& Commands) const;
 
     /**
-     * FALLBACK: Generate strategic commands using rule-based heuristics
-     * Used when MCTS tree search is disabled or fails
+     * BASELINE: Generate strategic commands using rule-based heuristics
+     * This is NOT part of MCTS - it's a separate rule-based baseline for research comparison
+     * Use this to compare MCTS performance against traditional decision-making
      */
     TMap<AActor*, struct FStrategicCommand> GenerateStrategicCommandsHeuristic(
         const FTeamObservation& TeamObs,
@@ -143,10 +122,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
     float ExplorationParameter;
 
-    /** Enable full MCTS tree search (if false, uses fast heuristics) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
-    bool bUseTreeSearch;
-
     /** Maximum command combinations to generate per expansion */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MCTS|Config")
     int32 MaxCombinationsPerExpansion;
@@ -154,26 +129,12 @@ public:
 
 private:
     //--------------------------------------------------------------------------
-    // SINGLE-AGENT STATE (Legacy)
-    //--------------------------------------------------------------------------
-    UPROPERTY()
-    TObjectPtr<UMCTSNode> RootNode;
-
-    UPROPERTY()
-    TObjectPtr<UMCTSNode> CurrentNode;
-
-    UPROPERTY()
-    FObservationElement CurrentObservation;
-
-    uint32 TreeDepth;
-
-    //--------------------------------------------------------------------------
-    // TEAM-LEVEL STATE (New)
+    // TEAM-LEVEL STATE 
     //--------------------------------------------------------------------------
     /** Root node of team MCTS tree */
-    UPROPERTY()
-    TObjectPtr<UTeamMCTSNode> TeamRootNode;
+    TSharedPtr<FTeamMCTSNode> TeamRootNode;
 
     /** Cached team observation for simulation */
+    UPROPERTY()
     FTeamObservation CachedTeamObservation;
 };

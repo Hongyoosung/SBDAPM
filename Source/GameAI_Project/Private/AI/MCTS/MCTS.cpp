@@ -1,331 +1,18 @@
 #include "AI/MCTS/MCTS.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Observation/TeamObservation.h"
 #include "Team/TeamTypes.h"
 
 UMCTS::UMCTS()
     : MaxSimulations(500)
     , DiscountFactor(0.95f)
     , ExplorationParameter(1.41f)
-    , bUseTreeSearch(false)
     , MaxCombinationsPerExpansion(10)
-    , RootNode(nullptr)
-    , CurrentNode(nullptr)
-    , TreeDepth(0)
     , TeamRootNode(nullptr)
 {
 }
 
-
-void UMCTS::InitializeMCTS()
-{
-    RootNode = NewObject<UMCTSNode>(this);
-    RootNode->InitializeNode(nullptr);
-
-    FPlatformProcess::Sleep(0.2f);
-
-    if (RootNode != nullptr)
-    {
-        RootNode->VisitCount = 1;
-
-        UE_LOG(LogTemp, Warning, TEXT("Initialized MCTS"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to Initialize MCTS"));
-    }
-}
-
-
-void UMCTS::InitializeCurrentNodeLocate()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Initialize Current Node Locate"));
-    CurrentNode = RootNode;
-    TreeDepth = 1;
-}
-
-
-UMCTSNode* UMCTS::SelectChildNode()
-{
-    if(ShouldTerminate())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("ShouldTerminate is true, cannot select child node"));
-		return nullptr;
-	}
-
-
-    UMCTSNode* BestChild = nullptr;
-    float BestScore = -FLT_MAX;
-
-
-    if (CurrentNode->Children.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CurrentNode has no children"));
-        return nullptr;
-    }
-
-
-    for (UMCTSNode* Child : CurrentNode->Children)
-    {
-
-        if (Child == nullptr)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Child node is nullptr"));
-            continue;
-        }
-
-        float Score = CalculateNodeScore(Child);
-
-        if (Score > BestScore)
-        {
-            BestScore = Score;
-            BestChild = Child;
-        }
-    }
-
-    if (BestChild)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Selected Child with UCT Value: %f"), BestScore);
-
-        return BestChild;
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No valid child found"));
-        return nullptr;
-    }
-}
-
-
-
-float UMCTS::CalculateNodeScore(UMCTSNode* Node) const
-{
-    if(Node == nullptr)
-    {
-        UE_LOG(LogTemp, Warning,
-        TEXT("Node is nullptr, cannot calculate node score"));
-        return -FLT_MAX;
-    }
-
-    if (Node->VisitCount == 0)
-        return FLT_MAX; 
-
-    if(Node->Parent == nullptr)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Parent node is nullptr, cannot calculate node score"));
-		return -FLT_MAX;
-	}
-
-
-    float Exploitation = Node->TotalReward / Node->VisitCount;
-    float Exploration = ExplorationParameter * FMath::Sqrt(FMath::Loge((double)Node->Parent->VisitCount) / Node->VisitCount);
-    float ObservationSimilarity = CalculateObservationSimilarity(Node->Observation, CurrentObservation);
-    float Recency = 1.0f / (1.0f + Node->LastVisitTime); 
-
-    // ���� Ž�� �Ķ���� ���
-    float DynamicExplorationParameter = CalculateDynamicExplorationParameter();
-
-
-    return Exploitation + DynamicExplorationParameter * Exploration * ObservationSimilarity ;
-}
-
-
-float UMCTS::CalculateDynamicExplorationParameter() const
-{
-
-    float DepthFactor = FMath::Max(0.5f, 1.0f - (TreeDepth / 20.0f));
-
-
-    float AverageReward = (RootNode->TotalReward / RootNode->VisitCount);
-    float RewardFactor = FMath::Max(0.5f, 1.0f - (AverageReward / 100.0f));  
-
-
-    return ExplorationParameter * DepthFactor * RewardFactor;
-}
-
-
-float UMCTS::CalculateObservationSimilarity(const FObservationElement& Obs1, const FObservationElement& Obs2) const
-{
-
-    float DistanceDiff = FMath::Abs(Obs1.DistanceToDestination - Obs2.DistanceToDestination) / 100.0f;
-    float HealthDiff = FMath::Abs(Obs1.AgentHealth - Obs2.AgentHealth) / 100.0f; 
-    float EnemiesDiff = FMath::Abs(Obs1.VisibleEnemyCount - Obs2.VisibleEnemyCount) / 10.0f; 
-
-
-    const float DistanceWeight = 0.4f;
-    const float HealthWeight = 0.4f;
-    const float EnemiesWeight = 0.2f;
-
-
-    float WeightedDistance = DistanceWeight * DistanceDiff + HealthWeight * HealthDiff + EnemiesWeight * EnemiesDiff;
-
-
-    return FMath::Exp(-WeightedDistance * 5.0f);  
-}
-
-
-void UMCTS::Expand()
-{
-
-}
-
-
-void UMCTS::Backpropagate()
-{
-    int Depth = 0;
-
-    while (CurrentNode != RootNode)
-    {
-        CurrentNode->VisitCount++;
-
-        float ImmediateReward = CalculateImmediateReward(CurrentNode);
-        float DiscountedFutureReward = ImmediateReward * FMath::Pow(DiscountFactor, Depth);
-        float WeightedReward = (ImmediateReward + DiscountedFutureReward) / 2.0f;
-
-        CurrentNode->TotalReward += WeightedReward;
-        UE_LOG(LogTemp, Warning, TEXT("Backpropagate: Update Node - VisitCount: %d, TotalReward: %f"),
-			CurrentNode->VisitCount, CurrentNode->TotalReward);
-
-        CurrentNode = CurrentNode->Parent;
-        Depth++;
-    }
-
-    TreeDepth = 1;
-}
-
-
-float UMCTS::CalculateImmediateReward(UMCTSNode* Node) const
-{
-    // Note: We need to access StateMachine to determine current state
-    // For now, we'll use a simpler approach based on observation data
-    // TODO: Pass StateMachine reference to this function for state-specific rewards
-
-    const FObservationElement& Obs = Node->Observation;
-
-    // Default reward calculation (for MoveToState, AttackState, etc.)
-    float BaseDistanceReward = 100.0f - Obs.DistanceToDestination;
-    float BaseHealthReward = Obs.AgentHealth;
-    float BaseEnemyPenalty = -10.0f * Obs.VisibleEnemyCount;
-
-    // Detect if this is likely a flee scenario based on observation characteristics
-    // Heuristic: If health is low (<40) AND enemies are numerous (>2), likely fleeing
-    bool bLikelyFleeScenario = (Obs.AgentHealth < 40.0f) && (Obs.VisibleEnemyCount > 2);
-
-    if (bLikelyFleeScenario)
-    {
-        // FLEE-SPECIFIC REWARD CALCULATION
-        // When fleeing, prioritize survival and distance from enemies
-
-        // 1. Cover Availability Reward
-        float CoverReward = Obs.bHasCover ? 100.0f : 0.0f;
-
-        // 2. Distance from Enemies Reward
-        // Calculate average enemy distance from NearbyEnemies array
-        float TotalEnemyDistance = 0.0f;
-        int32 ValidEnemies = 0;
-        for (const FEnemyObservation& Enemy : Obs.NearbyEnemies)
-        {
-            if (Enemy.Distance < 3000.0f) // Only count nearby enemies (within 30m)
-            {
-                TotalEnemyDistance += Enemy.Distance;
-                ValidEnemies++;
-            }
-        }
-        float AvgEnemyDistance = ValidEnemies > 0 ? TotalEnemyDistance / ValidEnemies : 3000.0f;
-        // Normalize distance reward (farther = better)
-        float DistanceFromEnemiesReward = AvgEnemyDistance / 50.0f; // Scale to 0-60 range
-
-        // 3. Health Preservation Reward
-        // Reward maintaining health (penalize damage taken)
-        // Note: We'd need previous health to calculate this properly
-        // For now, just reward higher health during flee
-        float HealthPreservationReward = Obs.AgentHealth * 0.5f; // Higher health = better
-
-        // 4. Stamina Penalty (can't sprint effectively if low stamina)
-        float StaminaPenalty = (Obs.Stamina < 20.0f) ? -30.0f : 0.0f;
-
-        // 5. Cover Distance Reward (prefer closer cover when available)
-        float CoverDistanceReward = 0.0f;
-        if (Obs.bHasCover)
-        {
-            // Closer cover is better (max reward at 0 distance, min at 1500cm)
-            CoverDistanceReward = FMath::Max(0.0f, 50.0f - (Obs.NearestCoverDistance / 30.0f));
-        }
-
-        float FleeReward = CoverReward + DistanceFromEnemiesReward +
-                          HealthPreservationReward + StaminaPenalty + CoverDistanceReward;
-
-        UE_LOG(LogTemp, Verbose, TEXT("MCTS Flee Reward: Total=%.1f (Cover=%.1f, DistFromEnemy=%.1f, Health=%.1f, Stamina=%.1f, CoverDist=%.1f)"),
-            FleeReward, CoverReward, DistanceFromEnemiesReward, HealthPreservationReward, StaminaPenalty, CoverDistanceReward);
-
-        return FleeReward;
-    }
-    else
-    {
-        // DEFAULT REWARD CALCULATION (Attack, MoveTo, etc.)
-        float DefaultReward = BaseDistanceReward + BaseHealthReward + BaseEnemyPenalty;
-
-        UE_LOG(LogTemp, Verbose, TEXT("MCTS Default Reward: Total=%.1f (Distance=%.1f, Health=%.1f, Enemy=%.1f)"),
-            DefaultReward, BaseDistanceReward, BaseHealthReward, BaseEnemyPenalty);
-
-        return DefaultReward;
-    }
-}
-
-
-bool UMCTS::ShouldTerminate() const
-{
-    
-    if (CurrentNode == nullptr)
-	{
-        UE_LOG(LogTemp, Warning, TEXT("ShouldTerminate: CurrentNode is nullptr"));
-		return true;
-	}
-
-
-    if (TreeDepth >= 10)
-	{
-        UE_LOG(LogTemp, Warning, TEXT("ShouldTerminate: TreeDepth is over 10"));
-
-		return true;
-	}
-
-    return false;
-}
-
-
-void UMCTS::RunMCTS()
-{
-    UE_LOG(LogTemp, Warning, TEXT("RunMCTS Start - CurrentNode: %p, TreeDepth: %d"), CurrentNode.Get(), TreeDepth);
-
-
-    if (ShouldTerminate())
-    {
-        Backpropagate();
-
-        UE_LOG(LogTemp, Warning, TEXT("Tree depth limit reached. Returning to root node."));
-    }
-
-
-    FPlatformProcess::Sleep(0.2f);
-
-    UMCTSNode* BestChild = SelectChildNode();
-    TreeDepth++;
-
-    FPlatformProcess::Sleep(0.2f);
-
-}
-
-
-FObservationElement UMCTS::GetCurrentObservation()
-{
-
-	return FObservationElement();
-}
-
-
 //==============================================================================
-// TEAM-LEVEL MCTS IMPLEMENTATION (New Architecture)
+// TEAM-LEVEL MCTS IMPLEMENTATION
 //==============================================================================
 
 void UMCTS::InitializeTeamMCTS(int32 InMaxSimulations, float InExplorationParam)
@@ -342,19 +29,11 @@ TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTS(
     const FTeamObservation& TeamObservation,
     const TArray<AActor*>& Followers)
 {
-    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level search for %d followers (TreeSearch: %s)"),
-        Followers.Num(), bUseTreeSearch ? TEXT("ENABLED") : TEXT("DISABLED"));
+    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level tree search for %d followers (%d simulations)"),
+        Followers.Num(), MaxSimulations);
 
-    if (bUseTreeSearch)
-    {
-        // Use full MCTS tree search
-        return RunTeamMCTSTreeSearch(TeamObservation, Followers);
-    }
-    else
-    {
-        // Use fast heuristic-based command generation
-        return GenerateStrategicCommandsHeuristic(TeamObservation, Followers);
-    }
+    // Always use full MCTS tree search
+    return RunTeamMCTSTreeSearch(TeamObservation, Followers);
 }
 
 
@@ -365,6 +44,12 @@ float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs) const
 
     // Formation coherence (0-50 points)
     float FormationReward = TeamObs.FormationCoherence * 50.0f;
+
+    // ============================================================================
+    // PROXIMITY DIAGNOSIS: Log FormationCoherence value
+    // ============================================================================
+    UE_LOG(LogTemp, Warning, TEXT("[MCTS] FormationCoherence=%.3f (reward component: %.1f)"),
+        TeamObs.FormationCoherence, FormationReward);
 
     // Objective progress (0-100 points)
     // Closer to objective = higher reward
@@ -408,9 +93,20 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommandsHeuristic(
     const FTeamObservation& TeamObs,
     const TArray<AActor*>& Followers) const
 {
+    // ============================================================================
+    // RESEARCH BASELINE: Rule-Based Heuristic Decision Making
+    // ============================================================================
+    // This method is NOT part of MCTS tree search. It's a traditional rule-based
+    // decision-making system used as a baseline for performance comparison.
+    //
+    // Use this to compare:
+    // - MCTS exploration vs deterministic rules
+    // - Learning-based strategies vs hand-crafted heuristics
+    // ============================================================================
+
     TMap<AActor*, FStrategicCommand> Commands;
 
-    UE_LOG(LogTemp, Warning, TEXT("📊 MCTS: Generating commands for %d followers"), Followers.Num());
+    UE_LOG(LogTemp, Warning, TEXT("📊 BASELINE HEURISTIC: Generating commands for %d followers"), Followers.Num());
     UE_LOG(LogTemp, Warning, TEXT("  Team State: Enemies=%d, Health=%.1f%%, Outnumbered=%s, Flanked=%s, DistToObj=%.1f"),
         TeamObs.TotalVisibleEnemies,
         TeamObs.AverageTeamHealth,
@@ -698,7 +394,7 @@ TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTSTreeSearch(
     CachedTeamObservation = TeamObs;
 
     // Create root node with empty command assignment
-    TeamRootNode = NewObject<UTeamMCTSNode>(this);
+    TeamRootNode = MakeShared<FTeamMCTSNode>();
     TMap<AActor*, FStrategicCommand> InitialCommands;
     TeamRootNode->Initialize(nullptr, InitialCommands);
 
@@ -708,81 +404,88 @@ TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTSTreeSearch(
     UE_LOG(LogTemp, Display, TEXT("🌲 MCTS: Root initialized with %d possible combinations"),
         TeamRootNode->UntriedActions.Num());
 
+    // Early exit if no combinations generated
+    if (TeamRootNode->UntriedActions.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS: No command combinations generated! Falling back to baseline heuristic"));
+        return GenerateStrategicCommandsHeuristic(TeamObs, Followers);
+    }
+
     // Run MCTS simulations
     for (int32 i = 0; i < MaxSimulations; ++i)
     {
-        // 1. SELECTION: Traverse tree using UCT
-        UTeamMCTSNode* LeafNode = SelectNode(TeamRootNode);
+        TSharedPtr<FTeamMCTSNode> LeafNode = SelectNode(TeamRootNode);
 
-        // 2. EXPANSION: Add child node if not terminal
-        UTeamMCTSNode* NodeToSimulate = LeafNode;
+        if (!LeafNode.IsValid())
+        {
+            break;
+        }
+
+        TSharedPtr<FTeamMCTSNode> NodeToSimulate = LeafNode;
+
         if (!LeafNode->IsTerminal() && LeafNode->VisitCount > 0)
         {
             NodeToSimulate = ExpandNode(LeafNode, Followers);
-            if (!NodeToSimulate)
+            if (!NodeToSimulate.IsValid())
             {
-                NodeToSimulate = LeafNode; // Expansion failed, use leaf
+                NodeToSimulate = LeafNode;
             }
         }
 
-        // 3. SIMULATION: Estimate reward
         float Reward = SimulateNode(NodeToSimulate, TeamObs);
-
-        // 4. BACKPROPAGATION: Update node statistics
         NodeToSimulate->Backpropagate(Reward);
-
-        if (i % 100 == 0)
-        {
-            UE_LOG(LogTemp, Verbose, TEXT("🌲 MCTS: Simulation %d/%d - Reward: %.1f"),
-                i, MaxSimulations, Reward);
-        }
     }
 
-    // Select best child based on visit count (most explored = most promising)
-    UTeamMCTSNode* BestChild = nullptr;
+    TSharedPtr<FTeamMCTSNode> BestChild = nullptr;
     int32 MaxVisits = 0;
 
-    for (UTeamMCTSNode* Child : TeamRootNode->Children)
+    for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
     {
-        if (Child && Child->VisitCount > MaxVisits)
+        if (Child.IsValid() && Child->VisitCount > MaxVisits)
         {
             MaxVisits = Child->VisitCount;
             BestChild = Child;
         }
     }
 
-    if (BestChild)
+    if (BestChild.IsValid())
     {
         float AvgReward = BestChild->TotalReward / FMath::Max(1, BestChild->VisitCount);
         UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS TREE SEARCH: Best child found (Visits: %d, Avg Reward: %.1f)"),
             MaxVisits, AvgReward);
         return BestChild->GetCommands();
     }
+    else if (TeamRootNode->VisitCount > 0)
+    {
+        // Root was simulated but no children - return root commands
+        UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS: No children expanded, using root node commands"));
+        return TeamRootNode->GetCommands();
+    }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS TREE SEARCH: No children expanded! Falling back to heuristics"));
+        // Complete failure - use baseline heuristic as emergency fallback
+        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS TREE SEARCH FAILED: No simulations completed! Using baseline heuristic fallback"));
         return GenerateStrategicCommandsHeuristic(TeamObs, Followers);
     }
 }
 
 
-UTeamMCTSNode* UMCTS::SelectNode(UTeamMCTSNode* Node)
+TSharedPtr<FTeamMCTSNode> UMCTS::SelectNode(TSharedPtr<FTeamMCTSNode> Node)
 {
     // Traverse tree using UCT until reaching a leaf node
+    if (!Node.IsValid()) return nullptr;
+
     while (!Node->IsTerminal())
     {
         if (!Node->IsFullyExpanded())
         {
-            // Node has untried actions, return it for expansion
             return Node;
         }
         else
         {
-            // Node is fully expanded, select best child using UCT
             Node = Node->SelectBestChild(ExplorationParameter);
-            if (!Node)
+            if (!Node.IsValid())
             {
-                UE_LOG(LogTemp, Error, TEXT("SelectNode: SelectBestChild returned nullptr!"));
                 break;
             }
         }
@@ -792,11 +495,12 @@ UTeamMCTSNode* UMCTS::SelectNode(UTeamMCTSNode* Node)
 }
 
 
-UTeamMCTSNode* UMCTS::ExpandNode(UTeamMCTSNode* Node, const TArray<AActor*>& Followers)
+TSharedPtr<FTeamMCTSNode> UMCTS::ExpandNode(TSharedPtr<FTeamMCTSNode> Node, const TArray<AActor*>& Followers)
 {
+    if (!Node.IsValid()) return nullptr;
+
     if (Node->UntriedActions.Num() == 0)
     {
-        // Generate new actions if none available
         Node->UntriedActions = GenerateCommandCombinations(
             Followers,
             CachedTeamObservation,
@@ -808,9 +512,10 @@ UTeamMCTSNode* UMCTS::ExpandNode(UTeamMCTSNode* Node, const TArray<AActor*>& Fol
 }
 
 
-float UMCTS::SimulateNode(UTeamMCTSNode* Node, const FTeamObservation& TeamObs)
+float UMCTS::SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation& TeamObs)
 {
-    // Fast rollout: evaluate reward for this command assignment
+    if (!Node.IsValid()) return 0.0f;
+
     TMap<AActor*, FStrategicCommand> Commands = Node->GetCommands();
 
     // If no commands assigned yet, use heuristic
@@ -830,6 +535,12 @@ TArray<TMap<AActor*, FStrategicCommand>> UMCTS::GenerateCommandCombinations(
     int32 MaxCombinations) const
 {
     TArray<TMap<AActor*, FStrategicCommand>> Combinations;
+
+    if (Followers.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GenerateCommandCombinations: No followers provided"));
+        return Combinations;
+    }
 
     // Available command types (strategic level)
     TArray<EStrategicCommandType> PossibleCommands = {

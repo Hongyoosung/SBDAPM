@@ -3,50 +3,52 @@
 #include "AI/MCTS/TeamMCTSNode.h"
 #include "Kismet/KismetMathLibrary.h"
 
-UTeamMCTSNode::UTeamMCTSNode()
-	: Parent(nullptr)
-	, TotalReward(0.0f)
+FTeamMCTSNode::FTeamMCTSNode()
+	: TotalReward(0.0f)
 	, VisitCount(0)
 	, Depth(0)
 {
 }
 
-void UTeamMCTSNode::Initialize(UTeamMCTSNode* InParent, const TMap<AActor*, FStrategicCommand>& InCommands)
+void FTeamMCTSNode::Initialize(TSharedPtr<FTeamMCTSNode> InParent, const TMap<AActor*, FStrategicCommand>& InCommands)
 {
 	Parent = InParent;
 	Commands = InCommands;
 	TotalReward = 0.0f;
 	VisitCount = 0;
-	Depth = InParent ? InParent->Depth + 1 : 0;
+
+	TSharedPtr<FTeamMCTSNode> ParentPinned = InParent;
+	Depth = ParentPinned.IsValid() ? ParentPinned->Depth + 1 : 0;
+
 	Children.Empty();
 	UntriedActions.Empty();
 }
 
-bool UTeamMCTSNode::IsFullyExpanded() const
+bool FTeamMCTSNode::IsFullyExpanded() const
 {
 	return UntriedActions.Num() == 0;
 }
 
-bool UTeamMCTSNode::IsTerminal() const
+bool FTeamMCTSNode::IsTerminal() const
 {
 	// Terminal if reached maximum depth
 	const int32 MaxDepth = 5;
 	return Depth >= MaxDepth;
 }
 
-UTeamMCTSNode* UTeamMCTSNode::SelectBestChild(float ExplorationParam) const
+TSharedPtr<FTeamMCTSNode> FTeamMCTSNode::SelectBestChild(float ExplorationParam) const
 {
 	if (Children.Num() == 0)
 	{
 		return nullptr;
 	}
 
-	UTeamMCTSNode* BestChild = nullptr;
+	TSharedPtr<FTeamMCTSNode> BestChild = nullptr;
 	float BestValue = -FLT_MAX;
 
-	for (UTeamMCTSNode* Child : Children)
+	for (const TSharedPtr<FTeamMCTSNode>& Child : Children)
 	{
-		if (!Child) continue;
+		if (!Child.IsValid()) continue;
 
 		float UCTValue = Child->CalculateUCTValue(ExplorationParam);
 
@@ -60,54 +62,49 @@ UTeamMCTSNode* UTeamMCTSNode::SelectBestChild(float ExplorationParam) const
 	return BestChild;
 }
 
-float UTeamMCTSNode::CalculateUCTValue(float ExplorationParam) const
+float FTeamMCTSNode::CalculateUCTValue(float ExplorationParam) const
 {
-	if (VisitCount == 0)
+	if (VisitCount == 0) return FLT_MAX;
+
+	TSharedPtr<FTeamMCTSNode> ParentPinned = Parent.Pin();
+	if (!ParentPinned || ParentPinned->VisitCount == 0)
 	{
-		return FLT_MAX; // Unvisited nodes have infinite value
+		return TotalReward / VisitCount;
 	}
 
-	if (!Parent || Parent->VisitCount == 0)
-	{
-		return TotalReward / VisitCount; // Root node or invalid parent
-	}
-
-	// UCT formula: Q/N + C * sqrt(ln(N_parent) / N)
 	float Exploitation = TotalReward / VisitCount;
-	float Exploration = ExplorationParam * FMath::Sqrt(FMath::Loge(static_cast<float>(Parent->VisitCount)) / VisitCount);
+	float Exploration = ExplorationParam * FMath::Sqrt(FMath::Loge(static_cast<float>(ParentPinned->VisitCount)) / VisitCount);
 
 	return Exploitation + Exploration;
 }
 
-UTeamMCTSNode* UTeamMCTSNode::Expand(const TArray<AActor*>& Followers)
+TSharedPtr<FTeamMCTSNode> FTeamMCTSNode::Expand(const TArray<AActor*>& Followers)
 {
-	if (UntriedActions.Num() == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamMCTSNode::Expand: No untried actions available"));
-		return nullptr;
-	}
+	if (UntriedActions.Num() == 0) return nullptr;
 
-	// Pick a random untried action
 	int32 RandomIndex = FMath::RandRange(0, UntriedActions.Num() - 1);
 	TMap<AActor*, FStrategicCommand> NewCommands = UntriedActions[RandomIndex];
 	UntriedActions.RemoveAt(RandomIndex);
 
-	// Create child node
-	UTeamMCTSNode* Child = NewObject<UTeamMCTSNode>(this);
-	Child->Initialize(this, NewCommands);
+	// 중요: NewObject 대신 MakeShared 사용
+	TSharedPtr<FTeamMCTSNode> Child = MakeShared<FTeamMCTSNode>();
+
+	// 'this'를 SharedPtr로 전달하기 위해 AsShared() 사용
+	Child->Initialize(AsShared(), NewCommands);
 
 	Children.Add(Child);
 
 	return Child;
 }
 
-void UTeamMCTSNode::Backpropagate(float Reward)
+void FTeamMCTSNode::Backpropagate(float Reward)
 {
 	VisitCount++;
 	TotalReward += Reward;
 
-	if (Parent)
+	TSharedPtr<FTeamMCTSNode> ParentPinned = Parent.Pin();
+	if (ParentPinned.IsValid())
 	{
-		Parent->Backpropagate(Reward);
+		ParentPinned->Backpropagate(Reward);
 	}
 }
