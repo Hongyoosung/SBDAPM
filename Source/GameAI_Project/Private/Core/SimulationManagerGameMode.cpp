@@ -1,7 +1,10 @@
 #include "Core/SimulationManagerGameMode.h"
 #include "Team/TeamLeaderComponent.h"
+#include "Team/FollowerAgentComponent.h"
+#include "Combat/HealthComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 ASimulationManagerGameMode::ASimulationManagerGameMode()
 {
@@ -23,9 +26,12 @@ void ASimulationManagerGameMode::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (bSimulationRunning)
+	if (bSimulationRunning && !bEpisodeEnding)
 	{
 		UpdateStatistics();
+
+		// Episode termination is now event-driven via OnAgentDied()
+		// No per-tick checking needed
 
 		if (bDrawDebugInfo)
 		{
@@ -425,4 +431,241 @@ void ASimulationManagerGameMode::DrawDebugInformation()
 
 	DrawDebugString(World, DebugOrigin + FVector(0, 0, YOffset), StatsStr, nullptr,
 		FColor::White, DebugDrawInterval, false, 1.5f);
+}
+
+//------------------------------------------------------------------------------
+// EPISODE MANAGEMENT
+//------------------------------------------------------------------------------
+
+void ASimulationManagerGameMode::OnAgentDied(AActor* DeadAgent)
+{
+	if (!DeadAgent || bEpisodeEnding)
+	{
+		return;
+	}
+
+	int32 TeamID = GetTeamIDForActor(DeadAgent);
+	UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Agent '%s' (Team %d) died"),
+		*DeadAgent->GetName(), TeamID);
+
+	// Check if this death causes episode termination
+	CheckEpisodeTermination();
+}
+
+bool ASimulationManagerGameMode::IsTeamEliminated(int32 TeamID) const
+{
+	return GetAliveAgentCount(TeamID) == 0;
+}
+
+int32 ASimulationManagerGameMode::GetAliveAgentCount(int32 TeamID) const
+{
+	const FTeamInfo* TeamInfo = RegisteredTeams.Find(TeamID);
+	if (!TeamInfo)
+	{
+		return 0;
+	}
+
+	int32 AliveCount = 0;
+	for (AActor* Member : TeamInfo->TeamMembers)
+	{
+		if (!Member || !IsValid(Member))
+		{
+			continue;
+		}
+
+		// Check HealthComponent for alive status
+		UHealthComponent* HealthComp = Member->FindComponentByClass<UHealthComponent>();
+		if (HealthComp && HealthComp->IsAlive())
+		{
+			AliveCount++;
+		}
+		else if (!HealthComp)
+		{
+			// No health component - assume alive if valid
+			AliveCount++;
+		}
+	}
+
+	return AliveCount;
+}
+
+void ASimulationManagerGameMode::CheckEpisodeTermination()
+{
+	if (bEpisodeEnding)
+	{
+		return;
+	}
+
+	// Check max steps
+	if (MaxStepsPerEpisode > 0 && CurrentStep >= MaxStepsPerEpisode)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Episode %d - Max steps reached (%d)"),
+			CurrentEpisode, MaxStepsPerEpisode);
+		EndEpisode(-1, -1); // Draw
+		return;
+	}
+
+	// Check for team elimination
+	TArray<int32> AllTeamIDs = GetAllTeamIDs();
+	TArray<int32> AliveTeams;
+	TArray<int32> EliminatedTeams;
+
+	for (int32 TeamID : AllTeamIDs)
+	{
+		if (IsTeamEliminated(TeamID))
+		{
+			EliminatedTeams.Add(TeamID);
+		}
+		else
+		{
+			AliveTeams.Add(TeamID);
+		}
+	}
+
+	// End episode if only one team survives (or all eliminated)
+	if (AliveTeams.Num() <= 1 && AllTeamIDs.Num() > 1)
+	{
+		int32 WinningTeamID = AliveTeams.Num() == 1 ? AliveTeams[0] : -1;
+		int32 LosingTeamID = EliminatedTeams.Num() > 0 ? EliminatedTeams[0] : -1;
+
+		UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Episode %d - Team %d eliminated! Winner: %d"),
+			CurrentEpisode, LosingTeamID, WinningTeamID);
+
+		EndEpisode(WinningTeamID, LosingTeamID);
+	}
+}
+
+void ASimulationManagerGameMode::EndEpisode(int32 WinningTeamID, int32 LosingTeamID)
+{
+	if (bEpisodeEnding)
+	{
+		return;
+	}
+
+	bEpisodeEnding = true;
+	float EpisodeDuration = GetWorld()->GetTimeSeconds() - EpisodeStartTime;
+
+	// Build episode result
+	LastEpisodeResult.EpisodeNumber = CurrentEpisode;
+	LastEpisodeResult.WinningTeamID = WinningTeamID;
+	LastEpisodeResult.LosingTeamID = LosingTeamID;
+	LastEpisodeResult.EpisodeDuration = EpisodeDuration;
+	LastEpisodeResult.TotalSteps = CurrentStep;
+
+	UE_LOG(LogTemp, Warning, TEXT("===== EPISODE %d ENDED ====="), CurrentEpisode);
+	UE_LOG(LogTemp, Warning, TEXT("  Winner: Team %d"), WinningTeamID);
+	UE_LOG(LogTemp, Warning, TEXT("  Loser: Team %d"), LosingTeamID);
+	UE_LOG(LogTemp, Warning, TEXT("  Duration: %.2fs"), EpisodeDuration);
+	UE_LOG(LogTemp, Warning, TEXT("  Steps: %d"), CurrentStep);
+	UE_LOG(LogTemp, Warning, TEXT("============================="));
+
+	// Distribute rewards to team leaders
+	for (const auto& Pair : RegisteredTeams)
+	{
+		int32 TeamID = Pair.Key;
+		UTeamLeaderComponent* TeamLeader = Pair.Value.TeamLeader;
+
+		if (TeamLeader)
+		{
+			float Reward = 0.0f;
+			if (TeamID == WinningTeamID)
+			{
+				Reward = WinReward;
+			}
+			else if (TeamID == LosingTeamID)
+			{
+				Reward = LosePenalty;
+			}
+
+			TeamLeader->OnEpisodeEnded(Reward);
+		}
+
+		// Also notify followers via their FollowerAgentComponent
+		for (AActor* Member : Pair.Value.TeamMembers)
+		{
+			if (!Member) continue;
+
+			UFollowerAgentComponent* FollowerComp = Member->FindComponentByClass<UFollowerAgentComponent>();
+			if (FollowerComp)
+			{
+				float FollowerReward = (TeamID == WinningTeamID) ? WinReward :
+									   (TeamID == LosingTeamID) ? LosePenalty : 0.0f;
+				FollowerComp->OnEpisodeEnded(FollowerReward);
+			}
+		}
+	}
+
+	// Broadcast episode ended event
+	OnEpisodeEnded.Broadcast(LastEpisodeResult);
+
+	// Auto-restart if enabled
+	if (bAutoRestartEpisode)
+	{
+		GetWorldTimerManager().SetTimer(
+			EpisodeRestartTimerHandle,
+			this,
+			&ASimulationManagerGameMode::StartNewEpisode,
+			EpisodeRestartDelay,
+			false
+		);
+
+		UE_LOG(LogTemp, Log, TEXT("SimulationManager: New episode starting in %.1fs"), EpisodeRestartDelay);
+	}
+}
+
+void ASimulationManagerGameMode::StartNewEpisode()
+{
+	// Clear timer
+	GetWorldTimerManager().ClearTimer(EpisodeRestartTimerHandle);
+
+	// Increment episode counter
+	CurrentEpisode++;
+	CurrentStep = 0;
+	EpisodeStartTime = GetWorld()->GetTimeSeconds();
+	bEpisodeEnding = false;
+
+	UE_LOG(LogTemp, Warning, TEXT("===== EPISODE %d STARTED ====="), CurrentEpisode);
+
+	// Reset agent health and positions
+	for (auto& Pair : RegisteredTeams)
+	{
+		UTeamLeaderComponent* TeamLeader = Pair.Value.TeamLeader;
+
+		// Clear leader's strategic experiences for new episode
+		if (TeamLeader)
+		{
+			TeamLeader->ClearStrategicExperiences();
+		}
+
+		// Reset team members
+		for (AActor* Member : Pair.Value.TeamMembers)
+		{
+			if (!Member) continue;
+
+			// Reset health
+			UHealthComponent* HealthComp = Member->FindComponentByClass<UHealthComponent>();
+			if (HealthComp)
+			{
+				HealthComp->ResetHealth();
+			}
+
+			// TODO: Reset to spawn positions if needed
+			// Could store initial transforms and restore them here
+		}
+	}
+
+	// Broadcast episode started event
+	OnEpisodeStarted.Broadcast(CurrentEpisode);
+}
+
+void ASimulationManagerGameMode::IncrementStep()
+{
+	CurrentStep++;
+
+	// Check max steps limit
+	if (MaxStepsPerEpisode > 0 && CurrentStep >= MaxStepsPerEpisode)
+	{
+		UE_LOG(LogTemp, Log, TEXT("SimulationManager: Step %d/%d - max steps reached"),
+			CurrentStep, MaxStepsPerEpisode);
+	}
 }

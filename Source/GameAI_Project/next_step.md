@@ -1,4 +1,4 @@
-# Next Steps: Agent Proximity & Formation Analysis
+# Next Steps: RL Training Pipeline with Schola + RLlib
 
 ## Current Status Summary
 
@@ -6,259 +6,272 @@
 - MCTS team-level strategic planning (~34ms per decision)
 - State Tree task execution (Assault, Defend, Support, Move, Retreat)
 - Combat system (movement, firing, damage, rewards)
-- Random actions at simulation start (exploration phase)
 - Command pipeline from perception to execution
+- Agent proximity/formation (SOLVED)
+- Experience collection (stores to JSON)
+- **Schola Integration (Phase 1)** - Plugin installed, components created
 
 **⚠️ CURRENT ISSUE:**
-During initial simulation, agents tend to be too close to each other. This raises the question:
-- Is there task logic forcing agents to cluster?
-- Or is this natural behavior during early learning/random exploration?
+RL model is NOT actually learning - uses **rule-based heuristics** as fallback.
 
-## State Tree Structure (Current - Working)
+---
+
+## ✅ Phase 1 Implementation Complete
+
+The following Schola components have been created:
+
+### C++ Components (UE5)
+- `Schola/TacticalObserver.h/cpp` - 71-feature observation via FObservationElement::ToFeatureVector()
+- `Schola/TacticalActuator.h/cpp` - 16 discrete actions (ETacticalAction enum)
+- `Schola/TacticalRewardProvider.h/cpp` - Reward from combat events
+
+### Python Scripts
+- `Scripts/sbdapm_env.py` - Gym wrapper for Schola/RLlib
+- `Scripts/train_rllib.py` - RLlib PPO training script
+- `Scripts/requirements.txt` - Updated with ray[rllib], gymnasium
+
+### Build Configuration
+- `GameAI_Project.Build.cs` - Added "Schola" dependency
+- `GameAI_Project.uproject` - Schola, NNE, NNERuntimeORT plugins enabled
+
+## Architecture Overview
+
 ```
-Root
-├── Dead State (condition: !IsAlive)
-├── Idle State (condition: CommandType == Idle)
-├── Assault State (condition: CommandType == Assault)
-│   ├── Task 1: STTask_QueryRLPolicy → Selects tactical action
-│   └── Task 2: STTask_ExecuteAssault → Executes movement + firing
-├── Defend State (condition: CommandType == Defend/HoldPosition/TakeCover)
-│   ├── Task 1: STTask_QueryRLPolicy
-│   └── Task 2: STTask_ExecuteDefend
-├── Support State (condition: CommandType == Support)
-│   ├── Task 1: STTask_QueryRLPolicy
-│   └── Task 2: STTask_ExecuteSupport
-├── Retreat State (condition: CommandType == Retreat)
-│   ├── Task 1: STTask_QueryRLPolicy
-│   └── Task 2: STTask_ExecuteRetreat
-└── Move State (condition: CommandType == MoveTo/Patrol/Advance)
-    ├── Task 1: STTask_QueryRLPolicy
-    └── Task 2: STTask_ExecuteMove
-
-Evaluators: STEvaluator_SyncCommand, STEvaluator_UpdateObservation
-Transitions: All states can transition to any other state based on command changes
-```
-
-## Agent Proximity Investigation Plan
-
-### Phase 1: Agent Spacing Analysis (PRIORITY)
-**Goal:** Understand why agents cluster together during initial simulation
-
-**Hypotheses to Test:**
-1. **MCTS assigns same/similar targets to all agents** → All agents converge on same location
-2. **No formation spacing enforcement** → Agents ignore teammate positions
-3. **Random actions lack spatial awareness** → Early exploration doesn't include spreading tactics
-4. **Natural convergence** → Both teams moving toward objectives creates unavoidable clustering
-5. **Task logic forces proximity** → ExecuteAssault/Move tasks have inherent clustering behavior
-
-**Investigation Steps:**
-
-1. **Log MCTS Command Assignments** (`Team/TeamLeaderComponent.cpp`)
-   ```cpp
-   // After MCTS decision, log each agent's target location
-   for (const auto& Pair : Commands)
-   {
-       AActor* Agent = Pair.Key;
-       FVector TargetLoc = Pair.Value.TargetLocation;
-       UE_LOG(LogTemp, Warning, TEXT("[MCTS] Agent '%s': Command=%s, TargetLoc=%s"),
-           *Agent->GetName(), *UEnum::GetValueAsString(Pair.Value.CommandType), *TargetLoc.ToString());
-   }
-   ```
-   - Check if all agents get same target location
-   - Verify MCTS generates diverse positioning
-
-2. **Log Agent Positions and Inter-Agent Distances** (`FollowerAgentComponent.cpp` or `TeamLeaderComponent.cpp`)
-   ```cpp
-   // Log every 2 seconds
-   for (AActor* Agent1 : TeamAgents)
-   {
-       for (AActor* Agent2 : TeamAgents)
-       {
-           if (Agent1 != Agent2)
-           {
-               float Distance = FVector::Dist(Agent1->GetActorLocation(), Agent2->GetActorLocation());
-               UE_LOG(LogTemp, Log, TEXT("[FORMATION] Distance '%s' <-> '%s': %.1f cm"),
-                   *Agent1->GetName(), *Agent2->GetName(), Distance);
-           }
-       }
-   }
-   ```
-   - Identify if agents start apart and converge, or start close
-   - Track minimum inter-agent distance over time
-
-3. **Analyze Task Movement Logic** (Code review - no changes needed)
-   - `STTask_ExecuteAssault.cpp:194` - `MoveToLocation(TargetLocation, 50.0f)`
-   - `STTask_ExecuteMove.cpp` - Check destination calculation
-   - Question: Do tasks consider ally positions when moving?
-   - Current: Tasks only consider target/enemy positions, not teammates
-
-4. **Check MCTS Reward Function** (`MCTS/MCTS.cpp:39-82`)
-   - `FormationCoherence` exists in reward (line 46)
-   - BUT: Does FormationCoherence encourage tight clustering or spacing?
-   - Verify: What is the actual value of `TeamObs.FormationCoherence`?
-   - Add logging: `UE_LOG(LogTemp, Warning, TEXT("[MCTS] FormationCoherence=%.2f"), TeamObs.FormationCoherence);`
-
-**Expected Findings:**
-- Likely: MCTS assigns similar target locations to all agents (e.g., all target same enemy)
-- Likely: FormationCoherence may encourage clustering (high coherence = tight formation)
-- Likely: No explicit spatial separation logic exists in task execution
-
-
-## Implementation Order
-
-### 1. LOGGING FOR PROXIMITY DIAGNOSIS (IMMEDIATE)
-**Goal:** Gather data to understand clustering behavior
-
-**Files to Modify:**
-1. `Team/TeamLeaderComponent.cpp` - Log MCTS command assignments with target locations
-2. `Team/TeamLeaderComponent.cpp` or `FollowerAgentComponent.cpp` - Log inter-agent distances
-3. `MCTS/MCTS.cpp` - Log FormationCoherence value in CalculateTeamReward()
-
-**Success Criteria:**
-```
-[MCTS] Agent 'BP_Follower_0': Command=Assault, TargetLoc=(1200, -300, 100)
-[MCTS] Agent 'BP_Follower_1': Command=Assault, TargetLoc=(1180, -320, 100)  ← Similar location!
-[MCTS] Agent 'BP_Follower_2': Command=Support, TargetLoc=(1150, -280, 100)  ← Also close!
-[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_1': 180.0 cm  ← Too close!
-[MCTS] FormationCoherence=0.85 (reward component: +42.5)
+Training: UE5.6 + Schola ←→ gRPC ←→ OpenAI Gym ←→ RLlib ←→ AWS SageMaker
+Inference: UE5.6 + NNE + ONNX Runtime (no Python)
 ```
 
-### 2. ROOT CAUSE ANALYSIS (AFTER LOGGING)
-**Based on logs, identify the root cause:**
+See `TOTAL_ACHITECTURE_IMPLEMENTATION_PLAN.md` for full architecture diagram.
 
-**Scenario A: MCTS assigns same target to all agents**
-- **Solution:** Add target diversity to MCTS expansion
-- Modify `TeamMCTSNode::Expand()` to ensure varied target assignments
-- Add penalty for multiple agents targeting same location
+---
 
-**Scenario B: FormationCoherence encourages tight clustering**
-- **Solution:** Redefine FormationCoherence calculation
-- Change from "stay close together" to "maintain optimal spacing"
-- Optimal spacing: 400-800cm between allies (close enough to support, far enough to avoid AoE)
+## Phase 1: Schola Plugin Integration (IMMEDIATE)
 
-**Scenario C: Task logic lacks spatial awareness**
-- **Solution:** Add formation offset to task movement
-- Modify `STTask_ExecuteAssault::ExecuteAggressiveAssault()` to add per-agent offset
-- Example: Agent 0 → target directly, Agent 1 → target + 300cm left, Agent 2 → target + 300cm right
+**Goal:** Establish gRPC communication between UE and Python/RLlib
 
-**Scenario D: Natural convergence (both teams meet)**
-- **Solution:** Add initial positioning spread
-- Modify spawn locations or initial commands to spread agents horizontally
-- Add "Move" commands at start to position agents before engaging
+### Step 1.1: Install Schola Plugin
+```bash
+cd C:\Users\Foryoucom\Documents\GitHub\4d\SBDAPM
+git clone https://github.com/GPUOpen-LibrariesAndSDKs/Schola.git Plugins/Schola
+```
 
-### 3. FORMATION SPACING IMPLEMENTATION (AFTER ROOT CAUSE IDENTIFIED)
-**Goal:** Implement solution based on root cause analysis
+### Step 1.2: Enable Plugins in .uproject
+```json
+"Plugins": [
+    { "Name": "Schola", "Enabled": true },
+    { "Name": "NNERuntimeORT", "Enabled": true }
+]
+```
 
-**Option 1: MCTS-Level Target Diversification**
+### Step 1.3: Install Python Package
+```bash
+pip install schola[rllib]
+# Or for all frameworks:
+pip install schola[all]
+```
+
+### Step 1.4: Create Schola Agent Component
+Create `ScholaAgentComponent` on follower pawns that:
+- **Sensors:** Maps to existing 71-feature observation (`FObservationElement`)
+- **Actuators:** Maps to 16 discrete actions (`ETacticalAction`)
+- **Rewards:** Exposes reward from `FollowerAgentComponent`
+
+---
+
+## Phase 2: RLlib Training Setup
+
+**Goal:** Train agents using RLlib PPO via Schola's Gym wrapper
+
+### Step 2.1: Create SBDAPM Environment Wrapper
+```python
+# Scripts/sbdapm_env.py
+from schola.envs import UnrealEnv
+from gymnasium import spaces
+import numpy as np
+
+class SBDAPMEnv(UnrealEnv):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 71 observation features (follower) + 40 (team) = 111 total
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(71,), dtype=np.float32
+        )
+        # 16 discrete tactical actions
+        self.action_space = spaces.Discrete(16)
+```
+
+### Step 2.2: Create RLlib Training Script
+```python
+# Scripts/train_rllib.py
+from ray.rllib.algorithms.ppo import PPOConfig
+from sbdapm_env import SBDAPMEnv
+
+config = (
+    PPOConfig()
+    .environment(SBDAPMEnv, env_config={"host": "localhost", "port": 50051})
+    .training(lr=3e-4, train_batch_size=4000, sgd_minibatch_size=128)
+    .framework("torch")
+)
+
+algo = config.build()
+for i in range(100):
+    result = algo.train()
+    print(f"Episode {i}: reward={result['episode_reward_mean']:.2f}")
+
+# Export to ONNX
+algo.export_policy_model("tactical_policy", onnx=True)
+```
+
+### Step 2.3: Run Local Training
+```bash
+# Terminal 1: Start UE with Schola server
+UnrealEditor.exe GameAI_Project.uproject -game -windowed -resx=800 -resy=600
+
+# Terminal 2: Run training
+cd Source/GameAI_Project/Scripts
+python train_rllib.py
+```
+
+---
+
+## Phase 3: ONNX Inference in UE (Production)
+
+**Goal:** Load trained model for real-time inference without Python
+
+### Step 3.1: Export ONNX from RLlib
+```python
+# After training
+algo.export_policy_model("Content/Models/tactical_policy", onnx=True)
+```
+
+### Step 3.2: Load in UE
 ```cpp
-// In TeamMCTSNode.cpp or MCTS.cpp
-// When generating command combinations, ensure target diversity:
-TArray<FVector> UsedTargetLocations;
-for (AActor* Follower : Followers)
+// In FollowerAgentComponent
+if (TacticalPolicy)
 {
-    FVector BaseTarget = GetPrimaryEnemyLocation();
-    FVector Offset = CalculateFormationOffset(Follower, UsedTargetLocations);
-    Commands.Add(Follower, FStrategicCommand(Assault, BaseTarget + Offset));
-    UsedTargetLocations.Add(BaseTarget + Offset);
+    bool bLoaded = TacticalPolicy->LoadPolicy(TEXT("Content/Models/tactical_policy.onnx"));
+    if (bLoaded)
+    {
+        UE_LOG(LogTemp, Log, TEXT("ONNX model loaded successfully"));
+    }
 }
 ```
 
-**Option 2: Task-Level Formation Offset**
-```cpp
-// In STTask_ExecuteAssault.cpp
-FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
-FVector FormationOffset = CalculateFormationOffset(Pawn, SharedContext.FollowerComponent);
-FVector AdjustedTarget = TargetLocation + FormationOffset;
-SharedContext.AIController->MoveToLocation(AdjustedTarget, 50.0f);
-```
+### Step 3.3: Verify Inference
+- Check `bUseONNXModel` is true
+- Inference time should be <5ms
+- Actions should differ from rule-based fallback
 
-**Option 3: Observation-Based Learning (RL learns spacing)**
-```cpp
-// In ObservationElement.cpp - Add new feature
-// "NearestAllyDistance" - Distance to nearest teammate
-// RL policy will learn to maintain optimal spacing via rewards
-Feature.NearestAllyDistance = CalculateNearestAllyDistance() / 3000.0f; // Normalize to 0-1
-```
+## File Locations
 
+```
+SBDAPM/
+├── Plugins/
+│   └── Schola/                     # AMD Schola plugin (gRPC bridge)
+├── Source/GameAI_Project/
+│   ├── Scripts/
+│   │   ├── sbdapm_env.py           # ✅ Custom Gym environment wrapper
+│   │   ├── train_rllib.py          # ✅ RLlib PPO training script
+│   │   ├── train_tactical_policy.py # Offline training from JSON
+│   │   └── requirements.txt        # ✅ Python dependencies
+│   ├── Public/Schola/              # ✅ NEW - Schola integration
+│   │   ├── TacticalObserver.h      # 71-feature observation
+│   │   ├── TacticalActuator.h      # 16 discrete actions
+│   │   └── TacticalRewardProvider.h # Combat reward provider
+│   ├── Private/Schola/             # ✅ NEW
+│   │   ├── TacticalObserver.cpp
+│   │   ├── TacticalActuator.cpp
+│   │   └── TacticalRewardProvider.cpp
+│   ├── Private/RL/
+│   │   ├── RLPolicyNetwork.cpp     # ONNX loading + inference
+│   │   └── RLReplayBuffer.cpp      # Experience storage (offline fallback)
+│   └── Public/RL/
+│       ├── RLPolicyNetwork.h       # Policy interface
+│       └── RLTypes.h               # ETacticalAction, FRLExperience
+└── Content/Models/
+    └── tactical_policy.onnx        # Trained model (after Phase 2)
+```
 
 ## Testing Checklist
 
-### Phase 1: Proximity Diagnosis (Current Focus)
-- [ ] Log MCTS command assignments (verify target location diversity)
-- [ ] Log inter-agent distances every 2 seconds
-- [ ] Log FormationCoherence values in MCTS reward calculation
-- [ ] Identify if agents start spread and converge, or start clustered
-- [ ] Determine root cause: MCTS assignments, task logic, or natural convergence
+### Phase 1: Schola Integration
+- [x] Schola plugin cloned to `Plugins/Schola`
+- [x] NNE + NNERuntimeORT plugins enabled
+- [x] C++ components created (TacticalObserver, TacticalActuator, TacticalRewardProvider)
+- [ ] Project compiles without errors
+- [ ] `pip install schola[rllib]` succeeds
+- [ ] Schola server starts when UE launches (check logs for gRPC port)
 
-### Phase 2: Formation Spacing Implementation (After Diagnosis)
-- [ ] Implement chosen solution (MCTS diversification, task offset, or RL observation)
-- [ ] Verify agents maintain 400-800cm spacing from teammates
-- [ ] Ensure formation doesn't break combat effectiveness
-- [ ] Test with 2, 3, and 4 agent teams
+### Phase 2: RLlib Training
+- [ ] Python connects to UE via Schola gRPC
+- [ ] Observations received (71 features, valid ranges)
+- [ ] Actions sent to UE (0-15 → ETacticalAction)
+- [ ] Rewards received from combat events
+- [ ] `train_rllib.py` runs without errors
+- [ ] Episode reward increases over training
 
-### Phase 3: Tactical Behavior Validation
-- [ ] MCTS generates diverse commands (Assault, Defend, Support, Retreat, Move)
-- [ ] Agents spread out during initial positioning
-- [ ] Agents maintain formation while advancing/retreating
-- [ ] Flanking maneuvers work correctly (agents take different angles)
-- [ ] Support agents position behind assault agents
+### Phase 3: ONNX Inference
+- [ ] ONNX model exported from RLlib
+- [ ] `LoadPolicy()` returns true in UE
+- [ ] `bUseONNXModel` set to true
+- [ ] `SelectAction()` uses neural network (not rule-based)
+- [ ] Inference time < 5ms per query
 
-### Integration Test (Already Working - Verify Maintained)
-- [x] Full loop: Perception → MCTS → Command → State Transition → Movement → Combat → Damage → Rewards
-- [x] Multiple agents coordinate (MCTS assigns different roles)
-- [ ] Agents respond to dynamic threats with formation awareness
-- [ ] Agents don't cluster when multiple targets available
+### Phase 4: Evaluation
+- [ ] Trained model produces different actions than rule-based
+- [ ] Average reward improves over untrained model
+- [ ] Agents exhibit learned behaviors (flanking, retreating when low health)
 
-## Files to Modify (Priority Order)
+## Troubleshooting
 
-### Immediate: Proximity Diagnosis Logging
-1. `Team/TeamLeaderComponent.cpp` - Log MCTS command assignments with target locations
-2. `Team/TeamLeaderComponent.cpp` - Log inter-agent distances (or add to FollowerAgentComponent)
-3. `MCTS/MCTS.cpp` - Log FormationCoherence value in CalculateTeamReward()
+**"Schola plugin not found"**
+- Verify `Plugins/Schola` directory exists
+- Check `Schola.uplugin` is present
+- Rebuild project after adding plugin
 
-### After Diagnosis: Formation Spacing Implementation
-4. `MCTS/MCTS.cpp` or `TeamMCTSNode.cpp` - Add target diversification (if root cause A)
-5. `Observation/TeamObservation.h/cpp` - Redefine FormationCoherence calculation (if root cause B)
-6. `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Add formation offset (if root cause C)
-7. `StateTree/Tasks/STTask_ExecuteMove.cpp` - Add formation offset (if root cause C)
-8. Level Blueprint or spawn logic - Spread initial positions (if root cause D)
+**"gRPC connection refused"**
+- Ensure UE is running with Schola enabled
+- Check default port 50051 is not blocked
+- Verify firewall allows local connections
 
-### Optional: Observation Enhancement
-9. `Observation/ObservationElement.h/cpp` - Add NearestAllyDistance feature
-10. `RL/RLPolicyNetwork.cpp` - Retrain with new observation feature
+**"NNERuntimeORTCpu not available"**
+- Enable NNERuntimeORT plugin in Editor
+- Check if plugin is listed in .uproject
+
+**"Failed to create NNE model"**
+- Ensure ONNX opset version is 11-13
+- Export with `torch.onnx.export(..., opset_version=11)`
+- Verify model input shape matches (71,)
+
+**Training loss not decreasing**
+- Check reward signal is being sent correctly
+- Increase `train_batch_size` in RLlib config
+- Reduce learning rate (try 1e-4)
+- Ensure episodes are terminating (deaths reset env)
 
 ## Success Criteria
 
-### Phase 1: Diagnosis Complete (Data Gathered)
+**Schola Connection:**
 ```
-[MCTS] Agent 'BP_Follower_0': Command=Assault, TargetLoc=(1200, -300, 100)
-[MCTS] Agent 'BP_Follower_1': Command=Support, TargetLoc=(800, -280, 105)   ← Different target!
-[MCTS] Agent 'BP_Follower_2': Command=Assault, TargetLoc=(1180, -500, 98)  ← Spread out!
-[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_1': 520.0 cm  ← Good spacing!
-[FORMATION] Distance 'BP_Follower_0' <-> 'BP_Follower_2': 450.0 cm  ← Good spacing!
-[MCTS] FormationCoherence=0.75 (reward component: +37.5)
+[Schola] gRPC server started on port 50051
+[Schola] Client connected from 127.0.0.1
+[Schola] Observation sent: 71 features
+[Schola] Action received: 5 (TakeCover)
 ```
 
-### Phase 2: Formation Spacing Working
+**RLlib Training:**
 ```
-[FORMATION] T=0s: Team spread = 0cm (just spawned)
-[FORMATION] T=2s: Team spread = 450cm (moving to positions)
-[FORMATION] T=5s: Team spread = 620cm (engaged, maintaining formation)
-[FORMATION] T=10s: Team spread = 550cm (flanking, good spacing maintained)
-
-[ASSAULT TASK] Agent 0: Moving to target with formation offset = (0, 0, 0)
-[ASSAULT TASK] Agent 1: Moving to target with formation offset = (-300, 200, 0)  ← Offset!
-[SUPPORT TASK] Agent 2: Moving to support position with formation offset = (0, -400, 0)  ← Behind!
+Episode 0: reward=-12.50
+Episode 10: reward=5.30
+Episode 50: reward=25.80
+Episode 100: reward=42.10
+Model exported to: tactical_policy.onnx
 ```
 
-### Phase 3: Full Tactical Behavior
+**ONNX Inference:**
 ```
-[MCTS] Decision: 3 agents, 5 possible commands, diverse assignments
-[MCTS] Agent 0: Assault (target: Enemy_1 at front)
-[MCTS] Agent 1: Assault + FlankLeft (target: Enemy_1, offset left)
-[MCTS] Agent 2: Support (target: cover position behind Agent 0)
-
-[FORMATION] Inter-agent distances: 450-700cm (optimal range maintained)
-[COMBAT] Agent 0 firing from front, Agent 1 firing from flank, Agent 2 suppressing
-[COMBAT] Enemies flanked, no friendly clustering, good tactical spread
+[RLPolicy] Loading ONNX model from: Content/Models/tactical_policy.onnx
+[RLPolicy] Model loaded successfully
+[RLPolicy] Using ONNX inference
+[RLPolicy] Selected action: TakeCover (prob: 0.42)
 ```

@@ -1,8 +1,12 @@
 #include "Team/TeamLeaderComponent.h"
 #include "Team/TeamCommunicationManager.h"
 #include "AI/MCTS/MCTS.h"
+#include "Core/SimulationManagerGameMode.h"
 #include "DrawDebugHelpers.h"
 #include "Async/Async.h"
+#include "Misc/FileHelper.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 UTeamLeaderComponent::UTeamLeaderComponent()
 {
@@ -779,4 +783,141 @@ void UTeamLeaderComponent::DrawDebugInfo()
 		KnownEnemies.Num());
 
 	DrawDebugString(World, LeaderPos + FVector(0, 0, 200), TeamInfo, nullptr, TeamColor.ToFColor(true), 0.5f, true);
+}
+
+//------------------------------------------------------------------------------
+// STRATEGIC EXPERIENCE (for MCTS training)
+//------------------------------------------------------------------------------
+
+void UTeamLeaderComponent::RecordPreDecisionState()
+{
+	// Build current observation
+	CurrentTeamObservation = BuildTeamObservation();
+
+	// Initialize pending experience
+	PendingExperience = FStrategicExperience();
+	PendingExperience.StateFeatures = CurrentTeamObservation.ToFeatureVector();
+	PendingExperience.Timestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+	// Get current step from SimulationManager
+	if (UWorld* World = GetWorld())
+	{
+		if (ASimulationManagerGameMode* GM = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode()))
+		{
+			PendingExperience.StepNumber = GM->GetCurrentStep();
+		}
+	}
+
+	bHasPendingExperience = true;
+
+	UE_LOG(LogTemp, Verbose, TEXT("TeamLeader '%s': Recorded pre-decision state (%d features)"),
+		*TeamName, PendingExperience.StateFeatures.Num());
+}
+
+void UTeamLeaderComponent::RecordPostDecisionActions()
+{
+	if (!bHasPendingExperience)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': No pending experience to record actions"), *TeamName);
+		return;
+	}
+
+	// Encode current commands as action indices
+	PendingExperience.ActionsTaken.Empty();
+	for (AActor* Follower : GetAliveFollowers())
+	{
+		if (CurrentCommands.Contains(Follower))
+		{
+			int32 ActionIndex = static_cast<int32>(CurrentCommands[Follower].CommandType);
+			PendingExperience.ActionsTaken.Add(ActionIndex);
+		}
+	}
+
+	// Store experience (reward will be assigned at episode end)
+	StrategicExperiences.Add(PendingExperience);
+	bHasPendingExperience = false;
+
+	UE_LOG(LogTemp, Verbose, TEXT("TeamLeader '%s': Recorded strategic experience #%d (%d actions)"),
+		*TeamName, StrategicExperiences.Num(), PendingExperience.ActionsTaken.Num());
+}
+
+void UTeamLeaderComponent::OnEpisodeEnded(float EpisodeReward)
+{
+	// Assign reward to all experiences from this episode
+	for (FStrategicExperience& Exp : StrategicExperiences)
+	{
+		Exp.EpisodeReward = EpisodeReward;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Episode ended - assigned reward %.2f to %d strategic experiences"),
+		*TeamName, EpisodeReward, StrategicExperiences.Num());
+}
+
+bool UTeamLeaderComponent::ExportStrategicExperiences(const FString& FilePath)
+{
+	if (StrategicExperiences.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': No strategic experiences to export"), *TeamName);
+		return false;
+	}
+
+	// Build JSON array
+	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> ExperienceArray;
+
+	for (const FStrategicExperience& Exp : StrategicExperiences)
+	{
+		TSharedRef<FJsonObject> ExpObject = MakeShared<FJsonObject>();
+
+		// State features
+		TArray<TSharedPtr<FJsonValue>> StateArray;
+		for (float Feature : Exp.StateFeatures)
+		{
+			StateArray.Add(MakeShared<FJsonValueNumber>(Feature));
+		}
+		ExpObject->SetArrayField(TEXT("state"), StateArray);
+
+		// Actions
+		TArray<TSharedPtr<FJsonValue>> ActionsArray;
+		for (int32 Action : Exp.ActionsTaken)
+		{
+			ActionsArray.Add(MakeShared<FJsonValueNumber>(Action));
+		}
+		ExpObject->SetArrayField(TEXT("actions"), ActionsArray);
+
+		// Reward
+		ExpObject->SetNumberField(TEXT("reward"), Exp.EpisodeReward);
+		ExpObject->SetNumberField(TEXT("step"), Exp.StepNumber);
+		ExpObject->SetNumberField(TEXT("timestamp"), Exp.Timestamp);
+
+		ExperienceArray.Add(MakeShared<FJsonValueObject>(ExpObject));
+	}
+
+	RootObject->SetStringField(TEXT("team"), TeamName);
+	RootObject->SetArrayField(TEXT("experiences"), ExperienceArray);
+
+	// Serialize to string
+	FString OutputString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(RootObject, Writer);
+
+	// Write to file
+	if (FFileHelper::SaveStringToFile(OutputString, *FilePath))
+	{
+		UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Exported %d strategic experiences to %s"),
+			*TeamName, StrategicExperiences.Num(), *FilePath);
+		return true;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("TeamLeader '%s': Failed to write experiences to %s"), *TeamName, *FilePath);
+	return false;
+}
+
+void UTeamLeaderComponent::ClearStrategicExperiences()
+{
+	int32 Count = StrategicExperiences.Num();
+	StrategicExperiences.Empty();
+	bHasPendingExperience = false;
+
+	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Cleared %d strategic experiences"), *TeamName, Count);
 }

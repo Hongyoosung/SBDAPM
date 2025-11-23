@@ -5,6 +5,10 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
+#include "NNE.h"
+#include "NNEModelData.h"
+#include "NNERuntimeCPU.h"
+#include "Misc/Paths.h"
 
 URLPolicyNetwork::URLPolicyNetwork()
 	: bEnableExploration(true)
@@ -36,15 +40,101 @@ bool URLPolicyNetwork::LoadPolicy(const FString& ModelPath)
 {
 	Config.ModelPath = ModelPath;
 
-	// TODO: Implement ONNX model loading
-	// For now, log a warning and fall back to rule-based
-	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: ONNX loading not yet implemented. Using rule-based fallback."));
-	UE_LOG(LogTemp, Warning, TEXT("  Model path: %s"), *ModelPath);
+	// Resolve path - support both absolute and relative paths
+	FString ResolvedPath = ModelPath;
+	if (!FPaths::FileExists(ResolvedPath))
+	{
+		// Try relative to project content directory
+		ResolvedPath = FPaths::ProjectContentDir() / ModelPath;
+	}
+	if (!FPaths::FileExists(ResolvedPath))
+	{
+		// Try relative to project saved directory
+		ResolvedPath = FPaths::ProjectSavedDir() / ModelPath;
+	}
 
-	bUseONNXModel = false;
+	if (!FPaths::FileExists(ResolvedPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Model file not found: %s"), *ModelPath);
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Loading ONNX model from: %s"), *ResolvedPath);
+
+	// Load model data from file
+	TArray<uint8> ModelBytes;
+	if (!FFileHelper::LoadFileToArray(ModelBytes, *ResolvedPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to read model file"));
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	// Get NNE runtime
+	TWeakInterfacePtr<INNERuntimeCPU> RuntimeCPU = UE::NNE::GetRuntime<INNERuntimeCPU>(TEXT("NNERuntimeORTCpu"));
+	if (!RuntimeCPU.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: NNERuntimeORTCpu not available. Using rule-based fallback."));
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	// Create model from bytes
+	TObjectPtr<UNNEModelData> NewModelData = NewObject<UNNEModelData>();
+	NewModelData->Init(TEXT("Onnx"), ModelBytes, TMap<FString, TConstArrayView64<uint8>>());
+	TSharedPtr<UE::NNE::IModelCPU> Model = RuntimeCPU->CreateModelCPU(NewModelData);
+	if (!Model.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to create NNE model from ONNX data"));
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	// Create model instance
+	ModelInstance = Model->CreateModelInstanceCPU();
+	if (!ModelInstance.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to create NNE model instance"));
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	// Get input/output tensor info
+	TConstArrayView<UE::NNE::FTensorDesc> InputDescs = ModelInstance->GetInputTensorDescs();
+	TConstArrayView<UE::NNE::FTensorDesc> OutputDescs = ModelInstance->GetOutputTensorDescs();
+
+	if (InputDescs.Num() < 1 || OutputDescs.Num() < 1)
+	{
+		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Model must have at least 1 input and 1 output"));
+		ModelInstance.Reset();
+		bUseONNXModel = false;
+		bIsInitialized = true;
+		return false;
+	}
+
+	// Log tensor info
+	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Model loaded successfully"));
+	UE_LOG(LogTemp, Log, TEXT("  Input tensors: %d"), InputDescs.Num());
+	UE_LOG(LogTemp, Log, TEXT("  Output tensors: %d"), OutputDescs.Num());
+
+	// Setup input buffer (71 features)
+	InputBuffer.SetNum(Config.InputSize);
+
+	// Setup output buffer (16 actions + optional value head)
+	// The model outputs [action_probs, state_value], but we only need action_probs
+	OutputBuffer.SetNum(Config.OutputSize + 1);  // +1 for value head
+
+	bUseONNXModel = true;
 	bIsInitialized = true;
 
-	return false;  // Return false until ONNX is implemented
+	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: ONNX model ready for inference"));
+	return true;
 }
 
 void URLPolicyNetwork::UnloadPolicy()
@@ -52,6 +142,15 @@ void URLPolicyNetwork::UnloadPolicy()
 	bIsInitialized = false;
 	bUseONNXModel = false;
 	Config.ModelPath = TEXT("");
+
+	// Reset NNE model instance
+	if (ModelInstance.IsValid())
+	{
+		ModelInstance.Reset();
+	}
+	ModelData = nullptr;
+	InputBuffer.Empty();
+	OutputBuffer.Empty();
 
 	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Policy unloaded"));
 }
@@ -342,16 +441,77 @@ FString URLPolicyNetwork::GetActionName(ETacticalAction Action)
 
 TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 {
-	// TODO: Implement ONNX forward pass
-	// For now, return rule-based probabilities
+	if (!ModelInstance.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Model instance not valid, using rule-based fallback"));
+		FObservationElement DummyObs;
+		return GetRuleBasedProbabilities(DummyObs);
+	}
 
-	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: ONNX forward pass not implemented, using rule-based fallback"));
+	// Copy input features to buffer
+	if (InputFeatures.Num() != Config.InputSize)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Input size mismatch (got %d, expected %d)"),
+			InputFeatures.Num(), Config.InputSize);
+		FObservationElement DummyObs;
+		return GetRuleBasedProbabilities(DummyObs);
+	}
 
-	// Create dummy observation from features
-	FObservationElement DummyObs;
-	// ... (would need to reconstruct observation from features, skip for now)
+	// Prepare input tensor binding
+	InputBuffer = InputFeatures;
 
-	return GetRuleBasedProbabilities(DummyObs);
+	// Create tensor shapes for binding
+	UE::NNE::FTensorShape InputTensorShape = UE::NNE::FTensorShape::Make({ 1u, static_cast<uint32>(Config.InputSize) });
+
+	// Create input tensor bindings
+	TArray<UE::NNE::FTensorBindingCPU> InputBindings;
+	InputBindings.Add(UE::NNE::FTensorBindingCPU{
+		InputBuffer.GetData(),
+		static_cast<uint64>(InputBuffer.Num() * sizeof(float))
+	});
+
+	// Create output tensor bindings
+	// First output: action_probabilities (16 values)
+	// Second output: state_value (1 value)
+	TArray<float> ActionProbsBuffer;
+	TArray<float> StateValueBuffer;
+	ActionProbsBuffer.SetNum(Config.OutputSize);
+	StateValueBuffer.SetNum(1);
+
+	TArray<UE::NNE::FTensorBindingCPU> OutputBindings;
+	OutputBindings.Add(UE::NNE::FTensorBindingCPU{
+		ActionProbsBuffer.GetData(),
+		static_cast<uint64>(ActionProbsBuffer.Num() * sizeof(float))
+	});
+	OutputBindings.Add(UE::NNE::FTensorBindingCPU{
+		StateValueBuffer.GetData(),
+		static_cast<uint64>(StateValueBuffer.Num() * sizeof(float))
+	});
+
+	// Set input tensor shapes
+	TArray<UE::NNE::FTensorShape> InputShapes;
+	InputShapes.Add(InputTensorShape);
+
+	UE::NNE::EResultStatus SetInputStatus = ModelInstance->SetInputTensorShapes(InputShapes);
+	if (SetInputStatus != UE::NNE::EResultStatus::Ok)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Failed to set input tensor shapes"));
+		FObservationElement DummyObs;
+		return GetRuleBasedProbabilities(DummyObs);
+	}
+
+	// Run inference
+	UE::NNE::EResultStatus RunStatus = ModelInstance->RunSync(InputBindings, OutputBindings);
+
+	if (RunStatus != UE::NNE::EResultStatus::Ok)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Inference failed, using rule-based fallback"));
+		FObservationElement DummyObs;
+		return GetRuleBasedProbabilities(DummyObs);
+	}
+
+	// Model already outputs softmax probabilities, return directly
+	return ActionProbsBuffer;
 }
 
 TArray<float> URLPolicyNetwork::Softmax(const TArray<float>& Logits)

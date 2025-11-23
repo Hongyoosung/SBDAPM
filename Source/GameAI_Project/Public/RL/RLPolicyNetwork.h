@@ -6,7 +6,14 @@
 #include "UObject/NoExportTypes.h"
 #include "RL/RLTypes.h"
 #include "Observation/ObservationElement.h"
+#include "NNE.h"
+#include "NNEModelData.h"
+#include "NNERuntimeCPU.h"
 #include "RLPolicyNetwork.generated.h"
+
+class UNNEModelData;
+class INNERuntime;
+class INNERuntimeGPU;
 
 /**
  * Neural Network-based RL Policy for Tactical Action Selection
@@ -274,4 +281,23 @@ private:
 
 	// Current episode step count
 	int32 CurrentEpisodeSteps;
+
+	// ========================================
+	// NNE (Neural Network Engine) State
+	// ========================================
+
+	// NNE model data (loaded from .onnx file)
+	UPROPERTY()
+	TObjectPtr<UNNEModelData> ModelData;
+
+	// NNE model instance for inference
+	TSharedPtr<UE::NNE::IModelInstanceCPU> ModelInstance;
+
+	// Input/output tensor bindings
+	TArray<float> InputBuffer;
+	TArray<float> OutputBuffer;
+
+	// Model input/output shapes
+	TArray<int32> InputShape;
+	TArray<int32> OutputShape;
 };

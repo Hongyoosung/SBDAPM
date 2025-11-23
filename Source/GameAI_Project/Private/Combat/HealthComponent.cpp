@@ -2,6 +2,7 @@
 
 #include "Combat/HealthComponent.h"
 #include "Team/FollowerAgentComponent.h"
+#include "Core/SimulationManagerGameMode.h"
 #include "RL/RLTypes.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
@@ -287,6 +288,15 @@ void UHealthComponent::HandleDeath(AActor* Killer, float FinalDamage)
 		if (UHealthComponent* KillerHealth = Killer->FindComponentByClass<UHealthComponent>())
 		{
 			KillerHealth->NotifyKillConfirmed(GetOwner(), TotalDamageTaken);
+		}
+	}
+
+	// Notify SimulationManager for episode termination check
+	if (UWorld* World = GetWorld())
+	{
+		if (ASimulationManagerGameMode* GM = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode()))
+		{
+			GM->OnAgentDied(GetOwner());
 		}
 	}
 

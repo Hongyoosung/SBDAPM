@@ -46,6 +46,35 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 );
 
 /**
+ * Strategic experience for MCTS training (AlphaZero-style)
+ */
+USTRUCT(BlueprintType)
+struct FStrategicExperience
+{
+	GENERATED_BODY()
+
+	/** Team observation when decision was made */
+	UPROPERTY()
+	TArray<float> StateFeatures;
+
+	/** Commands issued (encoded as action index per follower) */
+	UPROPERTY()
+	TArray<int32> ActionsTaken;
+
+	/** Episode outcome reward (+1 win, -1 loss, 0 draw) */
+	UPROPERTY()
+	float EpisodeReward = 0.0f;
+
+	/** Step number when decision was made */
+	UPROPERTY()
+	int32 StepNumber = 0;
+
+	/** Timestamp */
+	UPROPERTY()
+	float Timestamp = 0.0f;
+};
+
+/**
  * Team Leader Component - Strategic Decision Making
  *
  * Responsibilities:
@@ -213,6 +242,34 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Team Leader|Debug")
 	bool IsRunningMCTS() const { return bMCTSRunning; }
 
+	//--------------------------------------------------------------------------
+	// STRATEGIC EXPERIENCE (for MCTS training)
+	//--------------------------------------------------------------------------
+
+	/** Record current state before MCTS decision (call before RunStrategicDecisionMaking) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Training")
+	void RecordPreDecisionState();
+
+	/** Record MCTS actions after decision (call after commands issued) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Training")
+	void RecordPostDecisionActions();
+
+	/** Called when episode ends - assigns rewards to experiences */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Training")
+	void OnEpisodeEnded(float EpisodeReward);
+
+	/** Export strategic experiences to JSON file */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Training")
+	bool ExportStrategicExperiences(const FString& FilePath);
+
+	/** Clear recorded experiences */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Training")
+	void ClearStrategicExperiences();
+
+	/** Get experience count */
+	UFUNCTION(BlueprintPure, Category = "Team Leader|Training")
+	int32 GetStrategicExperienceCount() const { return StrategicExperiences.Num(); }
+
 
 private:
 	/** Process pending events */
@@ -342,4 +399,18 @@ private:
 
 	/** Time since last formation distance log (for proximity diagnosis) */
 	float TimeSinceLastFormationLog = 0.0f;
+
+	//--------------------------------------------------------------------------
+	// STRATEGIC EXPERIENCE STORAGE
+	//--------------------------------------------------------------------------
+
+	/** Recorded strategic experiences for this episode */
+	UPROPERTY()
+	TArray<FStrategicExperience> StrategicExperiences;
+
+	/** Pending experience (state recorded, waiting for actions) */
+	FStrategicExperience PendingExperience;
+
+	/** Is there a pending experience waiting for actions? */
+	bool bHasPendingExperience = false;
 };

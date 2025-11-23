@@ -185,6 +185,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void ResetEpisode();
 
+	/** Called when episode ends - assigns terminal reward and marks experiences */
+	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
+	void OnEpisodeEnded(float EpisodeReward);
+
 	/** Export collected experiences to JSON */
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	bool ExportExperiences(const FString& FilePath);

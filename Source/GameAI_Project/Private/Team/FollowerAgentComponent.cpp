@@ -510,6 +510,18 @@ void UFollowerAgentComponent::ResetEpisode()
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode reset"), *GetOwner()->GetName());
 }
 
+void UFollowerAgentComponent::OnEpisodeEnded(float EpisodeReward)
+{
+	// Add episode reward to accumulated reward
+	AccumulatedReward += EpisodeReward;
+
+	// Provide terminal reward to RL policy
+	ProvideReward(EpisodeReward, true); // bTerminal = true
+
+	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode ended - EpisodeReward=%.2f, TotalAccumulated=%.2f"),
+		*GetOwner()->GetName(), EpisodeReward, AccumulatedReward);
+}
+
 bool UFollowerAgentComponent::ExportExperiences(const FString& FilePath)
 {
 	if (!TacticalPolicy)

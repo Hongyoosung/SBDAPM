@@ -69,6 +69,30 @@ struct FSimulationStats
 };
 
 /**
+ * Episode result info
+ */
+USTRUCT(BlueprintType)
+struct FEpisodeResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Episode")
+	int32 EpisodeNumber = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Episode")
+	int32 WinningTeamID = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Episode")
+	int32 LosingTeamID = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Episode")
+	float EpisodeDuration = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Episode")
+	int32 TotalSteps = 0;
+};
+
+/**
  * Simulation Manager GameMode
  *
  * Manages team-based AI simulation with multi-team support.
@@ -297,6 +321,86 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Simulation|Stats")
 	FSimulationStats GetSimulationStats() const;
 
+	//--------------------------------------------------------------------------
+	// EPISODE MANAGEMENT (RL Training)
+	//--------------------------------------------------------------------------
+
+	/**
+	 * Check if a team is eliminated (all members dead)
+	 * @param TeamID - Team to check
+	 * @return true if all team members are dead
+	 */
+	UFUNCTION(BlueprintPure, Category = "Simulation|Episode")
+	bool IsTeamEliminated(int32 TeamID) const;
+
+	/**
+	 * Get number of alive agents in a team
+	 * @param TeamID - Team to query
+	 * @return Number of alive agents
+	 */
+	UFUNCTION(BlueprintPure, Category = "Simulation|Episode")
+	int32 GetAliveAgentCount(int32 TeamID) const;
+
+	/**
+	 * Called when an agent dies - checks for episode termination
+	 * Bind this to HealthComponent::OnDeath delegate
+	 * @param DeadAgent - The agent that died
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
+	void OnAgentDied(AActor* DeadAgent);
+
+	/**
+	 * Check episode termination conditions (called internally by OnAgentDied)
+	 */
+	void CheckEpisodeTermination();
+
+	/**
+	 * End the current episode and distribute rewards
+	 * @param WinningTeamID - ID of winning team (-1 for draw)
+	 * @param LosingTeamID - ID of losing team (-1 for draw)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
+	void EndEpisode(int32 WinningTeamID, int32 LosingTeamID);
+
+	/**
+	 * Start a new episode (resets agents to spawn positions)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
+	void StartNewEpisode();
+
+	/**
+	 * Increment global step counter (called by RL policy queries)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
+	void IncrementStep();
+
+	/**
+	 * Get current episode number
+	 */
+	UFUNCTION(BlueprintPure, Category = "Simulation|Episode")
+	int32 GetCurrentEpisode() const { return CurrentEpisode; }
+
+	/**
+	 * Get current step within episode
+	 */
+	UFUNCTION(BlueprintPure, Category = "Simulation|Episode")
+	int32 GetCurrentStep() const { return CurrentStep; }
+
+	/**
+	 * Get last episode result
+	 */
+	UFUNCTION(BlueprintPure, Category = "Simulation|Episode")
+	FEpisodeResult GetLastEpisodeResult() const { return LastEpisodeResult; }
+
+	/** Delegate broadcast when episode ends */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEpisodeEnded, const FEpisodeResult&, Result);
+	UPROPERTY(BlueprintAssignable, Category = "Simulation|Episode")
+	FOnEpisodeEnded OnEpisodeEnded;
+
+	/** Delegate broadcast when new episode starts */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEpisodeStarted, int32, EpisodeNumber);
+	UPROPERTY(BlueprintAssignable, Category = "Simulation|Episode")
+	FOnEpisodeStarted OnEpisodeStarted;
 
 private:
 	/** Update statistics */
@@ -322,6 +426,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Debug")
 	float DebugDrawInterval = 1.0f;
 
+	//--------------------------------------------------------------------------
+	// EPISODE CONFIG
+	//--------------------------------------------------------------------------
+
+	/** Auto-restart episode when a team is eliminated */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	bool bAutoRestartEpisode = true;
+
+	/** Delay before starting new episode (for visualization) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	float EpisodeRestartDelay = 2.0f;
+
+	/** Max steps per episode (0 = unlimited) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	int32 MaxStepsPerEpisode = 0;
+
+	/** Win reward for episode victory */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	float WinReward = 100.0f;
+
+	/** Lose penalty for episode loss */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	float LosePenalty = -50.0f;
+
 
 private:
 	/** Registered teams */
@@ -340,4 +468,26 @@ private:
 
 	/** Last debug draw time */
 	float LastDebugDrawTime = 0.0f;
+
+	//--------------------------------------------------------------------------
+	// EPISODE STATE
+	//--------------------------------------------------------------------------
+
+	/** Current episode number */
+	int32 CurrentEpisode = 0;
+
+	/** Current step within episode */
+	int32 CurrentStep = 0;
+
+	/** Episode start time */
+	float EpisodeStartTime = 0.0f;
+
+	/** Last episode result */
+	FEpisodeResult LastEpisodeResult;
+
+	/** Pending restart timer handle */
+	FTimerHandle EpisodeRestartTimerHandle;
+
+	/** Is episode transition in progress */
+	bool bEpisodeEnding = false;
 };

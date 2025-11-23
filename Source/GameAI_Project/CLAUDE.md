@@ -83,16 +83,19 @@ struct FMyConditionInstanceData {
 
 ### 4. RL Policy (`RL/RLPolicyNetwork.h/cpp`, `RL/RLReplayBuffer.h/cpp`)
 - 3-layer network (128→128→64 neurons)
-- PPO training algorithm
-- 16 tactical actions
+- PPO training algorithm (offline, Python)
+- 16 tactical actions (`ETacticalAction` enum)
 - Reward: +10 kill, +5 damage, -5 take damage, -10 die
+- **Experience Collection:** Auto-stores transitions, exports to JSON
+- **Training:** External Python script
+- **Inference:** UE5 NNE + ONNX Runtime for production
+- **Fallback:** Rule-based heuristics when no trained model
 
 
 ### 5. EQS Cover System (`EQS/*`)
 - **Generator:** `EnvQueryGenerator_CoverPoints` - Grid/tag-based cover candidate generation
 - **Test:** `EnvQueryTest_CoverQuality` - Multi-factor cover scoring (enemy distance, LOS, navigability)
 - **Context:** `EnvQueryContext_CoverEnemies` - Auto-fetches enemies from Team Leader
-- **BT Integration:** `BTTask_FindCoverLocation` (EQS) + `BTTask_ExecuteDefend::FindNearestCover()` (tag-based)
 - **Status:** ✅ Implemented, tag-based active, EQS available
 
 ### 6. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
@@ -134,32 +137,27 @@ struct FMyConditionInstanceData {
 - **MCTS Decision Making** - Team-level strategic commands working, random actions at simulation start ✅
 - **Comprehensive logging** - Color-coded debug system ✅
 - Enhanced observation system (71+40 features)
-- Team architecture (Leader, Follower, Communication)
+- Team architecture (Leader, Follower, Communication) ✅
 - RL policy network structure (128→128→64)
-- State Tree execution system (Tasks, Evaluators, Conditions)
-- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat)
+- State Tree execution system (Tasks, Evaluators, Conditions) ✅
+- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat) ✅
 - EQS cover system (Generator, Test, Context)
-- Simulation Manager GameMode (team registration, enemy tracking)
+- Simulation Manager GameMode (team registration, enemy tracking) ✅
 
-**⚠️ Current Investigation:**
-- **Agent Proximity Issue** - During initial simulation, agents tend to be too close to each other
-- Potential causes:
-  - No formation spacing logic (FormationCoherence reward exists but no spatial enforcement)
-  - MCTS may assign similar target locations to all team members
-  - Random early actions lack spreading/positioning tactics
-  - Natural convergence (both teams move toward objectives/enemies)
-- See `next_step.md` for investigation plan
+**⚠️ Current Focus:**
+- **RL Training Pipeline** - Model currently uses rule-based fallback, not trained neural network
+- See `NEXT_STEP.md` for training pipeline implementation
 
-**🔄 Next Steps (see next_step.md):**
-1. **Investigate Agent Proximity** - Determine if task logic forces clustering or if it's natural early-learning behavior
-2. **Formation Spacing** - Add formation maintenance logic to prevent agent clustering
-3. **Action Diversity Analysis** - Verify MCTS generates varied commands (not all agents doing same action)
-4. **Tactical Positioning** - Implement spreading/flanking behaviors in MCTS rollout policy
-5. **Observation Features** - Add inter-agent distance to observations for formation awareness
+**🔄 Next Steps (see NEXT_STEP.md):**
+1. **Enable NNE Plugin** - Enable NNE + NNERuntimeORT plugins in Editor
+2. **Collect Training Data** - Run simulation, export experiences to JSON
+3. **Train Model** - `python Scripts/train_tactical_policy.py`
+4. **Load ONNX Model** - `LoadPolicy("tactical_policy.onnx")`
+5. **Iterate** - Collect more data, retrain, evaluate
 
 **📋 Planned:**
+- Online training (in-engine PPO updates)
 - Distributed training (Ray RLlib integration)
-- Model persistence and loading
 - Full multi-team scenarios (Red vs Blue vs Green)
 - Performance profiling and optimization
 
@@ -194,7 +192,7 @@ struct FMyConditionInstanceData {
 ```
 Source/GameAI_Project/
 ├── MCTS/              # Team leader strategic planning (event-driven)
-├── RL/                # Follower tactical policies (PPO network)
+├── RL/                # Follower tactical policies (PPO network + NNE inference)
 ├── StateTree/         # ⭐ PRIMARY execution system
 │   ├── Tasks/         # ExecuteDefend, ExecuteAssault, QueryRLPolicy, ExecuteMove, ExecuteRetreat
 │   ├── Evaluators/    # SyncCommand, UpdateObservation
@@ -208,11 +206,14 @@ Source/GameAI_Project/
 ├── Perception/        # AgentPerceptionComponent (enemy detection)
 ├── Team/              # Leader, Follower, Communication
 ├── Observation/       # 71+40 feature observation system
+├── Scripts/           # 🆕 Python training scripts
+│   ├── train_tactical_policy.py  # PPO training → ONNX export
+│   └── requirements.txt          # torch, numpy, tensorboard
 └── Core/              # SimulationManagerGameMode (team management)
 ```
 
 **Key Files:**
-- `next_step.md` - Current implementation plan (execution pipeline fixes)
+- `NEXT_STEP.md` - Current focus: RL training pipeline
 - `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
 - `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
 - `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system
