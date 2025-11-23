@@ -102,22 +102,23 @@ ETacticalAction UTacticalActuator::MapActionToTactical(int32 ActionIndex) const
 	// Direct mapping to ETacticalAction enum values
 	switch (ActionIndex)
 	{
-		case 0:  return ETacticalAction::Advance;
-		case 1:  return ETacticalAction::Retreat;
-		case 2:  return ETacticalAction::FlankLeft;
-		case 3:  return ETacticalAction::FlankRight;
-		case 4:  return ETacticalAction::TakeCover;
-		case 5:  return ETacticalAction::SuppressiveFire;
-		case 6:  return ETacticalAction::HoldPosition;
-		case 7:  return ETacticalAction::AssaultTarget;
-		case 8:  return ETacticalAction::DefendPosition;
-		case 9:  return ETacticalAction::Regroup;
-		case 10: return ETacticalAction::Heal;
+		case 0:  return ETacticalAction::AggressiveAssault;
+		case 1:  return ETacticalAction::CautiousAdvance;
+		case 2:  return ETacticalAction::DefensiveHold;
+		case 3:  return ETacticalAction::TacticalRetreat;
+		case 4:  return ETacticalAction::SeekCover;
+		case 5:  return ETacticalAction::FlankLeft;
+		case 6:  return ETacticalAction::FlankRight;
+		case 7:  return ETacticalAction::MaintainDistance;
+		case 8:  return ETacticalAction::SuppressiveFire;
+		case 9:  return ETacticalAction::ProvideCoveringFire;
+		case 10: return ETacticalAction::Reload;
 		case 11: return ETacticalAction::Reload;
-		case 12: return ETacticalAction::CallSupport;
-		case 13: return ETacticalAction::SetAmbush;
-		case 14: return ETacticalAction::AggressivePush;
-		case 15: return ETacticalAction::DefensiveHold;
+		case 12: return ETacticalAction::UseAbility;
+		case 13: return ETacticalAction::Sprint;
+		case 14: return ETacticalAction::Crouch;
+		case 15: return ETacticalAction::Patrol;
+		case 16: return ETacticalAction::Hold;
 		default:
 			UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] Invalid action index %d, defaulting to DefensiveHold"), ActionIndex);
 			return ETacticalAction::DefensiveHold;

@@ -22,12 +22,13 @@ public class GameAI_Project : ModuleRules
             "GameplayStateTreeModule",
             "StateTreeModule",
             "StructUtils",
-            "Schola"
+            "Schola",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "GameplayTasks"
+            "GameplayTasks",
+            "NNE",
         });
 
         // Add Public directory to include paths
