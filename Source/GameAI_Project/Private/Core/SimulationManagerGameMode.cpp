@@ -28,6 +28,15 @@ void ASimulationManagerGameMode::Tick(float DeltaTime)
 
 	if (bSimulationRunning && !bEpisodeEnding)
 	{
+		// Auto-increment step counter (each tick = 1 step)
+		CurrentStep++;
+
+		// Check for max steps termination
+		if (MaxStepsPerEpisode > 0 && CurrentStep >= MaxStepsPerEpisode)
+		{
+			CheckEpisodeTermination();
+		}
+
 		UpdateStatistics();
 
 		// Episode termination is now event-driven via OnAgentDied()
@@ -125,6 +134,13 @@ bool ASimulationManagerGameMode::RegisterTeamMember(int32 TeamID, AActor* Agent)
 	TeamInfo->TeamMembers.AddUnique(Agent);
 	ActorToTeamMap.Add(Agent, TeamID);
 
+	// Store initial spawn transform for episode reset
+	if (!SpawnTransforms.Contains(Agent))
+	{
+		SpawnTransforms.Add(Agent, Agent->GetActorTransform());
+		UE_LOG(LogTemp, Log, TEXT("SimulationManager: Stored spawn transform for %s"), *Agent->GetName());
+	}
+
 	// Auto-bind HealthComponent::OnDeath to OnAgentDied for episode tracking
 	UHealthComponent* HealthComp = Agent->FindComponentByClass<UHealthComponent>();
 	if (HealthComp)
@@ -158,6 +174,7 @@ void ASimulationManagerGameMode::UnregisterTeamMember(int32 TeamID, AActor* Agen
 	}
 
 	ActorToTeamMap.Remove(Agent);
+	SpawnTransforms.Remove(Agent);
 }
 
 int32 ASimulationManagerGameMode::GetTeamIDForActor(AActor* Agent) const
@@ -684,7 +701,22 @@ void ASimulationManagerGameMode::StartNewEpisode()
 		// Reset team members
 		for (AActor* Member : Pair.Value.TeamMembers)
 		{
-			if (!Member) continue;
+			if (!Member || !IsValid(Member))
+			{
+				continue;
+			}
+
+			// Reset to spawn position
+			FTransform* SpawnTransform = SpawnTransforms.Find(Member);
+			if (SpawnTransform)
+			{
+				Member->SetActorTransform(*SpawnTransform, false, nullptr, ETeleportType::ResetPhysics);
+				UE_LOG(LogTemp, Log, TEXT("SimulationManager: Reset %s to spawn position"), *Member->GetName());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("SimulationManager: No spawn transform stored for %s"), *Member->GetName());
+			}
 
 			// Reset health
 			UHealthComponent* HealthComp = Member->FindComponentByClass<UHealthComponent>();
@@ -693,8 +725,13 @@ void ASimulationManagerGameMode::StartNewEpisode()
 				HealthComp->ResetHealth();
 			}
 
-			// TODO: Reset to spawn positions if needed
-			// Could store initial transforms and restore them here
+			// Reset follower agent state
+			UFollowerAgentComponent* FollowerComp = Member->FindComponentByClass<UFollowerAgentComponent>();
+			if (FollowerComp)
+			{
+				FollowerComp->ClearExperiences();
+				UE_LOG(LogTemp, Log, TEXT("SimulationManager: Cleared experiences for %s"), *Member->GetName());
+			}
 		}
 	}
 
@@ -704,12 +741,7 @@ void ASimulationManagerGameMode::StartNewEpisode()
 
 void ASimulationManagerGameMode::IncrementStep()
 {
-	CurrentStep++;
-
-	// Check max steps limit
-	if (MaxStepsPerEpisode > 0 && CurrentStep >= MaxStepsPerEpisode)
-	{
-		UE_LOG(LogTemp, Log, TEXT("SimulationManager: Step %d/%d - max steps reached"),
-			CurrentStep, MaxStepsPerEpisode);
-	}
+	// DEPRECATED: Steps now auto-increment in Tick()
+	// This function is kept for backward compatibility but does nothing
+	UE_LOG(LogTemp, Warning, TEXT("SimulationManager: IncrementStep() is deprecated - steps auto-increment in Tick()"));
 }

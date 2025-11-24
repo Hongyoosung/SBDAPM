@@ -185,6 +185,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void ResetEpisode();
 
+	/** Clear collected experiences (e.g., for new episode) */
+	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
+	void ClearExperiences();
+
 	/** Called when episode ends - assigns terminal reward and marks experiences */
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void OnEpisodeEnded(float EpisodeReward);

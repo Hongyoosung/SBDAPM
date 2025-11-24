@@ -37,13 +37,9 @@ public:
 	virtual bool IsStructAllowed(const UScriptStruct* InScriptStruct) const override;
 	virtual bool IsClassAllowed(const UClass* InClass) const override;
 	virtual bool IsExternalItemAllowed(const UStruct& InStruct) const override;
-	virtual TConstArrayView<FStateTreeExternalDataDesc> GetContextDataDescs() const override;
 
 
 protected:
-	// Override to provide custom context data (FollowerContext, FollowerComponent, etc.)
-	virtual void SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const override;
-
 	/** AIController class for this schema */
 	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear)
 	TSubclassOf<AAIController> AIControllerClass;
@@ -51,9 +47,4 @@ protected:
 	/** Pawn class (UE 5.6 - allows access to Pawn components) */
 	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear, meta = (DisplayName = "Pawn Class"))
 	TSubclassOf<APawn> PawnClass;
-
-
-private:
-	/** Mutable storage for context data descriptors (rebuilt on every access) */
-	mutable TArray<FStateTreeExternalDataDesc> ContextDataDescs;
 };

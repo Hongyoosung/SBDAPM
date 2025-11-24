@@ -370,9 +370,10 @@ public:
 	void StartNewEpisode();
 
 	/**
-	 * Increment global step counter (called by RL policy queries)
+	 * DEPRECATED: Steps now auto-increment in Tick()
+	 * Kept for backward compatibility
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
+	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode", meta = (DeprecatedFunction, DeprecationMessage = "Steps now auto-increment in Tick()"))
 	void IncrementStep();
 
 	/**
@@ -464,6 +465,10 @@ private:
 	/** Actor to team ID mapping (for fast lookup) */
 	UPROPERTY()
 	TMap<AActor*, int32> ActorToTeamMap;
+
+	/** Initial spawn transforms (for episode reset) */
+	UPROPERTY()
+	TMap<AActor*, FTransform> SpawnTransforms;
 
 	/** Is simulation running? */
 	bool bSimulationRunning = false;

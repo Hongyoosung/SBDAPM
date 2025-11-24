@@ -156,12 +156,9 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 
 bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
-	// 1. 오버라이드 설정 (기존 유지)
 	InContext.SetLinkedStateTreeOverrides(LinkedStateTreeOverrides);
 	InContext.SetCollectExternalDataCallback(FOnCollectStateTreeExternalData::CreateUObject(
 		this, &UFollowerStateTreeComponent::CollectExternalData));
-
-	// 2. 데이터 주입 (여기가 핵심!)
 
 	// (A) Follower Context
 	FStateTreeDataView ContextView(
@@ -179,8 +176,7 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerComponent"));
 	}
 
-	// [추가] (C) Follower State Tree Component (자기 자신! 이 부분이 빠져서 에러 발생)
-	// 스키마에서 필수(Required)로 지정했기 때문에 반드시 넣어줘야 합니다.
+	// (C) Follower State Tree Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerStateTreeComponent")), FStateTreeDataView(this)))
 	{
 		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerStateTreeComponent"));
@@ -198,9 +194,6 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 		InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(Context.TacticalPolicy));
 	}
 
-	// 3. 부모 클래스 호출 (Pawn, AIController 자동 주입 시도)
-	// [주의] 여기서 AIController를 찾지 못하면 False를 반환할 수 있습니다.
-	// 우리는 이미 CheckRequirementsAndStart에서 Controller 존재를 확인했으므로 통과될 것입니다.
 	const bool bResult = UStateTreeComponentSchema::SetContextRequirements(*this, InContext, bLogErrors);
 
 	if (!bResult && bLogErrors)

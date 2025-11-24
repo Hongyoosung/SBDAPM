@@ -27,6 +27,54 @@ UFollowerStateTreeSchema::UFollowerStateTreeSchema()
 {
 	AIControllerClass = AFollowerAIController::StaticClass();
 	PawnClass = AFollowerCharacter::StaticClass();
+
+	ContextDataDescs.Reset();
+
+	{
+		FStateTreeExternalDataDesc ActorDesc(
+			FName("Actor"),
+			AActor::StaticClass(),
+			FGuid(0x1D971B00, 0x28884FDE, 0xB5436802, 0x36984FD5)
+		);
+		ActorDesc.Requirement = EStateTreeExternalDataRequirement::Required;
+		ContextDataDescs.Add(ActorDesc);
+	}
+
+
+	// 1. FollowerContext
+	{
+		FStateTreeExternalDataDesc Desc(FName(TEXT("FollowerContext")), FFollowerStateTreeContext::StaticStruct(), FGuid(0x4F111111, 0x11112222, 0x33334444, 0x00000001));
+		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
+		ContextDataDescs.Add(Desc);
+	}
+
+	// 2. FollowerComponent
+	{
+		FStateTreeExternalDataDesc Desc(FName(TEXT("FollowerComponent")), UFollowerAgentComponent::StaticClass(), FGuid(0x4F111111, 0x11112222, 0x33334444, 0x00000002));
+		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
+		ContextDataDescs.Add(Desc);
+	}
+
+	// 3. FollowerStateTreeComponent
+	{
+		FStateTreeExternalDataDesc Desc(FName(TEXT("FollowerStateTreeComponent")), UFollowerStateTreeComponent::StaticClass(), FGuid(0x4F111111, 0x11112222, 0x33334444, 0x00000003));
+		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
+		ContextDataDescs.Add(Desc);
+	}
+
+	// 4. TeamLeader
+	{
+		FStateTreeExternalDataDesc Desc(FName(TEXT("TeamLeader")), UTeamLeaderComponent::StaticClass(), FGuid(0x4F111111, 0x11112222, 0x33334444, 0x00000004));
+		Desc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		ContextDataDescs.Add(Desc);
+	}
+
+	// 5. TacticalPolicy
+	{
+		FStateTreeExternalDataDesc Desc(FName(TEXT("TacticalPolicy")), URLPolicyNetwork::StaticClass(), FGuid(0x4F111111, 0x11112222, 0x33334444, 0x00000005));
+		Desc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		ContextDataDescs.Add(Desc);
+	}
 }
 
 bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStruct) const
@@ -133,81 +181,4 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 	}
 
 	return false;
-}
-
-TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
-{
-	// [수정됨] 이미 데이터가 구축되어 있다면 캐시된 데이터를 즉시 반환합니다.
-	// 이것이 에셋 안정성을 보장하는 핵심입니다.
-	if (ContextDataDescs.Num() > 0)
-	{
-		return ContextDataDescs;
-	}
-
-	// 1. 부모 클래스 데이터 가져오기 (AIController, Pawn 등)
-	TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
-	ContextDataDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
-
-	// 2. 커스텀 컨텍스트 데이터 추가
-	// (GUID는 기존과 동일하게 유지하여 에셋 호환성 확보)
-
-	// (1) Follower Context
-	{
-		FStateTreeExternalDataDesc Desc;
-		Desc.Name = FName(TEXT("FollowerContext"));
-		Desc.Struct = FFollowerStateTreeContext::StaticStruct();
-		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
-		Desc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788);
-		ContextDataDescs.Add(Desc);
-	}
-
-	// (2) Follower Agent Component
-	{
-		FStateTreeExternalDataDesc Desc;
-		Desc.Name = FName(TEXT("FollowerComponent"));
-		Desc.Struct = UFollowerAgentComponent::StaticClass();
-		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
-		Desc.ID = FGuid(0xA1B2C3D4, 0xE5F60002, 0x11223344, 0x55667788);
-		ContextDataDescs.Add(Desc);
-	}
-
-	// (3) Follower State Tree Component
-	{
-		FStateTreeExternalDataDesc Desc;
-		Desc.Name = FName(TEXT("FollowerStateTreeComponent"));
-		Desc.Struct = UFollowerStateTreeComponent::StaticClass();
-		Desc.Requirement = EStateTreeExternalDataRequirement::Required;
-		Desc.ID = FGuid(0xA1B2C3D4, 0xE5F60005, 0x11223344, 0x55667788);
-		ContextDataDescs.Add(Desc);
-	}
-
-	// (4) Team Leader
-	{
-		FStateTreeExternalDataDesc Desc;
-		Desc.Name = FName(TEXT("TeamLeader"));
-		Desc.Struct = UTeamLeaderComponent::StaticClass();
-		Desc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		Desc.ID = FGuid(0xA1B2C3D4, 0xE5F60003, 0x11223344, 0x55667788);
-		ContextDataDescs.Add(Desc);
-	}
-
-	// (5) Tactical Policy
-	{
-		FStateTreeExternalDataDesc Desc;
-		Desc.Name = FName(TEXT("TacticalPolicy"));
-		Desc.Struct = URLPolicyNetwork::StaticClass();
-		Desc.Requirement = EStateTreeExternalDataRequirement::Optional;
-		Desc.ID = FGuid(0xA1B2C3D4, 0xE5F60004, 0x11223344, 0x55667788);
-		ContextDataDescs.Add(Desc);
-	}
-
-	return ContextDataDescs;
-}
-
-void UFollowerStateTreeSchema::SetContextData(FContextDataSetter& ContextDataSetter, bool bLogErrors) const
-{
-	// Call parent to handle all descriptors
-	// Parent's implementation handles UActorComponent types via FindComponentByClass
-	// This will automatically find: FollowerComponent, TeamLeader, TacticalPolicy
-	Super::SetContextData(ContextDataSetter, bLogErrors);
 }

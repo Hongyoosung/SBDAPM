@@ -511,6 +511,15 @@ void UFollowerAgentComponent::ResetEpisode()
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode reset"), *GetOwner()->GetName());
 }
 
+void UFollowerAgentComponent::ClearExperiences()
+{
+	if (TacticalPolicy)
+	{
+		TacticalPolicy->ClearExperiences();
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Cleared experience buffer"), *GetOwner()->GetName());
+	}
+}
+
 void UFollowerAgentComponent::OnEpisodeEnded(float EpisodeReward)
 {
 	// Add episode reward to accumulated reward
