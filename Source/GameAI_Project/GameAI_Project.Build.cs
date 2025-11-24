@@ -23,12 +23,13 @@ public class GameAI_Project : ModuleRules
             "StateTreeModule",
             "StructUtils",
             "Schola",
+            "NNE",
+            "NNERuntimeORT"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "GameplayTasks",
-            "NNE",
         });
 
         // Add Public directory to include paths

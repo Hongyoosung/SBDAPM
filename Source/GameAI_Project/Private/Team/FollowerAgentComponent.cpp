@@ -4,6 +4,7 @@
 #include "Perception/AgentPerceptionComponent.h"
 #include "Combat/HealthComponent.h"
 #include "Combat/WeaponComponent.h"
+#include "Core/SimulationManagerGameMode.h"
 #include "DrawDebugHelpers.h"
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
@@ -704,5 +705,16 @@ void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
 	if (TeamLeader)
 	{
 		SignalEventToLeader(EStrategicEvent::AllyKilled, DeathEvent.Killer, GetOwner()->GetActorLocation(), 10);
+	}
+
+	// Notify SimulationManager for episode termination check
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode());
+		if (SimManager)
+		{
+			SimManager->OnAgentDied(GetOwner());
+		}
 	}
 }

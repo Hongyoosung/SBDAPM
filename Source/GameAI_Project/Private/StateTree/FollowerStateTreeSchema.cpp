@@ -137,24 +137,26 @@ bool UFollowerStateTreeSchema::IsExternalItemAllowed(const UStruct& InStruct) co
 
 TConstArrayView<FStateTreeExternalDataDesc> UFollowerStateTreeSchema::GetContextDataDescs() const
 {
-	// [중요] TConstArrayView를 리턴해야 하므로, 데이터는 함수가 끝나도 메모리에 남아있어야 합니다.
-	// static을 사용하여 한 번만 초기화하고 메모리를 유지합니다.
-	static TArray<FStateTreeExternalDataDesc> CachedDescs;
+	// 캐시가 비어있다면 다시 빌드 (const 함수 내부이므로 const_cast 또는 mutable 사용 필요)
+	// 여기서는 간단히 const_cast를 사용하여 멤버 변수를 수정합니다.
+	TArray<FStateTreeExternalDataDesc>& CachedDescs = const_cast<UFollowerStateTreeSchema*>(this)->ContextDataDescsCache;
 
+	// [중요] 항상 부모의 최신 데이터를 반영하기 위해 매번 체크하거나, 
+	// 확실한 초기화를 위해 Reset()을 고려해야 합니다. 
+	// 하지만 성능을 위해 비어있을 때만 초기화합니다.
 	if (CachedDescs.Num() == 0)
 	{
-		// 1. 부모 클래스(UStateTreeComponentSchema)의 데이터 가져오기 (Pawn, AIController 등)
+		// 1. 부모 클래스 데이터 가져오기
 		TConstArrayView<FStateTreeExternalDataDesc> ParentDescs = Super::GetContextDataDescs();
 		CachedDescs.Append(ParentDescs.GetData(), ParentDescs.Num());
 
-		// 2. 커스텀 데이터 추가 (반드시 고정된 GUID 사용)
+		// 2. 커스텀 데이터 추가 (GUID 등은 기존 코드 유지)
 
-		// (1) Follower Context (Struct)
+		// (1) Follower Context
 		FStateTreeExternalDataDesc ContextDesc;
 		ContextDesc.Name = FName(TEXT("FollowerContext"));
 		ContextDesc.Struct = FFollowerStateTreeContext::StaticStruct();
 		ContextDesc.Requirement = EStateTreeExternalDataRequirement::Required;
-		// 절대 변경하지 말 것 (기존 에셋과의 연결 고리)
 		ContextDesc.ID = FGuid(0xA1B2C3D4, 0xE5F60001, 0x11223344, 0x55667788);
 		CachedDescs.Add(ContextDesc);
 

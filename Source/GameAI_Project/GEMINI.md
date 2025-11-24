@@ -22,6 +22,8 @@ Followers (N agents) → RL Policy + State Tree → Tactical execution
 
 ### 1. Team Leader (`Team/TeamLeaderComponent.h/cpp`)
 - Event-driven MCTS (async, 500-1000 simulations)
+- **Pure MCTS tree search** - Full selection/expansion/simulation/backpropagation
+- **Research baseline available** - `GenerateStrategicCommandsHeuristic()` for comparison
 - Issues strategic commands to followers
 - Aggregates team observations (40 + N×71 features)
 - Runs on background thread (50-100ms, non-blocking)
@@ -81,16 +83,19 @@ struct FMyConditionInstanceData {
 
 ### 4. RL Policy (`RL/RLPolicyNetwork.h/cpp`, `RL/RLReplayBuffer.h/cpp`)
 - 3-layer network (128→128→64 neurons)
-- PPO training algorithm
-- 16 tactical actions
+- PPO training algorithm (offline, Python)
+- 16 tactical actions (`ETacticalAction` enum)
 - Reward: +10 kill, +5 damage, -5 take damage, -10 die
+- **Experience Collection:** Auto-stores transitions, exports to JSON
+- **Training:** External Python script
+- **Inference:** UE5 NNE + ONNX Runtime for production
+- **Fallback:** Rule-based heuristics when no trained model
 
 
 ### 5. EQS Cover System (`EQS/*`)
 - **Generator:** `EnvQueryGenerator_CoverPoints` - Grid/tag-based cover candidate generation
 - **Test:** `EnvQueryTest_CoverQuality` - Multi-factor cover scoring (enemy distance, LOS, navigability)
 - **Context:** `EnvQueryContext_CoverEnemies` - Auto-fetches enemies from Team Leader
-- **BT Integration:** `BTTask_FindCoverLocation` (EQS) + `BTTask_ExecuteDefend::FindNearestCover()` (tag-based)
 - **Status:** ✅ Implemented, tag-based active, EQS available
 
 ### 6. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
@@ -128,31 +133,31 @@ struct FMyConditionInstanceData {
 - **Command Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers → State Transitions ✅
 - **Perception system** - Enemy detection, team filtering, auto-reporting ✅
 - **Combat system** - Health/Weapon components, RL reward integration, observation population ✅
+- **State Tree Execution** - Tasks executing properly, agents performing actions ✅
+- **MCTS Decision Making** - Team-level strategic commands working, random actions at simulation start ✅
 - **Comprehensive logging** - Color-coded debug system ✅
 - Enhanced observation system (71+40 features)
-- Team architecture (Leader, Follower, Communication)
+- Team architecture (Leader, Follower, Communication) ✅
 - RL policy network structure (128→128→64)
-- State Tree execution system (Tasks, Evaluators, Conditions)
-- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat)
+- State Tree execution system (Tasks, Evaluators, Conditions) ✅
+- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat) ✅
 - EQS cover system (Generator, Test, Context)
-- Simulation Manager GameMode (team registration, enemy tracking)
-- BehaviorTree (LEGACY - deprecated in favor of StateTree)
+- Simulation Manager GameMode (team registration, enemy tracking) ✅
 
-**⚠️ Current Issue:**
-- **Execution Gap** - Agents receive Assault commands and transition states, but don't execute (no movement/firing)
-- Root causes: No target assignment, ExecuteAssault task incomplete, possible StateTree asset gaps
-- See `next_step.md` for detailed execution pipeline plan
+**⚠️ Current Focus:**
+- **RL Training Pipeline** - Model currently uses rule-based fallback, not trained neural network
+- See `NEXT_STEP.md` for training pipeline implementation
 
-**🔄 Next Steps (see next_step.md):**
-1. **Fix ExecuteAssault Task** - Implement movement toward target + weapon firing in STTask_ExecuteAssault
-2. **Target Assignment** - Team Leader assigns nearest enemy when issuing Assault commands
-3. **StateTree Asset Validation** - Verify ST_FollowerBehavior has proper task bindings
-4. **Movement Integration** - AIController MoveTo commands in assault execution
-5. **End-to-End Combat Test** - Full loop: Perception → MCTS → Commands → Movement → Firing → Damage → Rewards
+**🔄 Next Steps (see NEXT_STEP.md):**
+1. **Enable NNE Plugin** - Enable NNE + NNERuntimeORT plugins in Editor
+2. **Collect Training Data** - Run simulation, export experiences to JSON
+3. **Train Model** - `python Scripts/train_tactical_policy.py`
+4. **Load ONNX Model** - `LoadPolicy("tactical_policy.onnx")`
+5. **Iterate** - Collect more data, retrain, evaluate
 
 **📋 Planned:**
+- Online training (in-engine PPO updates)
 - Distributed training (Ray RLlib integration)
-- Model persistence and loading
 - Full multi-team scenarios (Red vs Blue vs Green)
 - Performance profiling and optimization
 
@@ -187,7 +192,7 @@ struct FMyConditionInstanceData {
 ```
 Source/GameAI_Project/
 ├── MCTS/              # Team leader strategic planning (event-driven)
-├── RL/                # Follower tactical policies (PPO network)
+├── RL/                # Follower tactical policies (PPO network + NNE inference)
 ├── StateTree/         # ⭐ PRIMARY execution system
 │   ├── Tasks/         # ExecuteDefend, ExecuteAssault, QueryRLPolicy, ExecuteMove, ExecuteRetreat
 │   ├── Evaluators/    # SyncCommand, UpdateObservation
@@ -201,11 +206,14 @@ Source/GameAI_Project/
 ├── Perception/        # AgentPerceptionComponent (enemy detection)
 ├── Team/              # Leader, Follower, Communication
 ├── Observation/       # 71+40 feature observation system
+├── Scripts/           # 🆕 Python training scripts
+│   ├── train_tactical_policy.py  # PPO training → ONNX export
+│   └── requirements.txt          # torch, numpy, tensorboard
 └── Core/              # SimulationManagerGameMode (team management)
 ```
 
 **Key Files:**
-- `next_step.md` - Current implementation plan (execution pipeline fixes)
+- `NEXT_STEP.md` - Current focus: RL training pipeline
 - `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
 - `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
 - `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system

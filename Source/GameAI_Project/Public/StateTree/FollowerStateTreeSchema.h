@@ -51,4 +51,7 @@ protected:
 	/** Pawn class (UE 5.6 - allows access to Pawn components) */
 	UPROPERTY(EditAnywhere, Category = "Defaults", NoClear, meta = (DisplayName = "Pawn Class"))
 	TSubclassOf<APawn> PawnClass;
+
+	UPROPERTY()
+	TArray<FStateTreeExternalDataDesc> ContextDataDescsCache;
 };

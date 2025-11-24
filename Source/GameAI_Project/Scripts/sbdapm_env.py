@@ -30,22 +30,29 @@ class SBDAPMEnv:
 
     # Action mapping to ETacticalAction enum
     ACTION_NAMES = [
-        "Advance",          # 0
-        "Retreat",          # 1
-        "FlankLeft",        # 2
-        "FlankRight",       # 3
-        "TakeCover",        # 4
-        "SuppressiveFire",  # 5
-        "HoldPosition",     # 6
-        "AssaultTarget",    # 7
-        "DefendPosition",   # 8
-        "Regroup",          # 9
-        "Heal",             # 10
-        "Reload",           # 11
-        "CallSupport",      # 12
-        "SetAmbush",        # 13
-        "AggressivePush",   # 14
-        "DefensiveHold",    # 15
+        # Combat Tactics (0-3)
+        "AggressiveAssault",       # 0 (AggressiveAssault)
+        "CautiousAdvance",         # 1 (CautiousAdvance)
+        "DefensiveHold",           # 2 (DefensiveHold)
+        "TacticalRetreat",         # 3 (TacticalRetreat)
+
+        # Positioning Tactics (4-7)
+        "SeekCover",               # 4 (SeekCover)
+        "FlankLeft",               # 5 (FlankLeft)
+        "FlankRight",              # 6 (FlankRight)
+        "MaintainDistance",        # 7 (MaintainDistance)
+
+        # Support Tactics (8-11)
+        "SuppressiveFire",         # 8 (SuppressiveFire)
+        "ProvideCoveringFire",     # 9 (ProvideCoveringFire)
+        "Reload",                  # 10 (Reload)
+        "UseAbility",              # 11 (UseAbility)
+
+        # Movement Tactics (12-15)
+        "Sprint",                  # 12 (Sprint)
+        "Crouch",                  # 13 (Crouch)
+        "Patrol",                  # 14 (Patrol)
+        "Hold"                     # 15 (Hold)
     ]
 
     def __init__(self, host="localhost", port=50051, **kwargs):
