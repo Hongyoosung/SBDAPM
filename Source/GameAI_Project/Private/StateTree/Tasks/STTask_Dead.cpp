@@ -7,6 +7,8 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Perception/AgentPerceptionComponent.h"
 #include "Animation/AnimInstance.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
@@ -40,6 +42,50 @@ EStateTreeRunStatus FSTTask_Dead::EnterState(FStateTreeExecutionContext& Context
 	// Clear focus
 	InstanceData.Context.AIController->ClearFocus(EAIFocusPriority::Gameplay);
 
+	// NOTE: Do NOT call StopLogic() - StateTree IS the brain component, stopping it from within causes crashes
+	// The Dead state itself keeps the agent disabled until respawn
+
+	// Disable character movement component
+	if (ACharacter* Character = Cast<ACharacter>(Pawn))
+	{
+		if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+		{
+			MovementComp->DisableMovement();
+			MovementComp->StopMovementImmediately();
+		}
+	}
+
+	// Hide mesh (make invisible)
+	if (ACharacter* Character = Cast<ACharacter>(Pawn))
+	{
+		if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
+		{
+			MeshComp->SetVisibility(false, true); // Hide mesh and propagate to children
+			UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Mesh hidden for %s"), *Pawn->GetName());
+		}
+	}
+	else
+	{
+		// For non-character pawns, hide all components
+		TArray<UActorComponent*> Components;
+		Pawn->GetComponents(UPrimitiveComponent::StaticClass(), Components);
+		for (UActorComponent* Comp : Components)
+		{
+			if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+			{
+				PrimComp->SetVisibility(false, true);
+			}
+		}
+	}
+
+	// Disable perception (stop detecting enemies)
+	UAgentPerceptionComponent* PerceptionComp = Pawn->FindComponentByClass<UAgentPerceptionComponent>();
+	if (PerceptionComp)
+	{
+		PerceptionComp->SetActive(false);
+		UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Perception disabled for %s"), *Pawn->GetName());
+	}
+
 	// Disable collision if configured
 	if (InstanceData.bDisableCollision)
 	{
@@ -56,17 +102,17 @@ EStateTreeRunStatus FSTTask_Dead::EnterState(FStateTreeExecutionContext& Context
 		}
 	}
 
-	// Play death animation
-	PlayDeathAnimation(Context);
+	// Play death animation (if visible - optional, since we're hiding)
+	// PlayDeathAnimation(Context);
 
-	// Enable ragdoll if configured
-	if (InstanceData.bEnableRagdoll)
-	{
-		EnableRagdoll(Context);
-	}
+	// Enable ragdoll if configured (NOTE: Conflicts with hiding mesh, so skip if hiding)
+	// if (InstanceData.bEnableRagdoll)
+	// {
+	// 	EnableRagdoll(Context);
+	// }
 
-	UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Agent %s entered death state (destroy in %.1fs)"),
-		*Pawn->GetName(), InstanceData.DestroyDelay);
+	UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Agent %s fully disabled (invisible, no collision, no perception)"),
+		*Pawn->GetName());
 
 	return EStateTreeRunStatus::Running;
 }
@@ -78,16 +124,11 @@ EStateTreeRunStatus FSTTask_Dead::Tick(FStateTreeExecutionContext& Context, floa
 	// Update timer
 	InstanceData.TimeSinceDeath += DeltaTime;
 
-	// Check if it's time to destroy
-	if (InstanceData.TimeSinceDeath >= InstanceData.DestroyDelay && !InstanceData.bMarkedForDestruction)
-	{
-		DestroyActor(Context);
-		InstanceData.bMarkedForDestruction = true;
+	// EPISODIC RL TRAINING: Do NOT destroy actors - they need to respawn on episode reset
+	// The SimulationManager will handle actor lifecycle during episodes
+	// Actors are disabled visually (ragdoll/animation) but remain in world for respawn
 
-		// Return succeeded to signal completion (though actor will be destroyed)
-		return EStateTreeRunStatus::Succeeded;
-	}
-
+	// Keep running indefinitely (actor stays in Dead state until episode reset)
 	return EStateTreeRunStatus::Running;
 }
 
@@ -95,8 +136,85 @@ void FSTTask_Dead::ExitState(FStateTreeExecutionContext& Context, const FStateTr
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Exiting death state (time: %.1fs)"),
+	UE_LOG(LogTemp, Warning, TEXT("STTask_Dead: Exiting death state (time: %.1fs) - Re-enabling actor"),
 		InstanceData.TimeSinceDeath);
+
+	// Re-enable actor for respawn (reverse what we did in EnterState)
+	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!Pawn)
+	{
+		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: Cannot exit - Pawn is NULL"));
+		return;
+	}
+
+	// Re-enable mesh visibility
+	if (ACharacter* Character = Cast<ACharacter>(Pawn))
+	{
+		if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
+		{
+			MeshComp->SetVisibility(true, true); // Show mesh and propagate to children
+			UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Mesh shown for %s"), *Pawn->GetName());
+		}
+	}
+	else
+	{
+		// For non-character pawns, show all components
+		TArray<UActorComponent*> Components;
+		Pawn->GetComponents(UPrimitiveComponent::StaticClass(), Components);
+		for (UActorComponent* Comp : Components)
+		{
+			if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Comp))
+			{
+				PrimComp->SetVisibility(true, true);
+			}
+		}
+	}
+
+	// Re-enable perception
+	UAgentPerceptionComponent* PerceptionComp = Pawn->FindComponentByClass<UAgentPerceptionComponent>();
+	if (PerceptionComp)
+	{
+		PerceptionComp->SetActive(true);
+		UE_LOG(LogTemp, Log, TEXT("STTask_Dead: Perception re-enabled for %s"), *Pawn->GetName());
+	}
+
+	// Re-enable collision
+	if (InstanceData.bDisableCollision)
+	{
+		if (ACharacter* Character = Cast<ACharacter>(Pawn))
+		{
+			if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+			{
+				Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			}
+
+			// Disable ragdoll if it was enabled (restore normal physics)
+			if (InstanceData.bEnableRagdoll)
+			{
+				if (USkeletalMeshComponent* MeshComp = Character->GetMesh())
+				{
+					MeshComp->SetSimulatePhysics(false);
+					MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+				}
+			}
+
+			// Re-enable character movement
+			if (UCharacterMovementComponent* MovementComp = Character->GetCharacterMovement())
+			{
+				MovementComp->SetMovementMode(MOVE_Walking);
+				MovementComp->Activate(); // Ensure movement component is active
+			}
+		}
+		else
+		{
+			Pawn->SetActorEnableCollision(true);
+		}
+	}
+
+	// NOTE: Do NOT call RestartLogic() - StateTree handles its own state transitions
+	// Exiting this task means StateTree is already transitioning to a new state
+
+	UE_LOG(LogTemp, Warning, TEXT("STTask_Dead: Actor %s fully re-enabled for respawn"), *Pawn->GetName());
 }
 
 void FSTTask_Dead::PlayDeathAnimation(FStateTreeExecutionContext& Context) const

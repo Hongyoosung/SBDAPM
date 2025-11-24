@@ -7,6 +7,8 @@
 #include "StateTreeExecutionContext.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "StateTreeModule\Public\StateTree.h"
 
 #if WITH_EDITOR
@@ -544,6 +546,40 @@ void UFollowerStateTreeComponent::OnFollowerDied()
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Follower died, transitioning to Dead state"));
 
 	// State Tree will transition to Dead state automatically via IsAlive condition
+}
+
+void UFollowerStateTreeComponent::OnFollowerRespawned()
+{
+	Context.bIsAlive = true;
+	AActor* Owner = GetOwner();
+
+	UE_LOG(LogTemp, Warning, TEXT("🔄 Follower '%s' Respawned: Restarting StateTree"), *GetNameSafe(Owner));
+
+	if (IsStateTreeRunning())
+	{
+		StopLogic("Respawn");
+		UE_LOG(LogTemp, Log, TEXT("  → StateTree stopped to trigger ExitState"));
+	}
+
+	GetWorld()->GetTimerManager().SetTimerForNextTick([WeakThis = TWeakObjectPtr<UFollowerStateTreeComponent>(this)]()
+		{
+			UFollowerStateTreeComponent* Comp = WeakThis.Get();
+			if (!Comp) return;
+
+			Comp->StartLogic();
+			UE_LOG(LogTemp, Warning, TEXT("✅ StateTree restarted for '%s'"), *GetNameSafe(Comp->GetOwner()));
+
+
+			if (ACharacter* Character = Cast<ACharacter>(Comp->GetOwner()))
+			{
+				UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
+				if (MoveComp && !MoveComp->IsActive())
+				{
+					MoveComp->Activate();
+					UE_LOG(LogTemp, Warning, TEXT("  → Force-activated CharacterMovementComponent"));
+				}
+			}
+		});
 }
 
 bool UFollowerStateTreeComponent::CheckRequirementsAndStart()

@@ -8,6 +8,7 @@
 #include "DrawDebugHelpers.h"
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 
 UFollowerAgentComponent::UFollowerAgentComponent()
 {
@@ -376,9 +377,33 @@ void UFollowerAgentComponent::MarkAsAlive()
 	if (bIsAlive) return;
 
 	bIsAlive = true;
+
+	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Respawning - resetting health and systems"), *GetOwner()->GetName());
+
+	// Reset health to full
+	UHealthComponent* HealthComp = GetOwner()->FindComponentByClass<UHealthComponent>();
+	if (HealthComp)
+	{
+		HealthComp->ResetHealth();
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Health reset to %.1f/%.1f"),
+			*GetOwner()->GetName(), HealthComp->GetCurrentHealth(), HealthComp->GetMaxHealth());
+	}
+
+	// Reset episode and clear old commands
+	ResetEpisode();
+	CurrentCommand = FStrategicCommand(); // Clear old command
+	TimeSinceLastCommand = 0.0f;
+
+	// Transition to Idle state
 	TransitionToState(EFollowerState::Idle);
 
-	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Marked as alive"), *GetOwner()->GetName());
+	// Notify StateTree of respawn (this will exit Dead state and re-enable systems)
+	if (UFollowerStateTreeComponent* StateTreeComp = GetOwner()->FindComponentByClass<UFollowerStateTreeComponent>())
+	{
+		StateTreeComp->OnFollowerRespawned();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Respawn complete - ready for new commands"), *GetOwner()->GetName());
 }
 
 //------------------------------------------------------------------------------

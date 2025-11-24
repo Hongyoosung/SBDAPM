@@ -690,7 +690,13 @@ void ASimulationManagerGameMode::StartNewEpisode()
 	// Reset agent health and positions
 	for (auto& Pair : RegisteredTeams)
 	{
-		UTeamLeaderComponent* TeamLeader = Pair.Value.TeamLeader;
+		int32 TeamID = Pair.Key;
+		FTeamInfo& TeamInfo = Pair.Value;
+
+		UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Resetting Team %d - %d members in array"),
+			TeamID, TeamInfo.TeamMembers.Num());
+
+		UTeamLeaderComponent* TeamLeader = TeamInfo.TeamLeader;
 
 		// Clear leader's strategic experiences for new episode
 		if (TeamLeader)
@@ -699,38 +705,60 @@ void ASimulationManagerGameMode::StartNewEpisode()
 		}
 
 		// Reset team members
-		for (AActor* Member : Pair.Value.TeamMembers)
+		for (AActor* Member : TeamInfo.TeamMembers)
 		{
-			if (!Member || !IsValid(Member))
+			if (!Member)
 			{
+				UE_LOG(LogTemp, Error, TEXT("SimulationManager: Team %d has NULL member in array"), TeamID);
 				continue;
 			}
+
+			if (!IsValid(Member))
+			{
+				UE_LOG(LogTemp, Error, TEXT("SimulationManager: Team %d member '%s' is INVALID"),
+					TeamID, *Member->GetName());
+				continue;
+			}
+
+			UHealthComponent* HealthComp = Member->FindComponentByClass<UHealthComponent>();
+			bool bWasDead = HealthComp ? HealthComp->IsDead() : false;
+
+			UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Processing %s (Team %d) - WasDead: %s"),
+				*Member->GetName(), TeamID, bWasDead ? TEXT("YES") : TEXT("NO"));
 
 			// Reset to spawn position
 			FTransform* SpawnTransform = SpawnTransforms.Find(Member);
 			if (SpawnTransform)
 			{
 				Member->SetActorTransform(*SpawnTransform, false, nullptr, ETeleportType::ResetPhysics);
-				UE_LOG(LogTemp, Log, TEXT("SimulationManager: Reset %s to spawn position"), *Member->GetName());
+				UE_LOG(LogTemp, Log, TEXT("  → Reset position"));
 			}
 			else
 			{
-				UE_LOG(LogTemp, Warning, TEXT("SimulationManager: No spawn transform stored for %s"), *Member->GetName());
+				UE_LOG(LogTemp, Warning, TEXT("  → No spawn transform stored"));
 			}
 
-			// Reset health
-			UHealthComponent* HealthComp = Member->FindComponentByClass<UHealthComponent>();
+			// Reset health (resurrects dead agents)
 			if (HealthComp)
 			{
 				HealthComp->ResetHealth();
+				UE_LOG(LogTemp, Log, TEXT("  → Reset health (Alive: %s)"),
+					HealthComp->IsAlive() ? TEXT("YES") : TEXT("NO"));
 			}
 
-			// Reset follower agent state
+			// Reset combat stats (kill count, etc.)
+			if (HealthComp)
+			{
+				HealthComp->ResetCombatStats();
+			}
+
+			// Mark agent as alive (syncs FollowerAgentComponent state)
 			UFollowerAgentComponent* FollowerComp = Member->FindComponentByClass<UFollowerAgentComponent>();
 			if (FollowerComp)
 			{
+				FollowerComp->MarkAsAlive();
 				FollowerComp->ClearExperiences();
-				UE_LOG(LogTemp, Log, TEXT("SimulationManager: Cleared experiences for %s"), *Member->GetName());
+				UE_LOG(LogTemp, Log, TEXT("  → Marked alive & cleared experiences"));
 			}
 		}
 	}

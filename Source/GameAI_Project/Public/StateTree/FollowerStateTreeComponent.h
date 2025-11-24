@@ -109,6 +109,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FStrategicCommand GetCurrentCommand() const { return Context.CurrentCommand; }
 
+	/** Handle follower death */
+	void OnFollowerDied();
+
+	/** Handle follower respawn (episode reset) */
+	void OnFollowerRespawned();
+
 	
 protected:
 	/** Find FollowerAgentComponent on actor */
@@ -120,9 +126,6 @@ protected:
 	/** Handle command received from leader */
 	UFUNCTION()
 	void OnCommandReceived(const FStrategicCommand& Command, EFollowerState NewState);
-
-	/** Handle follower death */
-	void OnFollowerDied();
 
 	bool CheckRequirementsAndStart();
 

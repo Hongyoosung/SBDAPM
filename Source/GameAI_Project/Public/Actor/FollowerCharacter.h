@@ -44,39 +44,12 @@ public:
 
 	//--------------------------------------------------------------------------
 	// COMBAT STATS (ICombatStatsInterface Implementation)
+	// Delegates to HealthComponent and WeaponComponent
 	//--------------------------------------------------------------------------
 	virtual float		GetHealthPercentage_Implementation	() const override;
 	virtual bool		IsAlive_Implementation				() const override;
 	virtual float		GetWeaponCooldown_Implementation	() const override;
 	virtual bool		CanFireWeapon_Implementation		() const override;
-
-
-	//--------------------------------------------------------------------------
-	// COMBAT SYSTEM
-	//--------------------------------------------------------------------------
-	UFUNCTION(BlueprintCallable, Category = "Combat|Health")
-	void TakeDamage(float DamageAmount);
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Health")
-	void Heal(float HealAmount);
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Health")
-	void Kill();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Health")
-	void Respawn();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Weapon")
-	bool FireWeapon();
-
-
-private:
-	//--------------------------------------------------------------------------
-	// HELPERS
-	//--------------------------------------------------------------------------
-	/** Update timers (cooldowns, regeneration) */
-	void UpdateTimers(float DeltaTime);
-	void UpdateWeaponCooldown(float DeltaTime);
 
 
 public:
@@ -90,18 +63,4 @@ public:
 	/** State Tree component (tactical state management) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Components")
 	UFollowerStateTreeComponent* StateTreeComponent;
-
-
-	//--------------------------------------------------------------------------
-	// COMBAT PROPERTIES
-	//--------------------------------------------------------------------------
-	FCombatStats CombatStats;
-
-
-private:
-	/** Time since last damage (for shield regen) */
-	float TimeSinceLastDamage = 0.0f;
-
-	/** Is character dead? */
-	bool bIsDead = false;
 };

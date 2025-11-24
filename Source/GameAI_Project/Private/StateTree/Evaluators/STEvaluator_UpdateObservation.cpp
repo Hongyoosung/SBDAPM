@@ -20,8 +20,8 @@ void FSTEvaluator_UpdateObservation::TreeStart(FStateTreeExecutionContext& Conte
 	// Initialize time accumulator
 	InstanceData.TimeAccumulator = 0.0f;
 
-	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS EVALUATOR] TreeStart called - UpdateInterval=%.3f"),
-		InstanceData.UpdateInterval);
+	/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS EVALUATOR] TreeStart called - UpdateInterval=%.3f"),
+		InstanceData.UpdateInterval);*/
 }
 
 void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
@@ -60,8 +60,8 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 	static int32 TickCount = 0;
 	if (++TickCount % 60 == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': TimeAccum=%.3f, UpdateInterval=%.3f, bFullUpdate=%d"),
-			*ControlledPawn->GetName(), InstanceData.TimeAccumulator, InstanceData.UpdateInterval, bFullUpdate ? 1 : 0);
+		/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': TimeAccum=%.3f, UpdateInterval=%.3f, bFullUpdate=%d"),
+			*ControlledPawn->GetName(), InstanceData.TimeAccumulator, InstanceData.UpdateInterval, bFullUpdate ? 1 : 0);*/
 	}
 
 	if (bFullUpdate)
@@ -72,7 +72,7 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 	// Full update (observations, perception, cover) - run at intervals
 	if (bFullUpdate)
 	{
-		UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': FULL UPDATE triggered"), *ControlledPawn->GetName());
+		//UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': FULL UPDATE triggered"), *ControlledPawn->GetName());
 
 		// Get observation from follower component
 		InstanceData.Context.PreviousObservation = InstanceData.Context.CurrentObservation;
@@ -147,9 +147,6 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	// Get detected enemies from perception system
 	TArray<AActor*> DetectedEnemies = PerceptionComp->GetDetectedEnemies();
 
-	// DEBUG: Log perception results
-	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': Perception detected %d enemies"),
-		*ControlledPawn->GetName(), DetectedEnemies.Num());
 
 	// Update visible enemies list in context
 	InstanceData.Context.VisibleEnemies.Empty();
@@ -158,21 +155,9 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 		if (Enemy)
 		{
 			InstanceData.Context.VisibleEnemies.Add(Enemy);
-			UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s':   - Adding enemy: %s"),
-				*ControlledPawn->GetName(), *Enemy->GetName());
 		}
 	}
 
-	// CRITICAL: Verify array was populated
-	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': VisibleEnemies array NOW has %d enemies (after population)"),
-		*ControlledPawn->GetName(), InstanceData.Context.VisibleEnemies.Num());
-
-	// Debug: Log what's in the array
-	for (AActor* Enemy : InstanceData.Context.VisibleEnemies)
-	{
-		UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s':   -> VisibleEnemies contains: %s"),
-			*ControlledPawn->GetName(), Enemy ? *Enemy->GetName() : TEXT("NULL"));
-	}
 
 	// Set primary target - PRIORITIZE command target over perception target
 	AActor* CommandTarget = InstanceData.Context.CurrentCommand.TargetActor;
