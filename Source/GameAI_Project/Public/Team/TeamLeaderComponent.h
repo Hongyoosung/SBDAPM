@@ -9,6 +9,8 @@
 // Forward declarations
 class UTeamCommunicationManager;
 class UMCTS;
+class UObjectiveManager;
+class UObjective;
 
 /**
  * Delegate for strategic decision events
@@ -223,6 +225,26 @@ public:
 	TArray<AActor*> GetKnownEnemies() const;
 
 	//--------------------------------------------------------------------------
+	// OBJECTIVE MANAGEMENT (v3.0 Combat Refactoring)
+	//--------------------------------------------------------------------------
+
+	/** Get the objective manager */
+	UFUNCTION(BlueprintPure, Category = "Team Leader|Objectives")
+	UObjectiveManager* GetObjectiveManager() const { return ObjectiveManager; }
+
+	/** Get objective assigned to a follower */
+	UFUNCTION(BlueprintPure, Category = "Team Leader|Objectives")
+	UObjective* GetObjectiveForFollower(AActor* Follower) const;
+
+	/** Assign objective to followers */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Objectives")
+	void AssignObjectiveToFollowers(UObjective* Objective, const TArray<AActor*>& FollowersToAssign);
+
+	/** Get all active objectives */
+	UFUNCTION(BlueprintPure, Category = "Team Leader|Objectives")
+	TArray<UObjective*> GetActiveObjectives() const;
+
+	//--------------------------------------------------------------------------
 	// METRICS & DEBUGGING
 	//--------------------------------------------------------------------------
 
@@ -366,6 +388,10 @@ public:
 	/** Communication manager (can be shared across teams) */
 	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
 	UTeamCommunicationManager* CommunicationManager;
+
+	/** Objective manager (v3.0 Combat Refactoring) */
+	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
+	UObjectiveManager* ObjectiveManager;
 
 	//--------------------------------------------------------------------------
 	// EVENTS

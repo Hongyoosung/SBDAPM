@@ -1,5 +1,7 @@
 #include "Team/TeamLeaderComponent.h"
 #include "Team/TeamCommunicationManager.h"
+#include "Team/ObjectiveManager.h"
+#include "Team/Objective.h"
 #include "AI/MCTS/MCTS.h"
 #include "Core/SimulationManagerGameMode.h"
 #include "DrawDebugHelpers.h"
@@ -25,6 +27,16 @@ void UTeamLeaderComponent::BeginPlay()
 	if (!CommunicationManager)
 	{
 		CommunicationManager = NewObject<UTeamCommunicationManager>(GetOwner());
+	}
+
+	// Initialize objective manager (v3.0 Combat Refactoring)
+	if (!ObjectiveManager)
+	{
+		ObjectiveManager = NewObject<UObjectiveManager>(GetOwner());
+		if (ObjectiveManager)
+		{
+			ObjectiveManager->RegisterComponent();
+		}
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("TeamLeaderComponent: Initialized team '%s'"), *TeamName);
@@ -920,4 +932,48 @@ void UTeamLeaderComponent::ClearStrategicExperiences()
 	bHasPendingExperience = false;
 
 	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Cleared %d strategic experiences"), *TeamName, Count);
+}
+
+//==============================================================================
+// OBJECTIVE MANAGEMENT (v3.0 Combat Refactoring)
+//==============================================================================
+
+UObjective* UTeamLeaderComponent::GetObjectiveForFollower(AActor* Follower) const
+{
+	if (!ObjectiveManager || !Follower)
+	{
+		return nullptr;
+	}
+
+	return ObjectiveManager->GetAgentObjective(Follower);
+}
+
+void UTeamLeaderComponent::AssignObjectiveToFollowers(UObjective* Objective, const TArray<AActor*>& FollowersToAssign)
+{
+	if (!ObjectiveManager || !Objective)
+	{
+		return;
+	}
+
+	// Assign agents to objective
+	ObjectiveManager->AssignAgentsToObjective(Objective, FollowersToAssign);
+
+	// Activate objective if not already active
+	if (!Objective->IsActive())
+	{
+		ObjectiveManager->ActivateObjective(Objective);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Assigned %d followers to objective (Type: %d, Priority: %d)"),
+		*TeamName, FollowersToAssign.Num(), (int32)Objective->Type, Objective->Priority);
+}
+
+TArray<UObjective*> UTeamLeaderComponent::GetActiveObjectives() const
+{
+	if (!ObjectiveManager)
+	{
+		return TArray<UObjective*>();
+	}
+
+	return ObjectiveManager->GetActiveObjectives();
 }
