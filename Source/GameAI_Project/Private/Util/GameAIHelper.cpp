@@ -5,23 +5,38 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 
+bool UGameAIHelper::bLogVerbosity = false;
+
 bool UGameAIHelper::IsTargetValid(AActor* Target)
 {
 	if (!Target)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: Target is nullptr"));
+		if (bLogVerbosity)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: Target is nullptr"));
+		}
+			
+
 		return false;
 	}
 
 	if (!Target->IsValidLowLevel())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: '%s' is NOT valid low level"), *Target->GetName());
+		if (bLogVerbosity)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: '%s' is not valid low level"), *Target->GetName());
+		}
+
 		return false;
 	}
 
 	if (Target->IsPendingKillPending())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: '%s' is pending kill"), *Target->GetName());
+		if (bLogVerbosity)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: '%s' is pending kill"), *Target->GetName());
+		}
+		
 		return false;
 	}
 
@@ -29,7 +44,7 @@ bool UGameAIHelper::IsTargetValid(AActor* Target)
 	if (UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>())
 	{
 		bool bIsAlive = HealthComp->IsAlive();
-		if (!bIsAlive)
+		if (!bIsAlive && bLogVerbosity)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[GameAIHelper] IsTargetValid: '%s' is DEAD (Health=%.1f)"),
 				*Target->GetName(), HealthComp->GetCurrentHealth());
@@ -45,8 +60,12 @@ AActor* UGameAIHelper::FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemi
 {
 	if (!FromPawn) return nullptr;
 
-	UE_LOG(LogTemp, Display, TEXT("[GameAIHelper] FindNearestValidEnemy: Searching %d visible enemies for '%s'"),
-		VisibleEnemies.Num(), *FromPawn->GetName());
+	if (bLogVerbosity)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[GameAIHelper] FindNearestValidEnemy: Searching %d visible enemies for '%s'"),
+			VisibleEnemies.Num(), *FromPawn->GetName());
+	}
+	
 
 	FVector MyLocation = FromPawn->GetActorLocation();
 	AActor* NearestEnemy = nullptr;
@@ -66,7 +85,7 @@ AActor* UGameAIHelper::FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemi
 		}
 	}
 
-	if (NearestEnemy)
+	if (NearestEnemy && bLogVerbosity)
 	{
 		UE_LOG(LogTemp, Display, TEXT("[GameAIHelper] FindNearestValidEnemy: Found '%s' at distance %.1f"),
 			*NearestEnemy->GetName(), NearestDistance);
@@ -146,12 +165,16 @@ FVector UGameAIHelper::CalculateFormationOffset(
 		break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[FORMATION OFFSET] Agent '%s' [%d/%d]: Command=%s, Offset=%s"),
-		*Agent->GetName(),
-		AgentIndex + 1,
-		TeamSize,
-		*UEnum::GetValueAsString(CommandType),
-		*Offset.ToString());
+	if (bLogVerbosity)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[FORMATION OFFSET] Agent '%s' [%d/%d]: Command=%s, Offset=%s"),
+			*Agent->GetName(),
+			AgentIndex + 1,
+			TeamSize,
+			*UEnum::GetValueAsString(CommandType),
+			*Offset.ToString());
+	}
+	
 
 	return Offset;
 }

@@ -266,7 +266,7 @@ void UHealthComponent::HandleDeath(AActor* Killer, float FinalDamage)
 	CurrentHealth = 0.0f;
 
 	// Create death event
-	FDeathEventData DeathEvent(Killer, FinalDamage, GetWorld()->GetTimeSeconds());
+	FDeathEventData DeathEvent(GetOwner(), Killer, FinalDamage, GetWorld()->GetTimeSeconds());
 	LastDeathEvent = DeathEvent;
 
 	// Broadcast death event
@@ -288,15 +288,6 @@ void UHealthComponent::HandleDeath(AActor* Killer, float FinalDamage)
 		if (UHealthComponent* KillerHealth = Killer->FindComponentByClass<UHealthComponent>())
 		{
 			KillerHealth->NotifyKillConfirmed(GetOwner(), TotalDamageTaken);
-		}
-	}
-
-	// Notify SimulationManager for episode termination check
-	if (UWorld* World = GetWorld())
-	{
-		if (ASimulationManagerGameMode* GM = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode()))
-		{
-			GM->OnAgentDied(GetOwner());
 		}
 	}
 

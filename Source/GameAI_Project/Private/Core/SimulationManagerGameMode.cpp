@@ -125,6 +125,14 @@ bool ASimulationManagerGameMode::RegisterTeamMember(int32 TeamID, AActor* Agent)
 	TeamInfo->TeamMembers.AddUnique(Agent);
 	ActorToTeamMap.Add(Agent, TeamID);
 
+	// Auto-bind HealthComponent::OnDeath to OnAgentDied for episode tracking
+	UHealthComponent* HealthComp = Agent->FindComponentByClass<UHealthComponent>();
+	if (HealthComp)
+	{
+		HealthComp->OnDeath.AddUniqueDynamic(this, &ASimulationManagerGameMode::OnAgentDied);
+		UE_LOG(LogTemp, Log, TEXT("SimulationManager: Bound OnDeath for %s"), *Agent->GetName());
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("SimulationManager: Registered %s to team %d"), *Agent->GetName(), TeamID);
 	return true;
 }
@@ -140,6 +148,13 @@ void ASimulationManagerGameMode::UnregisterTeamMember(int32 TeamID, AActor* Agen
 	if (TeamInfo)
 	{
 		TeamInfo->TeamMembers.Remove(Agent);
+	}
+
+	// Unbind OnDeath delegate
+	UHealthComponent* HealthComp = Agent->FindComponentByClass<UHealthComponent>();
+	if (HealthComp)
+	{
+		HealthComp->OnDeath.RemoveDynamic(this, &ASimulationManagerGameMode::OnAgentDied);
 	}
 
 	ActorToTeamMap.Remove(Agent);
@@ -415,8 +430,19 @@ void ASimulationManagerGameMode::DrawDebugInformation()
 	for (const auto& Pair : RegisteredTeams)
 	{
 		const FTeamInfo& Team = Pair.Value;
-		FString TeamStr = FString::Printf(TEXT("Team %d (%s): %d members, %d enemies"),
-			Team.TeamID, *Team.TeamName, Team.TeamMembers.Num(), Team.EnemyTeamIDs.Num());
+
+		// Count alive members and detected enemies
+		int32 AliveCount = GetAliveAgentCount(Team.TeamID);
+		int32 DetectedEnemyCount = 0;
+
+		// Count alive enemies across all enemy teams
+		for (int32 EnemyTeamID : Team.EnemyTeamIDs)
+		{
+			DetectedEnemyCount += GetAliveAgentCount(EnemyTeamID);
+		}
+
+		FString TeamStr = FString::Printf(TEXT("Team %d (%s): %d/%d alive, %d enemy teams, %d detected enemies"),
+			Team.TeamID, *Team.TeamName, AliveCount, Team.TeamMembers.Num(), Team.EnemyTeamIDs.Num(), DetectedEnemyCount);
 
 		DrawDebugString(World, DebugOrigin + FVector(0, 0, YOffset), TeamStr, nullptr,
 			Team.TeamColor.ToFColor(true), DebugDrawInterval, false, 1.2f);
@@ -437,16 +463,19 @@ void ASimulationManagerGameMode::DrawDebugInformation()
 // EPISODE MANAGEMENT
 //------------------------------------------------------------------------------
 
-void ASimulationManagerGameMode::OnAgentDied(AActor* DeadAgent)
+void ASimulationManagerGameMode::OnAgentDied(const FDeathEventData& DeathEvent)
 {
-	if (!DeadAgent || bEpisodeEnding)
+	if (!DeathEvent.DeadActor || bEpisodeEnding)
 	{
 		return;
 	}
 
-	int32 TeamID = GetTeamIDForActor(DeadAgent);
-	UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Agent '%s' (Team %d) died"),
-		*DeadAgent->GetName(), TeamID);
+	int32 TeamID = GetTeamIDForActor(DeathEvent.DeadActor);
+	int32 AliveCount = GetAliveAgentCount(TeamID);
+
+	UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Agent '%s' (Team %d) died - %d agents remaining alive (Killed by %s)"),
+		*DeathEvent.DeadActor->GetName(), TeamID, AliveCount,
+		DeathEvent.Killer ? *DeathEvent.Killer->GetName() : TEXT("Unknown"));
 
 	// Check if this death causes episode termination
 	CheckEpisodeTermination();
@@ -469,6 +498,12 @@ int32 ASimulationManagerGameMode::GetAliveAgentCount(int32 TeamID) const
 	for (AActor* Member : TeamInfo->TeamMembers)
 	{
 		if (!Member || !IsValid(Member))
+		{
+			continue;
+		}
+
+		// Skip leader if configured
+		if (!bIncludeLeaderInElimination && TeamInfo->TeamLeader && Member == TeamInfo->TeamLeader->GetOwner())
 		{
 			continue;
 		}
@@ -512,7 +547,13 @@ void ASimulationManagerGameMode::CheckEpisodeTermination()
 
 	for (int32 TeamID : AllTeamIDs)
 	{
-		if (IsTeamEliminated(TeamID))
+		int32 AliveCount = GetAliveAgentCount(TeamID);
+		bool bEliminated = IsTeamEliminated(TeamID);
+
+		UE_LOG(LogTemp, Log, TEXT("CheckEpisodeTermination: Team %d has %d alive agents (Eliminated: %s)"),
+			TeamID, AliveCount, bEliminated ? TEXT("YES") : TEXT("NO"));
+
+		if (bEliminated)
 		{
 			EliminatedTeams.Add(TeamID);
 		}
@@ -521,6 +562,9 @@ void ASimulationManagerGameMode::CheckEpisodeTermination()
 			AliveTeams.Add(TeamID);
 		}
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("CheckEpisodeTermination: %d teams alive, %d eliminated (Total: %d)"),
+		AliveTeams.Num(), EliminatedTeams.Num(), AllTeamIDs.Num());
 
 	// End episode if only one team survives (or all eliminated)
 	if (AliveTeams.Num() <= 1 && AllTeamIDs.Num() > 1)

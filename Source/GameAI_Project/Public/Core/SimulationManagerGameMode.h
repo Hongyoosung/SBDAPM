@@ -6,6 +6,7 @@
 #include "SimulationManagerGameMode.generated.h"
 
 class UTeamLeaderComponent;
+struct FDeathEventData;
 
 /**
  * Team registration info
@@ -344,10 +345,10 @@ public:
 	/**
 	 * Called when an agent dies - checks for episode termination
 	 * Bind this to HealthComponent::OnDeath delegate
-	 * @param DeadAgent - The agent that died
+	 * @param DeathEvent - Death event data containing the dead agent
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Simulation|Episode")
-	void OnAgentDied(AActor* DeadAgent);
+	UFUNCTION()
+	void OnAgentDied(const FDeathEventData& DeathEvent);
 
 	/**
 	 * Check episode termination conditions (called internally by OnAgentDied)
@@ -449,6 +450,10 @@ public:
 	/** Lose penalty for episode loss */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
 	float LosePenalty = -50.0f;
+
+	/** Include team leader in elimination checks? (If false, team is eliminated when all followers are dead) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	bool bIncludeLeaderInElimination = true;
 
 
 private:

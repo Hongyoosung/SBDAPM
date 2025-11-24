@@ -66,6 +66,10 @@ struct FDeathEventData
 {
 	GENERATED_BODY()
 
+	/** The actor that died */
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	AActor* DeadActor = nullptr;
+
 	/** Who killed this actor */
 	UPROPERTY(BlueprintReadOnly, Category = "Combat")
 	AActor* Killer = nullptr;
@@ -80,8 +84,9 @@ struct FDeathEventData
 
 	FDeathEventData() {}
 
-	FDeathEventData(AActor* InKiller, float InFinalDamage, float InTimeOfDeath)
-		: Killer(InKiller)
+	FDeathEventData(AActor* InDeadActor, AActor* InKiller, float InFinalDamage, float InTimeOfDeath)
+		: DeadActor(InDeadActor)
+		, Killer(InKiller)
 		, FinalDamage(InFinalDamage)
 		, TimeOfDeath(InTimeOfDeath)
 	{}

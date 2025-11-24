@@ -706,15 +706,4 @@ void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
 	{
 		SignalEventToLeader(EStrategicEvent::AllyKilled, DeathEvent.Killer, GetOwner()->GetActorLocation(), 10);
 	}
-
-	// Notify SimulationManager for episode termination check
-	UWorld* World = GetWorld();
-	if (World)
-	{
-		ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(World->GetAuthGameMode());
-		if (SimManager)
-		{
-			SimManager->OnAgentDied(GetOwner());
-		}
-	}
 }

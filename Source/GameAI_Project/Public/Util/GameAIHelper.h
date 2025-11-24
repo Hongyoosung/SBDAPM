@@ -32,4 +32,7 @@ public:
 		AActor* Agent,
 		UFollowerAgentComponent* FollowerComponent,
 		EStrategicCommandType CommandType);
+
+protected:
+	static bool bLogVerbosity;
 };
