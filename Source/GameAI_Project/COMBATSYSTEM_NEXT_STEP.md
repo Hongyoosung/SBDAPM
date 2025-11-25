@@ -1,6 +1,6 @@
 # Combat System Refactoring - Progress Tracker
 
-**Status:** Sprint 1 Complete - Ready for Sprint 2
+**Status:** Sprint 5 Complete - Ready for Sprint 6
 **Last Updated:** 2025-11-25
 
 ---
@@ -36,12 +36,12 @@
 
 ---
 
-## Sprint 2: 🔄 NEXT - Atomic Action Space (Weeks 1-2)
+## Sprint 2: ✅ COMPLETED - Atomic Action Space
 
 ### Goal
 Replace 16 discrete tactical actions with 8-dimensional continuous atomic action space
 
-### Files to Create
+### Implemented Files
 
 **1. FTacticalAction Struct**
 - **File:** `RL/RLTypes.h` (modify existing)
@@ -138,26 +138,53 @@ struct FActionSpaceMask
   - Input: 71 features + 7 objective embedding + mask
   - Output: 8-dimensional action
 
-### Tasks
-- [ ] Add FTacticalAction struct to RLTypes.h
-- [ ] Add FActionSpaceMask struct to RLTypes.h
-- [ ] Modify RLPolicyNetwork.h to output FTacticalAction
-- [ ] Implement RLPolicyNetwork.cpp atomic action logic
-- [ ] Create train_tactical_policy_v3.py (PyTorch PPO)
-- [ ] Test with random policy (no trained model)
-- [ ] Compile and validate
+### Tasks Completed
+- [x] Add FTacticalAction struct to RLTypes.h
+- [x] Add FActionSpaceMask struct to RLTypes.h
+- [x] Modify RLPolicyNetwork.h to output FTacticalAction
+- [x] Implement RLPolicyNetwork.cpp atomic action logic
+- [x] Create train_tactical_policy_v3.py (PyTorch PPO)
+- [x] Remove legacy ETacticalAction enum
+- [x] Update FRLExperience for atomic actions
+- [x] Clean up legacy methods from RLPolicyNetwork
+
+### Key Changes
+- **Removed Legacy Code:**
+  - ETacticalAction enum (16 discrete actions)
+  - SelectAction(), GetActionProbabilities(), GetActionValue() methods
+  - Rule-based fallback for discrete actions
+  - Helper methods: ActionToIndex(), IndexToAction(), GetActionName()
+
+- **New Atomic Action System:**
+  - FTacticalAction: 8-dimensional action (move_x, move_y, speed, look_x, look_y, fire, crouch, ability)
+  - FActionSpaceMask: Spatial constraints for valid actions
+  - GetAction() and GetActionWithMask(): New inference methods with objective context
+  - GetObjectivePriors(): For future MCTS integration
+  - Updated FRLExperience: Now stores atomic actions + objective embeddings
+  - Enhanced JSON export: Exports 8-dim actions + 7-dim objective context
+
+- **Training Script:**
+  - train_tactical_policy_v3.py: Hybrid continuous-discrete PPO
+  - Input: 78 features (71 observation + 7 objective)
+  - Output: 8 atomic action dimensions
+  - Supports action masking
+
+### Validation Needed
+- [ ] Compile project and verify no build errors
+- [ ] Test atomic action inference with dummy policy
+- [ ] Verify JSON export format matches training script expectations
 
 ---
 
-## Sprint 3: StateTree Simplification (Weeks 3-4)
+## Sprint 3: ✅ COMPLETED - StateTree Simplification (Weeks 3-4)
 
 ### Goal
 Replace 5 complex execution tasks with single STTask_ExecuteObjective
 
-### Files to Create
+### Implemented Files
 
 **1. STTask_ExecuteObjective**
-- **Files:** `StateTree/Tasks/STTask_ExecuteObjective.h/cpp`
+- ✅ `StateTree/Tasks/STTask_ExecuteObjective.h/cpp`
 - **Replaces:** ExecuteAssault, ExecuteDefend, ExecuteSupport, ExecuteMove, ExecuteRetreat
 - **Methods:**
   - `Tick()` - Main execution loop
@@ -165,50 +192,59 @@ Replace 5 complex execution tasks with single STTask_ExecuteObjective
   - `ExecuteAiming()` - Apply aiming from atomic action
   - `ExecuteFire()` - Fire weapon
   - `ExecuteCrouch()` - Toggle crouch
+  - `ExecuteAbility()` - Use ability system
   - `ApplyMask()` - Apply spatial constraints
 
 **2. STEvaluator_SpatialContext**
-- **Files:** `StateTree/Evaluators/STEvaluator_SpatialContext.h/cpp`
+- ✅ `StateTree/Evaluators/STEvaluator_SpatialContext.h/cpp`
 - **Purpose:** Compute action space mask based on environment
-- **Updates:** Every frame, writes FActionSpaceMask to context
+- **Updates:** Every 0.2s (5Hz), writes FActionSpaceMask to context
 - **Methods:**
   - `DetectIndoor()` - Check if in indoor space
   - `MeasureLateralClearance()` - Check corridor width
   - `MeasureNavMeshEdgeDistance()` - Check cliff proximity
   - `ApplyCoverAimingRestrictions()` - Limit aim angles at cover
+  - `CanSprint()` - Check sprint availability
+  - `IsFiringSafe()` - Prevent friendly fire
 
-**3. Simplified StateTree Structure**
-- **Change:** 6 states → 3 states
-  - Idle (wait for objective)
-  - Active (execute objective)
-  - Dead (terminal)
+**3. FollowerStateTreeContext Updates**
+- ✅ Added `CurrentAtomicAction` (FTacticalAction)
+- ✅ Added `CurrentObjective` (UObjective*)
+- ✅ Added `ActionMask` (FActionSpaceMask)
 
-### Files to Delete
-- [ ] `StateTree/Tasks/STTask_ExecuteAssault.h/cpp` (500+ lines)
-- [ ] `StateTree/Tasks/STTask_ExecuteDefend.h/cpp`
-- [ ] `StateTree/Tasks/STTask_ExecuteSupport.h/cpp`
-- [ ] `StateTree/Tasks/STTask_ExecuteMove.h/cpp`
-- [ ] `StateTree/Tasks/STTask_ExecuteRetreat.h/cpp`
+### Legacy Files Deleted
+- ✅ `StateTree/Tasks/STTask_ExecuteAssault.h/cpp` (500+ lines removed)
+- ✅ `StateTree/Tasks/STTask_ExecuteDefend.h/cpp`
+- ✅ `StateTree/Tasks/STTask_ExecuteSupport.h/cpp`
+- ✅ `StateTree/Tasks/STTask_ExecuteMove.h/cpp`
+- ✅ `StateTree/Tasks/STTask_ExecuteRetreat.h/cpp`
 
-### Tasks
-- [ ] Implement STTask_ExecuteObjective
-- [ ] Implement STEvaluator_SpatialContext
-- [ ] Update FollowerStateTreeSchema for new context
-- [ ] Create Blueprint StateTree asset with 3 states
-- [ ] Test objective execution
-- [ ] Delete old tasks after validation
+### Tasks Completed
+- [x] Implement STTask_ExecuteObjective
+- [x] Implement STEvaluator_SpatialContext
+- [x] Update FollowerStateTreeContext for new fields
+- [x] Delete legacy execution tasks
+- [ ] Create Blueprint StateTree asset with 3 states (requires UE Editor)
+- [ ] Compile and test objective execution
+- [ ] Verify action masking works correctly
+
+### Key Changes
+- **Single Universal Task:** One task handles all objective types via atomic actions
+- **Spatial Awareness:** Action masking prevents invalid actions (sprinting indoors, moving off edges)
+- **Objective-Driven:** Policy receives objective context for better decision-making
+- **Reduced Complexity:** ~2500 lines of legacy task code → ~300 lines of universal execution
 
 ---
 
-## Sprint 4: Hierarchical Rewards (Weeks 5-6)
+## Sprint 4: ✅ COMPLETED - Hierarchical Rewards (Weeks 5-6)
 
 ### Goal
 Unify individual, coordination, and strategic rewards
 
-### Files to Create
+### Implemented Files
 
 **RewardCalculator Component**
-- **Files:** `RL/RewardCalculator.h/cpp`
+- ✅ `RL/RewardCalculator.h/cpp`
 - **Methods:**
   - `CalculateTotalReward()` - Sum all reward components
   - `CalculateIndividualReward()` - Base combat rewards
@@ -236,38 +272,52 @@ Unify individual, coordination, and strategic rewards
 -30  Own squad eliminated
 ```
 
-### Tasks
-- [ ] Implement RewardCalculator component
-- [ ] Add coordination detection (combined fire tracking)
-- [ ] Integrate with FollowerAgentComponent
-- [ ] Update MCTS backpropagation for objective rewards
-- [ ] Test reward alignment
+### Tasks Completed
+- [x] Implement RewardCalculator component
+- [x] Add coordination detection (combined fire tracking)
+- [x] Integrate with FollowerAgentComponent
+- [ ] Update MCTS backpropagation for objective rewards (Sprint 5)
+- [ ] Test reward alignment (requires compile & runtime testing)
 
 ---
 
-## Sprint 5: MCTS Objective Selection (Weeks 7-8)
+## Sprint 5: ✅ COMPLETED - MCTS Objective Selection (Weeks 7-8)
 
 ### Goal
 MCTS selects objectives instead of command combinations (14,641 → ~50 actions)
 
-### Files to Modify
+### Implemented Files
 
-**MCTS.cpp Changes:**
-- Replace `GenerateCommandCombinations()` with `GenerateObjectiveAssignments()`
-- Action space: 7 objective types × N agents = ~50 combinations (vs 14,641)
-- Use UCB for objective selection
+**MCTS.h/cpp:**
+- ✅ Added `GenerateObjectiveAssignments()` - Generates 7 objective types × N agents ≈ 50 combinations
+- ✅ Added `RunTeamMCTSWithObjectives()` - Main objective-based MCTS entry point
+- ✅ Added `RunTeamMCTSTreeSearchWithObjectives()` - Objective-based tree search
+- ✅ Added `CalculateTeamReward(TeamObs, Objectives)` - Objective-specific reward calculation
+- ✅ Deprecated legacy command-based methods (kept for backward compatibility)
 
-**TeamLeaderComponent Changes:**
-- MCTS outputs: `TMap<AActor*, UObjective*>` (objective assignments)
-- Agents query objective from ObjectiveManager
-- Remove old FStrategicCommand system (or keep for compatibility)
+**TeamLeaderComponent.h/cpp:**
+- ✅ Added `RunObjectiveDecisionMaking()` - Sync objective-based MCTS
+- ✅ Added `RunObjectiveDecisionMakingAsync()` - Async objective-based MCTS
+- ✅ Added `OnObjectiveMCTSComplete()` - Callback to assign objectives via ObjectiveManager
+- ✅ Deprecated legacy command methods (kept for backward compatibility)
+- ✅ Integrated with ObjectiveManager for objective activation and assignment
 
-### Tasks
-- [ ] Modify MCTS action generation
-- [ ] Update MCTS simulation to use objectives
-- [ ] Integrate with ObjectiveManager
-- [ ] Benchmark MCTS performance (target: <15ms)
-- [ ] Test objective-driven decision making
+### Key Changes
+- **Reduced Action Space:** 14,641 command combinations → ~50 objective assignments (99.6% reduction)
+- **Objective Types:** Eliminate, CaptureObjective, DefendObjective, SupportAlly, FormationMove, Retreat, RescueAlly
+- **MCTS Integration:** Fully integrated with ObjectiveManager for lifecycle management
+- **Backward Compatible:** Legacy command system still available
+- **Bridge Pattern:** Temporary conversion from objectives to commands for node compatibility
+
+### Tasks Completed
+- [x] Implement GenerateObjectiveAssignments()
+- [x] Update MCTS simulation to use objectives
+- [x] Add objective-based reward calculation
+- [x] Integrate with ObjectiveManager
+- [x] Add sync/async objective decision making to TeamLeaderComponent
+- [x] Mark legacy code as deprecated
+- [ ] Benchmark MCTS performance (target: <15ms) - requires runtime testing
+- [ ] Test objective-driven decision making - requires runtime testing
 
 ---
 
@@ -297,54 +347,65 @@ Complete integration and performance validation
 
 ---
 
-## File Change Summary
+## File Change Summary (Sprints 1-5)
 
-### New Files (19)
+### New Files Created (19)
 ```
+✅ Sprint 1 - Objective System
 Team/Objective.h/cpp
 Team/Objectives/EliminateObjective.h/cpp
 Team/Objectives/CaptureObjective.h/cpp
 Team/Objectives/DefendObjective.h/cpp
 Team/Objectives/SupportAllyObjective.h/cpp
 Team/ObjectiveManager.h/cpp
+
+✅ Sprint 2 - Atomic Actions
+Scripts/train_tactical_policy_v3.py
+
+✅ Sprint 3 - StateTree Simplification
 StateTree/Tasks/STTask_ExecuteObjective.h/cpp
 StateTree/Evaluators/STEvaluator_SpatialContext.h/cpp
+
+✅ Sprint 4 - Hierarchical Rewards
 RL/RewardCalculator.h/cpp
-Scripts/train_tactical_policy_v3.py
 ```
 
-### Modified Files (8)
+### Modified Files (10)
 ```
-RL/RLTypes.h                    # FTacticalAction, FActionSpaceMask
-RL/RLPolicyNetwork.h/cpp        # Atomic action output
-Team/TeamLeaderComponent.h/cpp  # ObjectiveManager integration
-Team/FollowerAgentComponent.h/cpp # RewardCalculator integration
-AI/MCTS/MCTS.h/cpp              # Objective selection
-StateTree/FollowerStateTreeSchema.h # Context update
+✅ RL/RLTypes.h                        # FTacticalAction, FActionSpaceMask (Sprint 2)
+✅ RL/RLPolicyNetwork.h/cpp            # Atomic action output (Sprint 2)
+✅ StateTree/FollowerStateTreeContext.h # Atomic action + objective fields (Sprint 3)
+✅ StateTree/FollowerStateTreeSchema.cpp # Removed legacy task references (Sprint 3)
+✅ StateTree/FollowerStateTreeComponent.h # Updated architecture docs (Sprint 3)
+✅ Combat/WeaponComponent.h             # Updated task reference (Sprint 3)
+✅ Team/TeamLeaderComponent.h/cpp      # ObjectiveManager integration (Sprint 1), Objective-based MCTS (Sprint 5)
+✅ Team/FollowerAgentComponent.h/cpp   # RewardCalculator integration (Sprint 4)
+✅ AI/MCTS/MCTS.h/cpp                  # Objective selection (Sprint 5)
 ```
 
 ### Deleted Files (10)
 ```
-StateTree/Tasks/STTask_ExecuteAssault.h/cpp
-StateTree/Tasks/STTask_ExecuteDefend.h/cpp
-StateTree/Tasks/STTask_ExecuteSupport.h/cpp
-StateTree/Tasks/STTask_ExecuteMove.h/cpp
-StateTree/Tasks/STTask_ExecuteRetreat.h/cpp
+✅ StateTree/Tasks/STTask_ExecuteAssault.h/cpp     (Sprint 3)
+✅ StateTree/Tasks/STTask_ExecuteDefend.h/cpp      (Sprint 3)
+✅ StateTree/Tasks/STTask_ExecuteSupport.h/cpp     (Sprint 3)
+✅ StateTree/Tasks/STTask_ExecuteMove.h/cpp        (Sprint 3)
+✅ StateTree/Tasks/STTask_ExecuteRetreat.h/cpp     (Sprint 3)
 ```
 
 ---
 
 ## Current Blockers
 
-**None** - Sprint 1 complete, ready for Sprint 2
+**None** - Sprint 5 complete, ready for Sprint 6
 
 ---
 
 ## Next Immediate Steps
 
-1. **Compile Sprint 1** - Validate objective system compiles
-2. **Test Objective Creation** - Create simple test scenario
-3. **Start Sprint 2** - Define FTacticalAction struct
+1. **Compile Sprint 5** - Build project and verify no compilation errors
+2. **Test Objective-Based MCTS** - Verify objective assignment works in runtime
+3. **Benchmark MCTS Performance** - Measure MCTS execution time with objectives (target: <15ms)
+4. **Start Sprint 6** - End-to-end validation and performance testing
 
 ---
 

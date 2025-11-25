@@ -20,7 +20,7 @@ enum class EEngagementRange : uint8
  * Objective type classification
  */
 UENUM(BlueprintType)
-enum class EObjectiveType : uint8
+enum class EObjectiveTypeLegacy : uint8
 {
     None            UMETA(DisplayName = "No Objective"),
     Eliminate       UMETA(DisplayName = "Eliminate Enemies"),

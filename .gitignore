@@ -14,7 +14,7 @@
 *GameAI_Project.sln.DotSettings.user
 
 # md files
-*.md
+# *.md
 
 # Compiled Object files
 *.slo

@@ -67,49 +67,80 @@ public:
 	void UnloadPolicy();
 
 	// ========================================
-	// Inference
+	// Atomic Action Inference (v3.0)
 	// ========================================
 
 	/**
-	 * Select a tactical action based on the current observation
-	 * Uses epsilon-greedy exploration if enabled
+	 * Get atomic action with objective context (v3.0)
+	 * Replaces discrete action selection with continuous action space
 	 * @param Observation - Current 71-feature observation
-	 * @return Selected tactical action
+	 * @param CurrentObjective - Current objective from team leader (can be nullptr)
+	 * @return 8-dimensional atomic action (move, aim, discrete actions)
 	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	ETacticalAction SelectAction(const FObservationElement& Observation);
+	UFUNCTION(BlueprintCallable, Category = "RL|v3")
+	FTacticalAction GetAction(const FObservationElement& Observation, class UObjective* CurrentObjective);
 
 	/**
-	 * Get action probabilities for all actions
-	 * @param Observation - Current 71-feature observation
-	 * @return Array of 16 probabilities (sums to 1.0)
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	TArray<float> GetActionProbabilities(const FObservationElement& Observation);
-
-	/**
-	 * Get the Q-value for a specific action
+	 * Get atomic action with objective context and spatial mask (v3.0)
+	 * Applies environmental constraints to prevent invalid actions
 	 * @param Observation - Current observation
-	 * @param Action - Action to evaluate
-	 * @return Estimated Q-value
+	 * @param CurrentObjective - Current objective (can be nullptr)
+	 * @param Mask - Action space constraints from environment
+	 * @return 8-dimensional atomic action (constrained by mask)
 	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	float GetActionValue(const FObservationElement& Observation, ETacticalAction Action);
+	UFUNCTION(BlueprintCallable, Category = "RL|v3")
+	FTacticalAction GetActionWithMask(const FObservationElement& Observation, class UObjective* CurrentObjective, const FActionSpaceMask& Mask);
+
+	/**
+	 * Get action priors for MCTS initialization (v3.0)
+	 * Returns prior probabilities for objective types to guide MCTS tree search
+	 * @param TeamObs - Team-level observation
+	 * @return Array of 7 prior probabilities (one per objective type)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "RL|v3")
+	TArray<float> GetObjectivePriors(const struct FTeamObservation& TeamObs);
 
 	// ========================================
 	// Experience Collection
 	// ========================================
 
 	/**
-	 * Store an experience tuple for offline training
+	 * Store an experience tuple for offline training (v3.0 - Atomic Actions)
 	 * @param State - Current state
-	 * @param Action - Action taken
+	 * @param Action - Atomic action taken
 	 * @param Reward - Immediate reward
 	 * @param NextState - Resulting state
 	 * @param bTerminal - Is this a terminal state?
+	 * @param CurrentObjective - Current objective context (optional)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "RL")
-	void StoreExperience(const FObservationElement& State, ETacticalAction Action, float Reward, const FObservationElement& NextState, bool bTerminal);
+	void StoreExperience(const FObservationElement& State, const FTacticalAction& Action, float Reward, const FObservationElement& NextState, bool bTerminal, class UObjective* CurrentObjective = nullptr);
+
+	/**
+	 * Store experience with MCTS uncertainty tagging (v3.0 Sprint 3)
+	 * High uncertainty scenarios get prioritized in training
+	 * @param State - Current state
+	 * @param Action - Atomic action taken
+	 * @param Reward - Immediate reward
+	 * @param NextState - Resulting state
+	 * @param bTerminal - Is this a terminal state?
+	 * @param CurrentObjective - Current objective context
+	 * @param MCTSValueVariance - MCTS value uncertainty
+	 * @param MCTSPolicyEntropy - MCTS policy uncertainty
+	 * @param MCTSVisitCount - MCTS search depth
+	 */
+	UFUNCTION(BlueprintCallable, Category = "RL|Curriculum")
+	void StoreExperienceWithUncertainty(
+		const FObservationElement& State,
+		const FTacticalAction& Action,
+		float Reward,
+		const FObservationElement& NextState,
+		bool bTerminal,
+		class UObjective* CurrentObjective,
+		float MCTSValueVariance,
+		float MCTSPolicyEntropy,
+		float MCTSVisitCount
+	);
 
 	/**
 	 * Export collected experiences to JSON file for Python training
@@ -169,13 +200,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RL")
 	bool IsReady() const { return bIsInitialized; }
 
-	/**
-	 * Get human-readable action name
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	static FString GetActionName(ETacticalAction Action);
-
-
 private:
 	// ========================================
 	// Neural Network Inference (ONNX)
@@ -194,48 +218,38 @@ private:
 	static TArray<float> Softmax(const TArray<float>& Logits);
 
 	// ========================================
-	// Rule-Based Fallback (for testing without trained model)
+	// Atomic Action Helpers (v3.0)
 	// ========================================
 
 	/**
-	 * Rule-based action selection (used when ONNX model not available)
-	 * Implements heuristics based on observation features
+	 * Generate atomic action from network output
+	 * @param NetworkOutput - 8-element output from neural network
+	 * @return Atomic action struct
 	 */
-	ETacticalAction SelectActionRuleBased(const FObservationElement& Observation);
+	FTacticalAction NetworkOutputToAction(const TArray<float>& NetworkOutput);
 
 	/**
-	 * Calculate heuristic action probabilities
+	 * Apply spatial mask to constrain action
+	 * @param Action - Raw action from network
+	 * @param Mask - Spatial constraints
+	 * @return Constrained action
 	 */
-	TArray<float> GetRuleBasedProbabilities(const FObservationElement& Observation);
-
-	// ========================================
-	// Helper Functions
-	// ========================================
-
-	/**
-	 * Sample action from probability distribution
-	 */
-	ETacticalAction SampleAction(const TArray<float>& Probabilities);
+	FTacticalAction ApplyMask(const FTacticalAction& Action, const FActionSpaceMask& Mask);
 
 	/**
-	 * Get action with highest probability
+	 * Generate rule-based atomic action (fallback when no trained model)
+	 * @param Observation - Current observation
+	 * @param CurrentObjective - Current objective context
+	 * @return Rule-based atomic action
 	 */
-	ETacticalAction GetGreedyAction(const TArray<float>& Probabilities);
+	FTacticalAction GetActionRuleBased(const FObservationElement& Observation, class UObjective* CurrentObjective);
 
 	/**
-	 * Get random action (for epsilon-greedy exploration)
+	 * Build objective embedding for network input
+	 * @param CurrentObjective - Current objective (can be nullptr)
+	 * @return 7-element objective embedding
 	 */
-	ETacticalAction GetRandomAction();
-
-	/**
-	 * Convert ETacticalAction to integer index
-	 */
-	static int32 ActionToIndex(ETacticalAction Action);
-
-	/**
-	 * Convert integer index to ETacticalAction
-	 */
-	static ETacticalAction IndexToAction(int32 Index);
+	TArray<float> GetObjectiveEmbedding(class UObjective* CurrentObjective);
 
 public:
 	// ========================================

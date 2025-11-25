@@ -10,6 +10,8 @@
 // Forward declarations
 class UTeamLeaderComponent;
 class URLPolicyNetwork;
+class URewardCalculator;
+class UObjective;
 struct FDamageEventData;
 struct FDeathEventData;
 
@@ -205,6 +207,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Follower|RL")
 	URLPolicyNetwork* GetTacticalPolicy() const { return TacticalPolicy; }
 
+	/** Set current objective for reward calculation (Sprint 4) */
+	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
+	void SetCurrentObjective(UObjective* Objective);
+
+	//--------------------------------------------------------------------------
+	// STATE TRANSITION LOGGING (Sprint 2 - World Model Training)
+	//--------------------------------------------------------------------------
+
+	/** Enable state transition logging for world model training */
+	UFUNCTION(BlueprintCallable, Category = "Follower|WorldModel")
+	void EnableStateTransitionLogging(bool bEnable = true);
+
+	/** Log current state for world model training */
+	UFUNCTION(BlueprintCallable, Category = "Follower|WorldModel")
+	void LogStateTransition();
+
+	/** Export logged state transitions to JSON */
+	UFUNCTION(BlueprintCallable, Category = "Follower|WorldModel")
+	bool ExportStateTransitions(const FString& FilePath);
+
 	//--------------------------------------------------------------------------
 	// UTILITY
 	//--------------------------------------------------------------------------
@@ -212,6 +234,14 @@ public:
 	/** Get team leader */
 	UFUNCTION(BlueprintPure, Category = "Follower|Team")
 	UTeamLeaderComponent* GetTeamLeader() const { return TeamLeader; }
+
+	/** Get reward calculator (Sprint 5) */
+	UFUNCTION(BlueprintPure, Category = "Follower|RL")
+	URewardCalculator* GetRewardCalculator() const { return RewardCalculator; }
+
+	/** Is follower alive? */
+	UFUNCTION(BlueprintPure, Category = "Follower|State")
+	bool GetIsAlive() const { return bIsAlive; }
 
 	/** Is registered with team leader? */
 	UFUNCTION(BlueprintPure, Category = "Follower|Team")
@@ -269,6 +299,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Components")
 	URLPolicyNetwork* TacticalPolicy = nullptr;
 
+	/** Reward calculator for hierarchical rewards (Sprint 4) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|Components")
+	URewardCalculator* RewardCalculator = nullptr;
+
 	/** Enable RL policy (if false, uses rule-based fallback) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|RL")
 	bool bUseRLPolicy = true;
@@ -305,10 +339,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
 	float TimeSinceLastCommand = 0.0f;
 
-	/** Last tactical action selected by RL policy */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
-	ETacticalAction LastTacticalAction = ETacticalAction::DefensiveHold;
-
 	/** Time since last tactical action was taken (seconds) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
 	float TimeSinceLastTacticalAction = 0.0f;
@@ -342,4 +372,23 @@ public:
 private:
 	/** Previous state (for state change detection) */
 	EFollowerState PreviousFollowerState = EFollowerState::Idle;
+
+	//--------------------------------------------------------------------------
+	// STATE TRANSITION LOGGING (Sprint 2)
+	//--------------------------------------------------------------------------
+
+	/** Enable state transition logging */
+	bool bLogStateTransitions = false;
+
+	/** Previous team observation (for transition logging) */
+	struct FTeamObservation PreviousTeamObservation;
+
+	/** Logged state transitions */
+	TArray<struct FStateTransitionSample> LoggedTransitions;
+
+	/** Time of last state log */
+	float LastStateLogTime = 0.0f;
+
+	/** Minimum time between state logs (seconds) */
+	float StateLogInterval = 1.0f;
 };

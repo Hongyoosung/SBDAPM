@@ -97,8 +97,8 @@ struct GAMEAI_PROJECT_API FSTTask_QueryRLPolicy : public FStateTreeTaskBase
 
 protected:
 	/** Query the RL policy and update context */
-	ETacticalAction QueryPolicy(FStateTreeExecutionContext& Context) const;
+	FTacticalAction QueryPolicy(FStateTreeExecutionContext& Context) const;
 
 	/** Get rule-based fallback action */
-	ETacticalAction GetFallbackAction(FStateTreeExecutionContext& Context) const;
+	FTacticalAction GetFallbackAction(FStateTreeExecutionContext& Context) const;
 };

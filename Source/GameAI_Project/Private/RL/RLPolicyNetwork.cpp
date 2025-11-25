@@ -9,6 +9,8 @@
 #include "NNEModelData.h"
 #include "NNERuntimeCPU.h"
 #include "Misc/Paths.h"
+#include "Team/Objective.h"
+#include "Observation/TeamObservation.h"
 
 URLPolicyNetwork::URLPolicyNetwork()
 	: bEnableExploration(true)
@@ -156,86 +158,10 @@ void URLPolicyNetwork::UnloadPolicy()
 }
 
 // ========================================
-// Inference
+// Experience Collection (v3.0)
 // ========================================
 
-ETacticalAction URLPolicyNetwork::SelectAction(const FObservationElement& Observation)
-{
-	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Selecting action for observation"));
-	if (!bIsInitialized)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Not initialized, returning default action"));
-		return ETacticalAction::DefensiveHold;
-	}
-
-	// Epsilon-greedy exploration
-	if (bEnableExploration && FMath::FRand() < Config.Epsilon)
-	{
-		ETacticalAction RandomAction = GetRandomAction();
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Exploring - selected random action: %s"),
-			*GetActionName(RandomAction));
-		return RandomAction;
-	}
-
-	// Get action probabilities
-	TArray<float> Probabilities = GetActionProbabilities(Observation);
-
-	// Select greedy action
-	ETacticalAction SelectedAction = GetGreedyAction(Probabilities);
-
-	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Exploiting - selected action: %s (prob: %.3f)"),
-		*GetActionName(SelectedAction),
-		Probabilities[ActionToIndex(SelectedAction)]);
-
-	return SelectedAction;
-}
-
-TArray<float> URLPolicyNetwork::GetActionProbabilities(const FObservationElement& Observation)
-{
-	if (!bIsInitialized)
-	{
-		// Return uniform distribution if not initialized
-		TArray<float> UniformProbs;
-		UniformProbs.SetNum(Config.OutputSize);
-		float UniformValue = 1.0f / Config.OutputSize;
-		for (int32 i = 0; i < Config.OutputSize; i++)
-		{
-			UniformProbs[i] = UniformValue;
-		}
-		return UniformProbs;
-	}
-
-	if (bUseONNXModel)
-	{
-		// ONNX inference
-		TArray<float> InputFeatures = Observation.ToFeatureVector();
-		return ForwardPass(InputFeatures);
-	}
-	else
-	{
-		// Rule-based fallback
-		return GetRuleBasedProbabilities(Observation);
-	}
-}
-
-float URLPolicyNetwork::GetActionValue(const FObservationElement& Observation, ETacticalAction Action)
-{
-	TArray<float> Probabilities = GetActionProbabilities(Observation);
-	int32 ActionIndex = ActionToIndex(Action);
-
-	if (ActionIndex >= 0 && ActionIndex < Probabilities.Num())
-	{
-		return Probabilities[ActionIndex];
-	}
-
-	return 0.0f;
-}
-
-// ========================================
-// Experience Collection
-// ========================================
-
-void URLPolicyNetwork::StoreExperience(const FObservationElement& State, ETacticalAction Action, float Reward, const FObservationElement& NextState, bool bTerminal)
+void URLPolicyNetwork::StoreExperience(const FObservationElement& State, const FTacticalAction& Action, float Reward, const FObservationElement& NextState, bool bTerminal, UObjective* CurrentObjective)
 {
 	if (!bCollectExperiences)
 	{
@@ -245,6 +171,10 @@ void URLPolicyNetwork::StoreExperience(const FObservationElement& State, ETactic
 	// Create experience
 	FRLExperience Experience(State, Action, Reward, NextState, bTerminal);
 	Experience.Timestamp = FPlatformTime::Seconds();
+
+	// Add objective embeddings
+	Experience.ObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
+	Experience.NextObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);  // Assume same objective for now
 
 	// Add to buffer
 	CollectedExperiences.Add(Experience);
@@ -295,6 +225,75 @@ void URLPolicyNetwork::StoreExperience(const FObservationElement& State, ETactic
 	}
 }
 
+void URLPolicyNetwork::StoreExperienceWithUncertainty(
+	const FObservationElement& State,
+	const FTacticalAction& Action,
+	float Reward,
+	const FObservationElement& NextState,
+	bool bTerminal,
+	UObjective* CurrentObjective,
+	float MCTSValueVariance,
+	float MCTSPolicyEntropy,
+	float MCTSVisitCount)
+{
+	if (!bCollectExperiences)
+	{
+		return;
+	}
+
+	// Create experience
+	FRLExperience Experience(State, Action, Reward, NextState, bTerminal);
+	Experience.Timestamp = FPlatformTime::Seconds();
+
+	// Add objective embeddings
+	Experience.ObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
+	Experience.NextObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
+
+	// Add MCTS uncertainty metrics (Sprint 3)
+	Experience.MCTSValueVariance = MCTSValueVariance;
+	Experience.MCTSPolicyEntropy = MCTSPolicyEntropy;
+	Experience.MCTSVisitCount = MCTSVisitCount;
+
+	// Add to buffer
+	CollectedExperiences.Add(Experience);
+
+	// Update statistics
+	TrainingStats.TotalExperiences++;
+	CurrentEpisodeReward += Reward;
+	CurrentEpisodeSteps++;
+
+	// Handle episode termination
+	if (bTerminal)
+	{
+		TrainingStats.EpisodesCompleted++;
+		TrainingStats.LastEpisodeReward = CurrentEpisodeReward;
+
+		if (CurrentEpisodeReward > TrainingStats.BestEpisodeReward)
+		{
+			TrainingStats.BestEpisodeReward = CurrentEpisodeReward;
+		}
+
+		// Update averages
+		float Alpha = 0.1f;
+		TrainingStats.AverageReward = Alpha * CurrentEpisodeReward + (1.0f - Alpha) * TrainingStats.AverageReward;
+		TrainingStats.AverageEpisodeLength = Alpha * CurrentEpisodeSteps + (1.0f - Alpha) * TrainingStats.AverageEpisodeLength;
+
+		// Reset episode counters
+		CurrentEpisodeReward = 0.0f;
+		CurrentEpisodeSteps = 0;
+
+		UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Episode complete (with MCTS tagging). Reward: %.2f, MCTS Variance: %.3f"),
+			TrainingStats.LastEpisodeReward, MCTSValueVariance);
+	}
+
+	// Check buffer overflow
+	if (CollectedExperiences.Num() > MaxExperienceBufferSize)
+	{
+		int32 RemoveCount = MaxExperienceBufferSize / 10;
+		CollectedExperiences.RemoveAt(0, RemoveCount);
+	}
+}
+
 bool URLPolicyNetwork::ExportExperiencesToJSON(const FString& FilePath)
 {
 	if (CollectedExperiences.Num() == 0)
@@ -319,8 +318,25 @@ bool URLPolicyNetwork::ExportExperiencesToJSON(const FString& FilePath)
 		}
 		ExpObject->SetArrayField(TEXT("state"), StateArray);
 
-		// Action (integer index)
-		ExpObject->SetNumberField(TEXT("action"), ActionToIndex(Exp.Action));
+		// Objective embedding (7 features)
+		TArray<TSharedPtr<FJsonValue>> ObjectiveArray;
+		for (float Feature : Exp.ObjectiveEmbedding)
+		{
+			ObjectiveArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
+		}
+		ExpObject->SetArrayField(TEXT("objective_embedding"), ObjectiveArray);
+
+		// Action (8-dimensional atomic action)
+		TArray<TSharedPtr<FJsonValue>> ActionArray;
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveDirection.X)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveDirection.Y)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveSpeed)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.LookDirection.X)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.LookDirection.Y)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bFire ? 1.0f : 0.0f)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bCrouch ? 1.0f : 0.0f)));
+		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bUseAbility ? 1.0f : 0.0f)));
+		ExpObject->SetArrayField(TEXT("action"), ActionArray);
 
 		// Reward
 		ExpObject->SetNumberField(TEXT("reward"), Exp.Reward);
@@ -334,11 +350,24 @@ bool URLPolicyNetwork::ExportExperiencesToJSON(const FString& FilePath)
 		}
 		ExpObject->SetArrayField(TEXT("next_state"), NextStateArray);
 
+		// Next objective embedding (7 features)
+		TArray<TSharedPtr<FJsonValue>> NextObjectiveArray;
+		for (float Feature : Exp.NextObjectiveEmbedding)
+		{
+			NextObjectiveArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
+		}
+		ExpObject->SetArrayField(TEXT("next_objective_embedding"), NextObjectiveArray);
+
 		// Terminal
 		ExpObject->SetBoolField(TEXT("terminal"), Exp.bTerminal);
 
 		// Timestamp
 		ExpObject->SetNumberField(TEXT("timestamp"), Exp.Timestamp);
+
+		// MCTS uncertainty metrics (Sprint 3 - Curriculum Learning)
+		ExpObject->SetNumberField(TEXT("mcts_value_variance"), Exp.MCTSValueVariance);
+		ExpObject->SetNumberField(TEXT("mcts_policy_entropy"), Exp.MCTSPolicyEntropy);
+		ExpObject->SetNumberField(TEXT("mcts_visit_count"), Exp.MCTSVisitCount);
 
 		ExperiencesArray.Add(MakeShareable(new FJsonValueObject(ExpObject)));
 	}
@@ -411,30 +440,6 @@ void URLPolicyNetwork::UpdateEpsilon()
 	Config.Epsilon = FMath::Max(Config.Epsilon * Config.EpsilonDecay, Config.MinEpsilon);
 }
 
-FString URLPolicyNetwork::GetActionName(ETacticalAction Action)
-{
-	switch (Action)
-	{
-		case ETacticalAction::AggressiveAssault: return TEXT("Aggressive Assault");
-		case ETacticalAction::CautiousAdvance: return TEXT("Cautious Advance");
-		case ETacticalAction::DefensiveHold: return TEXT("Defensive Hold");
-		case ETacticalAction::TacticalRetreat: return TEXT("Tactical Retreat");
-		case ETacticalAction::SeekCover: return TEXT("Seek Cover");
-		case ETacticalAction::FlankLeft: return TEXT("Flank Left");
-		case ETacticalAction::FlankRight: return TEXT("Flank Right");
-		case ETacticalAction::MaintainDistance: return TEXT("Maintain Distance");
-		case ETacticalAction::SuppressiveFire: return TEXT("Suppressive Fire");
-		case ETacticalAction::ProvideCoveringFire: return TEXT("Provide Covering Fire");
-		case ETacticalAction::Reload: return TEXT("Reload");
-		case ETacticalAction::UseAbility: return TEXT("Use Ability");
-		case ETacticalAction::Sprint: return TEXT("Sprint");
-		case ETacticalAction::Crouch: return TEXT("Crouch");
-		case ETacticalAction::Patrol: return TEXT("Patrol");
-		case ETacticalAction::Hold: return TEXT("Hold");
-		default: return TEXT("Unknown");
-	}
-}
-
 // ========================================
 // Neural Network Inference
 // ========================================
@@ -443,9 +448,10 @@ TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 {
 	if (!ModelInstance.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Model instance not valid, using rule-based fallback"));
-		FObservationElement DummyObs;
-		return GetRuleBasedProbabilities(DummyObs);
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Model instance not valid, returning zero action"));
+		TArray<float> ZeroAction;
+		ZeroAction.Init(0.0f, Config.OutputSize);
+		return ZeroAction;
 	}
 
 	// Copy input features to buffer
@@ -453,8 +459,9 @@ TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Input size mismatch (got %d, expected %d)"),
 			InputFeatures.Num(), Config.InputSize);
-		FObservationElement DummyObs;
-		return GetRuleBasedProbabilities(DummyObs);
+		TArray<float> ZeroAction;
+		ZeroAction.Init(0.0f, Config.OutputSize);
+		return ZeroAction;
 	}
 
 	// Prepare input tensor binding
@@ -496,8 +503,9 @@ TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 	if (SetInputStatus != UE::NNE::EResultStatus::Ok)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Failed to set input tensor shapes"));
-		FObservationElement DummyObs;
-		return GetRuleBasedProbabilities(DummyObs);
+		TArray<float> ZeroAction;
+		ZeroAction.Init(0.0f, Config.OutputSize);
+		return ZeroAction;
 	}
 
 	// Run inference
@@ -505,9 +513,10 @@ TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 
 	if (RunStatus != UE::NNE::EResultStatus::Ok)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Inference failed, using rule-based fallback"));
-		FObservationElement DummyObs;
-		return GetRuleBasedProbabilities(DummyObs);
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Inference failed, returning zero action"));
+		TArray<float> ZeroAction;
+		ZeroAction.Init(0.0f, Config.OutputSize);
+		return ZeroAction;
 	}
 
 	// Model already outputs softmax probabilities, return directly
@@ -547,21 +556,237 @@ TArray<float> URLPolicyNetwork::Softmax(const TArray<float>& Logits)
 }
 
 // ========================================
-// Rule-Based Fallback
+// Atomic Action Space (v3.0)
 // ========================================
 
-ETacticalAction URLPolicyNetwork::SelectActionRuleBased(const FObservationElement& Observation)
+FTacticalAction URLPolicyNetwork::GetAction(const FObservationElement& Observation, UObjective* CurrentObjective)
 {
-	TArray<float> Probabilities = GetRuleBasedProbabilities(Observation);
-	return GetGreedyAction(Probabilities);
+	FActionSpaceMask DefaultMask;  // No constraints
+	return GetActionWithMask(Observation, CurrentObjective, DefaultMask);
 }
 
-TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElement& Observation)
+FTacticalAction URLPolicyNetwork::GetActionWithMask(const FObservationElement& Observation, UObjective* CurrentObjective, const FActionSpaceMask& Mask)
 {
-	UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Using rule-based action selection"));
-	// Initialize probabilities (16 actions)
-	TArray<float> Probabilities;
-	Probabilities.Init(0.1f, 16);  // Small baseline probability for all actions
+	if (!bIsInitialized)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Not initialized, returning default action"));
+		FTacticalAction DefaultAction;
+		return DefaultAction;
+	}
+
+	if (bUseONNXModel && ModelInstance.IsValid())
+	{
+		// Build enhanced input: 71 observation + 7 objective embedding = 78 features
+		TArray<float> InputFeatures = Observation.ToFeatureVector();
+		TArray<float> ObjectiveEmbed = GetObjectiveEmbedding(CurrentObjective);
+		InputFeatures.Append(ObjectiveEmbed);
+
+		// Forward pass (expects 8-dim output: move_x, move_y, speed, look_x, look_y, fire, crouch, ability)
+		TArray<float> NetworkOutput = ForwardPass(InputFeatures);
+
+		// Convert to action
+		FTacticalAction Action = NetworkOutputToAction(NetworkOutput);
+
+		// Apply spatial constraints
+		return ApplyMask(Action, Mask);
+	}
+	else
+	{
+		// Rule-based fallback
+		FTacticalAction Action = GetActionRuleBased(Observation, CurrentObjective);
+		return ApplyMask(Action, Mask);
+	}
+}
+
+TArray<float> URLPolicyNetwork::GetObjectivePriors(const FTeamObservation& TeamObs)
+{
+	// v3.0 Sprint 4: Heuristic-based priors to guide MCTS
+	// These priors are calculated based on team state to provide intelligent initial guidance
+	// Future: Replace with learned priors from dual-head policy network
+
+	TArray<float> Priors;
+	Priors.Init(0.1f, 7);  // Start with small baseline probability
+
+	// Objective type indices (matching EObjectiveType enum)
+	const int32 ELIMINATE = 0;
+	const int32 CAPTURE_OBJ = 1;
+	const int32 DEFEND_OBJ = 2;
+	const int32 SUPPORT_ALLY = 3;
+	const int32 FORMATION_MOVE = 4;
+	const int32 RETREAT = 5;
+	const int32 RESCUE_ALLY = 6;
+
+	// Context-aware prior assignment
+	if (TeamObs.TotalVisibleEnemies > 0)
+	{
+		// COMBAT SITUATION
+		if (TeamObs.bOutnumbered && TeamObs.AverageTeamHealth < 50.0f)
+		{
+			// Outnumbered and weak → retreat highly preferred
+			Priors[RETREAT] = 0.4f;
+			Priors[DEFEND_OBJ] = 0.2f;
+			Priors[SUPPORT_ALLY] = 0.15f;
+			Priors[ELIMINATE] = 0.05f;
+		}
+		else if (TeamObs.bFlanked)
+		{
+			// Being flanked → defensive posture + support
+			Priors[DEFEND_OBJ] = 0.3f;
+			Priors[SUPPORT_ALLY] = 0.25f;
+			Priors[FORMATION_MOVE] = 0.2f;  // Regroup
+			Priors[ELIMINATE] = 0.1f;
+		}
+		else if (TeamObs.AverageTeamHealth > 70.0f && !TeamObs.bOutnumbered)
+		{
+			// Strong position → aggressive
+			Priors[ELIMINATE] = 0.35f;
+			Priors[CAPTURE_OBJ] = 0.25f;
+			Priors[SUPPORT_ALLY] = 0.15f;
+			Priors[DEFEND_OBJ] = 0.1f;
+		}
+		else
+		{
+			// Balanced combat → mixed tactics
+			Priors[ELIMINATE] = 0.25f;
+			Priors[DEFEND_OBJ] = 0.2f;
+			Priors[SUPPORT_ALLY] = 0.2f;
+			Priors[CAPTURE_OBJ] = 0.15f;
+		}
+	}
+	else
+	{
+		// NO ENEMIES VISIBLE
+		if (TeamObs.AverageTeamHealth < 40.0f)
+		{
+			// Low health, no enemies → recover and defend
+			Priors[DEFEND_OBJ] = 0.35f;
+			Priors[RESCUE_ALLY] = 0.25f;
+			Priors[FORMATION_MOVE] = 0.2f;
+		}
+		else if (TeamObs.DistanceToObjective > 1000.0f)
+		{
+			// Far from objective → advance and capture
+			Priors[FORMATION_MOVE] = 0.35f;
+			Priors[CAPTURE_OBJ] = 0.3f;
+			Priors[DEFEND_OBJ] = 0.15f;
+		}
+		else if (TeamObs.FormationCoherence < 0.5f)
+		{
+			// Formation broken → regroup
+			Priors[FORMATION_MOVE] = 0.4f;
+			Priors[DEFEND_OBJ] = 0.2f;
+			Priors[CAPTURE_OBJ] = 0.2f;
+		}
+		else
+		{
+			// Stable situation → objective-focused
+			Priors[CAPTURE_OBJ] = 0.35f;
+			Priors[DEFEND_OBJ] = 0.25f;
+			Priors[FORMATION_MOVE] = 0.2f;
+		}
+	}
+
+	// Normalize to sum to 1.0
+	float Sum = 0.0f;
+	for (float Prior : Priors)
+	{
+		Sum += Prior;
+	}
+	if (Sum > 0.0f)
+	{
+		for (int32 i = 0; i < Priors.Num(); ++i)
+		{
+			Priors[i] /= Sum;
+		}
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("RL Policy Priors: Eliminate=%.2f, Capture=%.2f, Defend=%.2f, Support=%.2f, Move=%.2f, Retreat=%.2f, Rescue=%.2f"),
+		Priors[ELIMINATE], Priors[CAPTURE_OBJ], Priors[DEFEND_OBJ], Priors[SUPPORT_ALLY],
+		Priors[FORMATION_MOVE], Priors[RETREAT], Priors[RESCUE_ALLY]);
+
+	return Priors;
+}
+
+FTacticalAction URLPolicyNetwork::NetworkOutputToAction(const TArray<float>& NetworkOutput)
+{
+	FTacticalAction Action;
+
+	// Network output format: [move_x, move_y, speed, look_x, look_y, fire_logit, crouch_logit, ability_logit]
+	if (NetworkOutput.Num() >= 8)
+	{
+		// Continuous actions (already normalized to [-1,1] or [0,1] by network)
+		Action.MoveDirection.X = FMath::Clamp(NetworkOutput[0], -1.0f, 1.0f);
+		Action.MoveDirection.Y = FMath::Clamp(NetworkOutput[1], -1.0f, 1.0f);
+		Action.MoveSpeed = FMath::Clamp(NetworkOutput[2], 0.0f, 1.0f);
+		Action.LookDirection.X = FMath::Clamp(NetworkOutput[3], -1.0f, 1.0f);
+		Action.LookDirection.Y = FMath::Clamp(NetworkOutput[4], -1.0f, 1.0f);
+
+		// Discrete actions (use sigmoid threshold: > 0.5 = true)
+		Action.bFire = NetworkOutput[5] > 0.5f;
+		Action.bCrouch = NetworkOutput[6] > 0.5f;
+		Action.bUseAbility = NetworkOutput[7] > 0.5f;
+
+		// AbilityID (if more outputs exist)
+		if (NetworkOutput.Num() > 8)
+		{
+			Action.AbilityID = FMath::RoundToInt(NetworkOutput[8]);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Invalid network output size %d, expected 8+"), NetworkOutput.Num());
+	}
+
+	return Action;
+}
+
+FTacticalAction URLPolicyNetwork::ApplyMask(const FTacticalAction& Action, const FActionSpaceMask& Mask)
+{
+	FTacticalAction ConstrainedAction = Action;
+
+	// Movement constraints
+	if (Mask.bLockMovementX)
+	{
+		ConstrainedAction.MoveDirection.X = 0.0f;
+	}
+	if (Mask.bLockMovementY)
+	{
+		ConstrainedAction.MoveDirection.Y = 0.0f;
+	}
+
+	// Speed constraints
+	ConstrainedAction.MoveSpeed = FMath::Min(ConstrainedAction.MoveSpeed, Mask.MaxSpeed);
+
+	// Sprint constraints
+	if (!Mask.bCanSprint && ConstrainedAction.MoveSpeed > 0.6f)
+	{
+		ConstrainedAction.MoveSpeed = 0.6f;  // Limit to walk speed
+	}
+
+	// Aiming constraints (convert 2D direction to angles)
+	// Note: Full angle constraint implementation would require current agent rotation
+	// For now, we just clamp the look direction vector
+	ConstrainedAction.LookDirection.X = FMath::Clamp(ConstrainedAction.LookDirection.X, -1.0f, 1.0f);
+	ConstrainedAction.LookDirection.Y = FMath::Clamp(ConstrainedAction.LookDirection.Y, -1.0f, 1.0f);
+
+	// Crouch constraints
+	if (Mask.bForceCrouch)
+	{
+		ConstrainedAction.bCrouch = true;
+	}
+
+	// Safety lock (disable firing)
+	if (Mask.bSafetyLock)
+	{
+		ConstrainedAction.bFire = false;
+	}
+
+	return ConstrainedAction;
+}
+
+FTacticalAction URLPolicyNetwork::GetActionRuleBased(const FObservationElement& Observation, UObjective* CurrentObjective)
+{
+	FTacticalAction Action;
 
 	// Extract key features
 	float Health = Observation.AgentHealth;
@@ -569,127 +794,94 @@ TArray<float> URLPolicyNetwork::GetRuleBasedProbabilities(const FObservationElem
 	bool bHasCover = Observation.bHasCover;
 	float NearestCoverDistance = Observation.NearestCoverDistance;
 
-	// Calculate nearest enemy distance
+	// Calculate nearest enemy direction
+	FVector2D EnemyDirection = FVector2D::ZeroVector;
 	float NearestEnemyDistance = MAX_FLT;
 	if (Observation.NearbyEnemies.Num() > 0)
 	{
 		NearestEnemyDistance = Observation.NearbyEnemies[0].Distance;
+		// Approximate direction from bearing (simplified)
+		float Bearing = Observation.NearbyEnemies[0].RelativeBearing;
+		EnemyDirection.X = FMath::Sin(FMath::DegreesToRadians(Bearing));
+		EnemyDirection.Y = FMath::Cos(FMath::DegreesToRadians(Bearing));
 	}
 
-	// Rule 1: Low health → Seek cover or retreat
+	// Rule-based movement
 	if (Health < 30.0f)
 	{
-		Probabilities[ActionToIndex(ETacticalAction::TacticalRetreat)] += 5.0f;
-		Probabilities[ActionToIndex(ETacticalAction::SeekCover)] += 4.0f;
-		Probabilities[ActionToIndex(ETacticalAction::DefensiveHold)] += 2.0f;
-		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 1 triggered: Low health (%.1f%%) → Retreat/Cover/DefensiveHold"), Health);
+		// Low health: retreat away from enemies
+		Action.MoveDirection = -EnemyDirection;  // Move away
+		Action.MoveSpeed = 1.0f;  // Sprint
+		Action.bCrouch = false;
 	}
-
-	// Rule 2: No cover and enemies visible → Seek cover
-	if (!bHasCover && VisibleEnemies > 0 && NearestCoverDistance < 500.0f)
+	else if (!bHasCover && VisibleEnemies > 0 && NearestCoverDistance < 500.0f)
 	{
-		Probabilities[ActionToIndex(ETacticalAction::SeekCover)] += 6.0f;
-		Probabilities[ActionToIndex(ETacticalAction::Sprint)] += 3.0f;
+		// No cover, seek it (move perpendicular to enemy)
+		Action.MoveDirection = FVector2D(-EnemyDirection.Y, EnemyDirection.X);  // Perpendicular
+		Action.MoveSpeed = 0.8f;
+		Action.bCrouch = false;
 	}
-
-	// Rule 3: Healthy + cover + enemies visible → Aggressive tactics
-	if (Health > 70.0f && bHasCover && VisibleEnemies > 0)
+	else if (VisibleEnemies > 0)
 	{
-		Probabilities[ActionToIndex(ETacticalAction::AggressiveAssault)] += 4.0f;
-		Probabilities[ActionToIndex(ETacticalAction::SuppressiveFire)] += 3.0f;
-		Probabilities[ActionToIndex(ETacticalAction::FlankLeft)] += 2.0f;
-		Probabilities[ActionToIndex(ETacticalAction::FlankRight)] += 2.0f;
-	}
-
-	// Rule 4: Enemies very close → Aggressive tactics (changed from defensive)
-	if (NearestEnemyDistance < 200.0f)
-	{
-		Probabilities[ActionToIndex(ETacticalAction::AggressiveAssault)] += 5.0f;  // Changed from DefensiveHold
-		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 4 triggered: Enemy very close (%.1f units) → AggressiveAssault"), NearestEnemyDistance);
-		if (Health < 50.0f)
+		// Enemies visible: cautious advance or hold
+		if (Health > 70.0f)
 		{
-			Probabilities[ActionToIndex(ETacticalAction::TacticalRetreat)] += 4.0f;
+			Action.MoveDirection = EnemyDirection * 0.3f;  // Slow advance
+			Action.MoveSpeed = 0.4f;
 		}
-	}
-
-	// Rule 5: No enemies visible → Patrol or cautious advance
-	if (VisibleEnemies == 0)
-	{
-		Probabilities[ActionToIndex(ETacticalAction::Patrol)] += 3.0f;
-		Probabilities[ActionToIndex(ETacticalAction::CautiousAdvance)] += 2.0f;
-		Probabilities[ActionToIndex(ETacticalAction::Hold)] += 2.0f;
-		UE_LOG(LogTemp, Warning, TEXT("[RL POLICY] Rule 5 triggered: No enemies visible → Patrol/CautiousAdvance/Hold"));
-	}
-
-	// Rule 6: Multiple enemies → Seek cover + suppressive fire
-	if (VisibleEnemies >= 3)
-	{
-		Probabilities[ActionToIndex(ETacticalAction::SeekCover)] += 4.0f;
-		Probabilities[ActionToIndex(ETacticalAction::SuppressiveFire)] += 4.0f;
-		Probabilities[ActionToIndex(ETacticalAction::ProvideCoveringFire)] += 3.0f;
-	}
-
-	// Normalize to probabilities
-	return Softmax(Probabilities);
-}
-
-// ========================================
-// Helper Functions
-// ========================================
-
-ETacticalAction URLPolicyNetwork::SampleAction(const TArray<float>& Probabilities)
-{
-	float RandomValue = FMath::FRand();
-	float CumulativeProbability = 0.0f;
-
-	for (int32 i = 0; i < Probabilities.Num(); i++)
-	{
-		CumulativeProbability += Probabilities[i];
-		if (RandomValue <= CumulativeProbability)
+		else
 		{
-			return IndexToAction(i);
+			Action.MoveDirection = FVector2D::ZeroVector;  // Hold position
+			Action.MoveSpeed = 0.0f;
 		}
+		Action.bCrouch = true;  // Use cover
 	}
-
-	// Fallback (should never reach here)
-	return IndexToAction(Probabilities.Num() - 1);
-}
-
-ETacticalAction URLPolicyNetwork::GetGreedyAction(const TArray<float>& Probabilities)
-{
-	int32 BestActionIndex = 0;
-	float BestProbability = -1.0f;
-
-	for (int32 i = 0; i < Probabilities.Num(); i++)
+	else
 	{
-		if (Probabilities[i] > BestProbability)
-		{
-			BestProbability = Probabilities[i];
-			BestActionIndex = i;
-		}
+		// No enemies: patrol forward
+		Action.MoveDirection = FVector2D(0.0f, 1.0f);  // Forward
+		Action.MoveSpeed = 0.5f;
+		Action.bCrouch = false;
 	}
 
-	return IndexToAction(BestActionIndex);
-}
-
-ETacticalAction URLPolicyNetwork::GetRandomAction()
-{
-	int32 RandomIndex = FMath::RandRange(0, Config.OutputSize - 1);
-	return IndexToAction(RandomIndex);
-}
-
-int32 URLPolicyNetwork::ActionToIndex(ETacticalAction Action)
-{
-	return static_cast<int32>(Action);
-}
-
-ETacticalAction URLPolicyNetwork::IndexToAction(int32 Index)
-{
-	if (Index < 0 || Index >= 16)
+	// Rule-based aiming
+	if (VisibleEnemies > 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Invalid action index %d, returning default"), Index);
-		return ETacticalAction::DefensiveHold;
+		// Aim at nearest enemy
+		Action.LookDirection = EnemyDirection;
+		Action.bFire = (NearestEnemyDistance < 1000.0f);  // Fire if in range
+	}
+	else
+	{
+		// Look forward
+		Action.LookDirection = FVector2D(0.0f, 1.0f);
+		Action.bFire = false;
 	}
 
-	return static_cast<ETacticalAction>(Index);
+	// Ability usage (simple heuristic)
+	Action.bUseAbility = (Health < 50.0f && VisibleEnemies > 2);  // Use ability when outnumbered
+	Action.AbilityID = 0;
+
+	UE_LOG(LogTemp, VeryVerbose, TEXT("Rule-based action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d Crouch=%d"),
+		Action.MoveDirection.X, Action.MoveDirection.Y, Action.MoveSpeed,
+		Action.LookDirection.X, Action.LookDirection.Y, Action.bFire, Action.bCrouch);
+
+	return Action;
+}
+
+TArray<float> URLPolicyNetwork::GetObjectiveEmbedding(UObjective* CurrentObjective)
+{
+	// 7-element one-hot encoding for objective type
+	TArray<float> Embedding;
+	Embedding.Init(0.0f, 7);
+
+	if (CurrentObjective)
+	{
+		// TODO: Get objective type from CurrentObjective->Type
+		// For now, default to first type (Eliminate)
+		Embedding[0] = 1.0f;
+	}
+	// If null objective, return all zeros (no objective)
+
+	return Embedding;
 }

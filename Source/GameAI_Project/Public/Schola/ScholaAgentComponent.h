@@ -8,7 +8,6 @@
 
 class UFollowerAgentComponent;
 class UTacticalObserver;
-class UTacticalActuator;
 class UTacticalRewardProvider;
 
 /**
@@ -16,7 +15,6 @@ class UTacticalRewardProvider;
  *
  * This component attaches to follower pawns and:
  * - Exposes 71-feature tactical observations (TacticalObserver)
- * - Receives 16 discrete tactical actions (TacticalActuator)
  * - Provides combat rewards (TacticalRewardProvider)
  * - Bridges between FollowerAgentComponent and Schola's InferenceComponent
  *
@@ -28,7 +26,7 @@ class UTacticalRewardProvider;
  * 1. Add InferenceComponent (from Schola plugin) to follower pawn
  * 2. Add ScholaAgentComponent to the same pawn
  * 3. Ensure FollowerAgentComponent is on the same pawn
- * 4. Component auto-configures observers/actuators/rewards
+ * 4. Component auto-configures observers/rewards
  * 5. Start UE with Schola server enabled
  * 6. Run Python training script (train_rllib.py)
  */
@@ -67,10 +65,6 @@ public:
 	/** Tactical observer (71 features) */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Schola|Components")
 	UTacticalObserver* TacticalObserver = nullptr;
-
-	/** Tactical actuator (16 discrete actions) */
-	UPROPERTY(EditAnywhere, Instanced, Category = "Schola|Components")
-	UTacticalActuator* TacticalActuator = nullptr;
 
 	/** Tactical reward provider (combat events) */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Schola|Components")
@@ -112,9 +106,6 @@ private:
 
 	/** Configure observers (TacticalObserver) */
 	void ConfigureObservers();
-
-	/** Configure actuators (TacticalActuator) */
-	void ConfigureActuators();
 
 	/** Configure reward provider */
 	void ConfigureRewardProvider();

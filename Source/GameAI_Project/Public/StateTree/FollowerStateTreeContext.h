@@ -13,6 +13,7 @@ class UFollowerAgentComponent;
 class URLPolicyNetwork;
 class AAIController;
 class UTeamLeaderComponent;
+class UObjective;
 
 /**
  * State Tree Shared Context for Follower Agents
@@ -71,9 +72,9 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	// TACTICAL STATE (Updated by RL policy and execution tasks)
 	//--------------------------------------------------------------------------
 
-	/** Last tactical action selected by RL policy */
+	/** Current atomic action from RL policy (8-dimensional) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
-	ETacticalAction CurrentTacticalAction = ETacticalAction::DefensiveHold;
+	FTacticalAction CurrentAtomicAction;
 
 	/** Time in current tactical action (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
@@ -82,6 +83,18 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	/** Progress of current action (0-1) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tactical")
 	float ActionProgress = 0.0f;
+
+	//--------------------------------------------------------------------------
+	// OBJECTIVE & SPATIAL CONTEXT (Sprint 3 - Atomic Actions)
+	//--------------------------------------------------------------------------
+
+	/** Current objective assigned to this agent */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	TObjectPtr<UObjective> CurrentObjective = nullptr;
+
+	/** Action space mask for spatial constraints */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")
+	FActionSpaceMask ActionMask;
 
 	//--------------------------------------------------------------------------
 	// OBSERVATION DATA (Updated every tick by evaluator)

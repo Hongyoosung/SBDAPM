@@ -203,4 +203,16 @@ struct GAMEAI_PROJECT_API FTeamObservation
         const FTeamObservation& A,
         const FTeamObservation& B
     );
+
+    /** Flatten team observation to feature vector (for world model) */
+    TArray<float> Flatten() const;
+
+    /** Apply state delta to create predicted next state */
+    FTeamObservation ApplyDelta(const struct FTeamStateDelta& Delta) const;
+
+    /** Deep clone observation */
+    FTeamObservation Clone() const;
+
+    /** Serialize to JSON for world model training */
+    FString Serialize() const;
 };

@@ -1,6 +1,10 @@
 #include "AI/MCTS/MCTS.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Team/TeamTypes.h"
+#include "Team/ObjectiveManager.h"
+#include "Team/Objective.h"
+#include "RL/TeamValueNetwork.h"
+#include "RL/RLPolicyNetwork.h"
 
 UMCTS::UMCTS()
     : MaxSimulations(500)
@@ -20,21 +24,50 @@ void UMCTS::InitializeTeamMCTS(int32 InMaxSimulations, float InExplorationParam)
     MaxSimulations = InMaxSimulations;
     ExplorationParameter = InExplorationParam;
 
+    // Initialize Value Network (v3.0)
+    ValueNetwork = NewObject<UTeamValueNetwork>(this);
+    if (ValueNetwork)
+    {
+        ValueNetwork->Initialize(10);  // Max 10 agents per team
+
+        // Try to load trained model (fallback to heuristic if not found)
+        FString ModelPath = TEXT("Models/team_value_network.onnx");
+        if (!ValueNetwork->LoadModel(ModelPath))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: ValueNetwork model not loaded, using heuristic fallback"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("MCTS: ValueNetwork loaded successfully"));
+        }
+    }
+
+    // Initialize RL Policy Network for priors (v3.0 Sprint 4)
+    RLPolicyNetwork = NewObject<URLPolicyNetwork>(this);
+    if (RLPolicyNetwork)
+    {
+        FRLPolicyConfig PolicyConfig;
+        PolicyConfig.InputSize = 78;  // 71 observation + 7 objective
+        PolicyConfig.OutputSize = 8;  // 8 atomic action dimensions
+        RLPolicyNetwork->Initialize(PolicyConfig);
+
+        // Try to load trained policy (fallback to heuristic priors if not found)
+        FString PolicyModelPath = TEXT("Models/rl_policy_network.onnx");
+        if (!RLPolicyNetwork->LoadPolicy(PolicyModelPath))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: RL Policy model not loaded, using heuristic priors"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("MCTS: RL Policy loaded successfully for priors"));
+        }
+    }
+
     UE_LOG(LogTemp, Log, TEXT("MCTS: Initialized for team-level decisions (Simulations: %d, Exploration: %.2f)"),
         MaxSimulations, ExplorationParameter);
 }
 
 
-TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTS(
-    const FTeamObservation& TeamObservation,
-    const TArray<AActor*>& Followers)
-{
-    UE_LOG(LogTemp, Log, TEXT("MCTS: Running team-level tree search for %d followers (%d simulations)"),
-        Followers.Num(), MaxSimulations);
-
-    // Always use full MCTS tree search
-    return RunTeamMCTSTreeSearch(TeamObservation, Followers);
-}
 
 
 float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs) const
@@ -379,95 +412,6 @@ TMap<AActor*, FStrategicCommand> UMCTS::GenerateStrategicCommandsHeuristic(
 }
 
 
-//==============================================================================
-// MCTS TREE SEARCH IMPLEMENTATION
-//==============================================================================
-
-TMap<AActor*, FStrategicCommand> UMCTS::RunTeamMCTSTreeSearch(
-    const FTeamObservation& TeamObs,
-    const TArray<AActor*>& Followers)
-{
-    UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS TREE SEARCH: Starting for %d followers (%d simulations)"),
-        Followers.Num(), MaxSimulations);
-
-    // Cache observation for simulation phase
-    CachedTeamObservation = TeamObs;
-
-    // Create root node with empty command assignment
-    TeamRootNode = MakeShared<FTeamMCTSNode>();
-    TMap<AActor*, FStrategicCommand> InitialCommands;
-    TeamRootNode->Initialize(nullptr, InitialCommands);
-
-    // Generate initial untried actions for root
-    TeamRootNode->UntriedActions = GenerateCommandCombinations(Followers, TeamObs, MaxCombinationsPerExpansion);
-
-    UE_LOG(LogTemp, Display, TEXT("🌲 MCTS: Root initialized with %d possible combinations"),
-        TeamRootNode->UntriedActions.Num());
-
-    // Early exit if no combinations generated
-    if (TeamRootNode->UntriedActions.Num() == 0)
-    {
-        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS: No command combinations generated! Falling back to baseline heuristic"));
-        return GenerateStrategicCommandsHeuristic(TeamObs, Followers);
-    }
-
-    // Run MCTS simulations
-    for (int32 i = 0; i < MaxSimulations; ++i)
-    {
-        TSharedPtr<FTeamMCTSNode> LeafNode = SelectNode(TeamRootNode);
-
-        if (!LeafNode.IsValid())
-        {
-            break;
-        }
-
-        TSharedPtr<FTeamMCTSNode> NodeToSimulate = LeafNode;
-
-        if (!LeafNode->IsTerminal() && LeafNode->VisitCount > 0)
-        {
-            NodeToSimulate = ExpandNode(LeafNode, Followers);
-            if (!NodeToSimulate.IsValid())
-            {
-                NodeToSimulate = LeafNode;
-            }
-        }
-
-        float Reward = SimulateNode(NodeToSimulate, TeamObs);
-        NodeToSimulate->Backpropagate(Reward);
-    }
-
-    TSharedPtr<FTeamMCTSNode> BestChild = nullptr;
-    int32 MaxVisits = 0;
-
-    for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
-    {
-        if (Child.IsValid() && Child->VisitCount > MaxVisits)
-        {
-            MaxVisits = Child->VisitCount;
-            BestChild = Child;
-        }
-    }
-
-    if (BestChild.IsValid())
-    {
-        float AvgReward = BestChild->TotalReward / FMath::Max(1, BestChild->VisitCount);
-        UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS TREE SEARCH: Best child found (Visits: %d, Avg Reward: %.1f)"),
-            MaxVisits, AvgReward);
-        return BestChild->GetCommands();
-    }
-    else if (TeamRootNode->VisitCount > 0)
-    {
-        // Root was simulated but no children - return root commands
-        UE_LOG(LogTemp, Warning, TEXT("🌲 MCTS: No children expanded, using root node commands"));
-        return TeamRootNode->GetCommands();
-    }
-    else
-    {
-        // Complete failure - use baseline heuristic as emergency fallback
-        UE_LOG(LogTemp, Error, TEXT("🌲 MCTS TREE SEARCH FAILED: No simulations completed! Using baseline heuristic fallback"));
-        return GenerateStrategicCommandsHeuristic(TeamObs, Followers);
-    }
-}
 
 
 TSharedPtr<FTeamMCTSNode> UMCTS::SelectNode(TSharedPtr<FTeamMCTSNode> Node)
@@ -499,13 +443,12 @@ TSharedPtr<FTeamMCTSNode> UMCTS::ExpandNode(TSharedPtr<FTeamMCTSNode> Node, cons
 {
     if (!Node.IsValid()) return nullptr;
 
+    // v3.0: UntriedActions should be pre-populated by objective-based MCTS
+    // If empty, there's nothing to expand
     if (Node->UntriedActions.Num() == 0)
     {
-        Node->UntriedActions = GenerateCommandCombinations(
-            Followers,
-            CachedTeamObservation,
-            MaxCombinationsPerExpansion
-        );
+        UE_LOG(LogTemp, Warning, TEXT("MCTS::ExpandNode: No untried actions available for expansion"));
+        return nullptr;
     }
 
     return Node->Expand(Followers);
@@ -516,136 +459,927 @@ float UMCTS::SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation
 {
     if (!Node.IsValid()) return 0.0f;
 
-    TMap<AActor*, FStrategicCommand> Commands = Node->GetCommands();
+    // v3.0 Sprint 2: Use WorldModel for multi-step rollout, then ValueNetwork for leaf evaluation
+    FTeamObservation CurrentState = TeamObs;
+    float AccumulatedReward = 0.0f;
 
-    // If no commands assigned yet, use heuristic
-    if (Commands.Num() == 0)
+    // If WorldModel is available, perform multi-step rollout
+    if (WorldModel && WorldModel->IsReady())
     {
-        return CalculateTeamReward(TeamObs) * 0.5f; // Base reward
+        TMap<AActor*, FStrategicCommand> Commands = Node->GetCommands();
+
+        // Convert commands to arrays for world model input
+        TArray<FStrategicCommand> CommandArray;
+        TArray<ETacticalAction> TacticalActions;
+
+        for (auto& Pair : Commands)
+        {
+            CommandArray.Add(Pair.Value);
+            // Placeholder: In full implementation, query RL policy for tactical actions
+            TacticalActions.Add(ETacticalAction::Advance);
+        }
+
+        // Perform multi-step rollout (5 steps default)
+        const int32 RolloutSteps = 5;
+        TArray<TArray<FStrategicCommand>> CommandSequence;
+        TArray<TArray<ETacticalAction>> ActionSequence;
+
+        for (int32 i = 0; i < RolloutSteps; ++i)
+        {
+            CommandSequence.Add(CommandArray);
+            ActionSequence.Add(TacticalActions);
+        }
+
+        TArray<FWorldModelPrediction> Predictions = WorldModel->PredictRollout(
+            CurrentState, CommandSequence, ActionSequence, RolloutSteps
+        );
+
+        // Accumulate rewards from predictions
+        for (int32 i = 0; i < Predictions.Num(); ++i)
+        {
+            const FWorldModelPrediction& Pred = Predictions[i];
+
+            // Apply predicted delta to get next state
+            CurrentState = CurrentState.ApplyDelta(Pred.PredictedDelta);
+
+            // Calculate reward from predicted state
+            float StepReward = CalculateTeamReward(CurrentState);
+
+            // Discount future rewards
+            float Discount = FMath::Pow(DiscountFactor, i + 1);
+            AccumulatedReward += StepReward * Discount;
+        }
+
+        UE_LOG(LogTemp, VeryVerbose, TEXT("MCTS: WorldModel rollout (%d steps) = %.3f"),
+            Predictions.Num(), AccumulatedReward);
     }
 
-    // Calculate reward based on command synergy and team state
-    return CalculateTeamReward(TeamObs, Commands);
+    // Use ValueNetwork for final state evaluation
+    if (ValueNetwork && ValueNetwork->IsReady())
+    {
+        float Value = ValueNetwork->EvaluateState(CurrentState);
+
+        // Convert from [-1, 1] to reward scale and add to accumulated reward
+        float FinalValue = Value * 250.0f;
+        AccumulatedReward += FinalValue * FMath::Pow(DiscountFactor, 5); // Discount final value
+
+        UE_LOG(LogTemp, VeryVerbose, TEXT("MCTS: ValueNetwork estimate = %.3f, Total = %.3f"),
+            FinalValue, AccumulatedReward);
+
+        return AccumulatedReward;
+    }
+    else
+    {
+        // Fallback to hand-crafted heuristic evaluation if no neural networks available
+        TMap<AActor*, FStrategicCommand> Commands = Node->GetCommands();
+
+        // If no commands assigned yet, use base heuristic
+        if (Commands.Num() == 0)
+        {
+            return CalculateTeamReward(TeamObs) * 0.5f;
+        }
+
+        // Calculate reward based on command synergy and team state
+        return CalculateTeamReward(TeamObs, Commands);
+    }
 }
 
 
-TArray<TMap<AActor*, FStrategicCommand>> UMCTS::GenerateCommandCombinations(
+
+
+
+
+//==============================================================================
+// v3.0 COMBAT REFACTORING: OBJECTIVE-BASED MCTS
+//==============================================================================
+
+TArray<TMap<AActor*, UObjective*>> UMCTS::GenerateObjectiveAssignments(
     const TArray<AActor*>& Followers,
     const FTeamObservation& TeamObs,
+    UObjectiveManager* ObjectiveManager,
     int32 MaxCombinations) const
 {
-    TArray<TMap<AActor*, FStrategicCommand>> Combinations;
+    TArray<TMap<AActor*, UObjective*>> Assignments;
 
-    if (Followers.Num() == 0)
+    if (Followers.Num() == 0 || !ObjectiveManager)
     {
-        UE_LOG(LogTemp, Warning, TEXT("GenerateCommandCombinations: No followers provided"));
-        return Combinations;
+        UE_LOG(LogTemp, Warning, TEXT("GenerateObjectiveAssignments: Invalid input (Followers=%d, ObjMgr=%s)"),
+            Followers.Num(), ObjectiveManager ? TEXT("Valid") : TEXT("Null"));
+        return Assignments;
     }
 
-    // Available command types (strategic level)
-    TArray<EStrategicCommandType> PossibleCommands = {
-        EStrategicCommandType::Assault,
-        EStrategicCommandType::TakeCover,
-        EStrategicCommandType::Support,
-        EStrategicCommandType::Retreat,
-        EStrategicCommandType::Advance,
-        EStrategicCommandType::HoldPosition
+    // Available objective types (7 strategic objectives)
+    TArray<EObjectiveType> PossibleObjectives = {
+        EObjectiveType::Eliminate,
+        EObjectiveType::CaptureObjective,
+        EObjectiveType::DefendObjective,
+        EObjectiveType::SupportAlly,
+        EObjectiveType::FormationMove,
+        EObjectiveType::Retreat,
+        EObjectiveType::RescueAlly
     };
 
-    // Generate diverse command combinations using sampling
+    UE_LOG(LogTemp, Display, TEXT("🎯 [UCB] Generating %d objective assignments for %d followers"),
+        MaxCombinations, Followers.Num());
+
+    // Sprint 5: UCB-based progressive widening
+    // 1. Compute objective scores for each follower-objective pair
+    // 2. Greedily select top-K objectives per follower
+    // 3. Combine with synergy bonuses
+    // 4. Add exploration with epsilon-greedy
+
+    const int32 TopKPerFollower = 3; // Top-3 objectives per follower
+    const float EpsilonExploration = 0.2f; // 20% random exploration
+
+    // Build scored objectives for each follower
+    TMap<AActor*, TArray<TPair<EObjectiveType, float>>> FollowerObjectiveScores;
+
+    for (AActor* Follower : Followers)
+    {
+        if (!Follower) continue;
+
+        TArray<TPair<EObjectiveType, float>> Scores;
+
+        for (EObjectiveType ObjType : PossibleObjectives)
+        {
+            float Score = CalculateObjectiveScore(Follower, ObjType, TeamObs);
+            Scores.Add(TPair<EObjectiveType, float>(ObjType, Score));
+        }
+
+        // Sort by score (descending)
+        Scores.Sort([](const TPair<EObjectiveType, float>& A, const TPair<EObjectiveType, float>& B) {
+            return A.Value > B.Value;
+        });
+
+        FollowerObjectiveScores.Add(Follower, Scores);
+    }
+
+    // Generate combinations using greedy + synergy approach
     for (int32 i = 0; i < MaxCombinations; ++i)
     {
-        TMap<AActor*, FStrategicCommand> Combo;
+        TMap<AActor*, UObjective*> Assignment;
+        TMap<AActor*, EObjectiveType> SelectedTypes; // Track for synergy calculation
 
-        for (AActor* Follower : Followers)
+        // Epsilon-greedy: Sometimes explore randomly
+        bool bExplore = (FMath::FRand() < EpsilonExploration);
+
+        if (bExplore)
         {
-            if (!Follower) continue;
-
-            // Pick random command type
-            int32 RandomIndex = FMath::RandRange(0, PossibleCommands.Num() - 1);
-            EStrategicCommandType CommandType = PossibleCommands[RandomIndex];
-
-            FStrategicCommand Command;
-            Command.CommandType = CommandType;
-            Command.Priority = 7;
-
-            // Assign target if enemies available
-            if (TeamObs.TrackedEnemies.Num() > 0)
+            // Random assignment (exploration)
+            for (AActor* Follower : Followers)
             {
+                if (!Follower) continue;
 
-                TArray<AActor*> TrackedEnemiesArray = TeamObs.TrackedEnemies.Array();
+                int32 RandomIndex = FMath::RandRange(0, PossibleObjectives.Num() - 1);
+                EObjectiveType ObjType = PossibleObjectives[RandomIndex];
+                SelectedTypes.Add(Follower, ObjType);
+            }
+        }
+        else
+        {
+            // Greedy selection with synergy (exploitation)
+            for (AActor* Follower : Followers)
+            {
+                if (!Follower) continue;
 
-                int32 EnemyIndex = FMath::RandRange(0, TrackedEnemiesArray.Num() - 1);
+                const TArray<TPair<EObjectiveType, float>>* Scores = FollowerObjectiveScores.Find(Follower);
+                if (!Scores || Scores->Num() == 0) continue;
 
-                // 3. TArray에서 타겟을 가져옵니다.
-                Command.TargetActor = TrackedEnemiesArray[EnemyIndex];
+                // Pick from top-K with probability weighted by score
+                int32 K = FMath::Min(TopKPerFollower, Scores->Num());
+                TArray<TPair<EObjectiveType, float>> TopK = Scores->GetData();
+                TopK.SetNum(K);
 
-                if (Command.TargetActor)
+                // Apply synergy bonus based on already selected objectives
+                for (auto& ScorePair : TopK)
                 {
-                    Command.TargetLocation = Command.TargetActor->GetActorLocation();
+                    float SynergyBonus = CalculateObjectiveSynergy(ScorePair.Key, SelectedTypes, TeamObs);
+                    ScorePair.Value += SynergyBonus;
+                }
+
+                // Softmax selection from top-K
+                float TotalScore = 0.0f;
+                for (const auto& ScorePair : TopK)
+                {
+                    TotalScore += FMath::Exp(ScorePair.Value);
+                }
+
+                float RandomValue = FMath::FRand() * TotalScore;
+                float CumulativeScore = 0.0f;
+                EObjectiveType SelectedType = TopK[0].Key;
+
+                for (const auto& ScorePair : TopK)
+                {
+                    CumulativeScore += FMath::Exp(ScorePair.Value);
+                    if (RandomValue <= CumulativeScore)
+                    {
+                        SelectedType = ScorePair.Key;
+                        break;
+                    }
+                }
+
+                SelectedTypes.Add(Follower, SelectedType);
+            }
+        }
+
+        // Create actual objectives from selected types
+        for (const auto& Pair : SelectedTypes)
+        {
+            AActor* Follower = Pair.Key;
+            EObjectiveType ObjType = Pair.Value;
+
+            AActor* TargetActor = nullptr;
+            FVector TargetLocation = FVector::ZeroVector;
+            int32 Priority = 5;
+
+            // Select target based on objective type (same logic as before)
+            switch (ObjType)
+            {
+                case EObjectiveType::Eliminate:
+                    if (TeamObs.TrackedEnemies.Num() > 0)
+                    {
+                        TArray<AActor*> EnemyArray = TeamObs.TrackedEnemies.Array();
+                        TargetActor = EnemyArray[FMath::RandRange(0, EnemyArray.Num() - 1)];
+                        Priority = 7;
+                    }
+                    break;
+
+                case EObjectiveType::SupportAlly:
+                    if (Followers.Num() > 1)
+                    {
+                        TArray<AActor*> OtherFollowers = Followers;
+                        OtherFollowers.Remove(Follower);
+                        if (OtherFollowers.Num() > 0)
+                        {
+                            TargetActor = OtherFollowers[FMath::RandRange(0, OtherFollowers.Num() - 1)];
+                            Priority = 6;
+                        }
+                    }
+                    break;
+
+                case EObjectiveType::CaptureObjective:
+                    TargetLocation = TeamObs.TeamCentroid;
+                    Priority = 8;
+                    break;
+
+                case EObjectiveType::DefendObjective:
+                    TargetLocation = TeamObs.TeamCentroid;
+                    Priority = 7;
+                    break;
+
+                case EObjectiveType::FormationMove:
+                    TargetLocation = TeamObs.TeamCentroid;
+                    Priority = 5;
+                    break;
+
+                case EObjectiveType::Retreat:
+                    if (TeamObs.TrackedEnemies.Num() > 0)
+                    {
+                        TArray<AActor*> EnemyArray = TeamObs.TrackedEnemies.Array();
+                        TargetActor = EnemyArray[FMath::RandRange(0, EnemyArray.Num() - 1)];
+                    }
+                    TargetLocation = TeamObs.TeamCentroid;
+                    Priority = 6;
+                    break;
+
+                case EObjectiveType::RescueAlly:
+                    if (Followers.Num() > 1)
+                    {
+                        TArray<AActor*> OtherFollowers = Followers;
+                        OtherFollowers.Remove(Follower);
+                        if (OtherFollowers.Num() > 0)
+                        {
+                            TargetActor = OtherFollowers[FMath::RandRange(0, OtherFollowers.Num() - 1)];
+                            Priority = 7;
+                        }
+                    }
+                    break;
+            }
+
+            // Create objective
+            UObjective* Objective = ObjectiveManager->CreateObjective(ObjType, TargetActor, TargetLocation, Priority);
+            if (Objective)
+            {
+                Assignment.Add(Follower, Objective);
+            }
+        }
+
+        if (Assignment.Num() > 0)
+        {
+            Assignments.Add(Assignment);
+        }
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("🎯 [UCB] Generated %d objective combinations (%.1f%% exploration)"),
+        Assignments.Num(), EpsilonExploration * 100.0f);
+    return Assignments;
+}
+
+float UMCTS::CalculateObjectiveScore(AActor* Follower, EObjectiveType ObjType, const FTeamObservation& TeamObs) const
+{
+    if (!Follower) return 0.0f;
+
+    float Score = 0.0f;
+
+    // Get follower observation (if available via index)
+    // For simplicity, use team-level heuristics
+
+    switch (ObjType)
+    {
+        case EObjectiveType::Eliminate:
+            // Prefer when enemies are present and team health is good
+            Score = TeamObs.TrackedEnemies.Num() * 10.0f;
+            Score += TeamObs.AverageTeamHealth * 0.5f;
+            Score -= TeamObs.ThreatLevel * 5.0f; // Avoid if under heavy fire
+            break;
+
+        case EObjectiveType::CaptureObjective:
+            // Prefer when near objective and team is coordinated
+            Score = 50.0f - (TeamObs.DistanceToObjective / 100.0f);
+            Score += TeamObs.FormationCoherence * 20.0f;
+            Score -= TeamObs.ThreatLevel * 3.0f;
+            break;
+
+        case EObjectiveType::DefendObjective:
+            // Prefer when on objective and threat is moderate
+            Score = 30.0f - (TeamObs.DistanceToObjective / 50.0f);
+            Score += TeamObs.ThreatLevel * 5.0f; // Higher threat = more defense needed
+            Score += TeamObs.FormationCoherence * 15.0f;
+            break;
+
+        case EObjectiveType::SupportAlly:
+            // Prefer when team health is low or formation broken
+            Score = (100.0f - TeamObs.AverageTeamHealth) * 0.3f;
+            Score += (1.0f - TeamObs.FormationCoherence) * 20.0f;
+            break;
+
+        case EObjectiveType::FormationMove:
+            // Prefer when formation is broken
+            Score = (1.0f - TeamObs.FormationCoherence) * 30.0f;
+            Score += 10.0f; // Base utility
+            break;
+
+        case EObjectiveType::Retreat:
+            // Prefer when health is low or threat is high
+            Score = (100.0f - TeamObs.AverageTeamHealth) * 0.5f;
+            Score += TeamObs.ThreatLevel * 10.0f;
+            Score += (TeamObs.KillDeathRatio < 0.5f) ? 20.0f : 0.0f;
+            break;
+
+        case EObjectiveType::RescueAlly:
+            // Prefer when allies are low health
+            Score = (100.0f - TeamObs.AverageTeamHealth) * 0.4f;
+            Score += TeamObs.ThreatLevel * 3.0f;
+            break;
+    }
+
+    return FMath::Max(0.0f, Score);
+}
+
+float UMCTS::CalculateObjectiveSynergy(EObjectiveType ObjType, const TMap<AActor*, EObjectiveType>& ExistingObjectives, const FTeamObservation& TeamObs) const
+{
+    if (ExistingObjectives.Num() == 0) return 0.0f;
+
+    float Synergy = 0.0f;
+
+    // Count objective types
+    TMap<EObjectiveType, int32> ObjectiveCounts;
+    for (const auto& Pair : ExistingObjectives)
+    {
+        ObjectiveCounts.FindOrAdd(Pair.Value, 0)++;
+    }
+
+    // Synergy bonuses for tactical diversity
+    int32 UniqueTypes = ObjectiveCounts.Num();
+    if (UniqueTypes >= 2)
+    {
+        Synergy += 5.0f; // Bonus for diverse tactics
+    }
+
+    // Specific synergies
+    switch (ObjType)
+    {
+        case EObjectiveType::Eliminate:
+            // Good synergy with Support (covering fire)
+            if (ObjectiveCounts.Contains(EObjectiveType::SupportAlly))
+            {
+                Synergy += 8.0f;
+            }
+            // Good synergy with Defend (hold and eliminate)
+            if (ObjectiveCounts.Contains(EObjectiveType::DefendObjective))
+            {
+                Synergy += 6.0f;
+            }
+            // Bad synergy with Retreat (conflicting objectives)
+            if (ObjectiveCounts.Contains(EObjectiveType::Retreat))
+            {
+                Synergy -= 10.0f;
+            }
+            break;
+
+        case EObjectiveType::CaptureObjective:
+            // Good synergy with FormationMove (coordinated advance)
+            if (ObjectiveCounts.Contains(EObjectiveType::FormationMove))
+            {
+                Synergy += 7.0f;
+            }
+            // Good synergy with Support (covering fire while advancing)
+            if (ObjectiveCounts.Contains(EObjectiveType::SupportAlly))
+            {
+                Synergy += 5.0f;
+            }
+            // Bad synergy with Retreat
+            if (ObjectiveCounts.Contains(EObjectiveType::Retreat))
+            {
+                Synergy -= 12.0f;
+            }
+            break;
+
+        case EObjectiveType::DefendObjective:
+            // Good synergy with Eliminate (defensive posture)
+            if (ObjectiveCounts.Contains(EObjectiveType::Eliminate))
+            {
+                Synergy += 6.0f;
+            }
+            // Bad synergy with FormationMove (conflicting - static vs dynamic)
+            if (ObjectiveCounts.Contains(EObjectiveType::FormationMove))
+            {
+                Synergy -= 5.0f;
+            }
+            break;
+
+        case EObjectiveType::SupportAlly:
+            // Good synergy with most offensive objectives
+            if (ObjectiveCounts.Contains(EObjectiveType::Eliminate))
+            {
+                Synergy += 8.0f;
+            }
+            if (ObjectiveCounts.Contains(EObjectiveType::CaptureObjective))
+            {
+                Synergy += 5.0f;
+            }
+            break;
+
+        case EObjectiveType::FormationMove:
+            // Good synergy with CaptureObjective (coordinated advance)
+            if (ObjectiveCounts.Contains(EObjectiveType::CaptureObjective))
+            {
+                Synergy += 7.0f;
+            }
+            // Neutral with Retreat (both movement-based)
+            if (ObjectiveCounts.Contains(EObjectiveType::Retreat))
+            {
+                Synergy += 2.0f;
+            }
+            break;
+
+        case EObjectiveType::Retreat:
+            // Good synergy with RescueAlly (both defensive)
+            if (ObjectiveCounts.Contains(EObjectiveType::RescueAlly))
+            {
+                Synergy += 5.0f;
+            }
+            // Bad synergy with offensive objectives
+            if (ObjectiveCounts.Contains(EObjectiveType::Eliminate) ||
+                ObjectiveCounts.Contains(EObjectiveType::CaptureObjective))
+            {
+                Synergy -= 10.0f;
+            }
+            break;
+
+        case EObjectiveType::RescueAlly:
+            // Good synergy with Support
+            if (ObjectiveCounts.Contains(EObjectiveType::SupportAlly))
+            {
+                Synergy += 6.0f;
+            }
+            // Good synergy with Retreat (defensive)
+            if (ObjectiveCounts.Contains(EObjectiveType::Retreat))
+            {
+                Synergy += 5.0f;
+            }
+            break;
+    }
+
+    // Penalty for too many of the same objective (diminishing returns)
+    int32* ExistingCount = ObjectiveCounts.Find(ObjType);
+    if (ExistingCount && *ExistingCount >= 2)
+    {
+        Synergy -= 5.0f * (*ExistingCount); // Increasing penalty
+    }
+
+    return Synergy;
+}
+
+
+TMap<AActor*, UObjective*> UMCTS::RunTeamMCTSWithObjectives(
+    const FTeamObservation& TeamObservation,
+    const TArray<AActor*>& Followers,
+    UObjectiveManager* ObjectiveManager)
+{
+    UE_LOG(LogTemp, Log, TEXT("🎯 MCTS: Running objective-based tree search for %d followers (%d simulations)"),
+        Followers.Num(), MaxSimulations);
+
+    if (!ObjectiveManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("🎯 MCTS: ObjectiveManager is null! Cannot run objective-based MCTS"));
+        return TMap<AActor*, UObjective*>();
+    }
+
+    return RunTeamMCTSTreeSearchWithObjectives(TeamObservation, Followers, ObjectiveManager);
+}
+
+
+TMap<AActor*, UObjective*> UMCTS::RunTeamMCTSTreeSearchWithObjectives(
+    const FTeamObservation& TeamObs,
+    const TArray<AActor*>& Followers,
+    UObjectiveManager* ObjectiveManager)
+{
+    UE_LOG(LogTemp, Warning, TEXT("🎯 MCTS OBJECTIVE SEARCH: Starting for %d followers (%d simulations)"),
+        Followers.Num(), MaxSimulations);
+
+    // Cache for simulation
+    CachedTeamObservation = TeamObs;
+    CachedObjectiveManager = ObjectiveManager;
+
+    // Create root node with empty assignment
+    TeamRootNode = MakeShared<FTeamMCTSNode>();
+    TMap<AActor*, FStrategicCommand> DummyCommands; // Nodes still use FStrategicCommand internally
+    TeamRootNode->Initialize(nullptr, DummyCommands);
+
+    // Generate initial objective assignments
+    TArray<TMap<AActor*, UObjective*>> ObjectiveAssignments =
+        GenerateObjectiveAssignments(Followers, TeamObs, ObjectiveManager, MaxCombinationsPerExpansion);
+
+    if (ObjectiveAssignments.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("🎯 MCTS: No objective assignments generated! Aborting"));
+        return TMap<AActor*, UObjective*>();
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("🎯 MCTS: Root initialized with %d objective combinations"),
+        ObjectiveAssignments.Num());
+
+    // v3.0 Sprint 4: Compute priors for objective assignments using RL policy
+    TArray<float> ObjectivePriors;
+    if (RLPolicyNetwork && RLPolicyNetwork->IsReady())
+    {
+        // Get base priors from RL policy for each objective type
+        TArray<float> BasePriors = RLPolicyNetwork->GetObjectivePriors(TeamObs);
+
+        // Compute prior for each objective assignment combination
+        for (const auto& ObjAssignment : ObjectiveAssignments)
+        {
+            // Count objective types in this assignment
+            TMap<EObjectiveType, int32> ObjectiveCounts;
+            for (const auto& Pair : ObjAssignment)
+            {
+                if (Pair.Value)
+                {
+                    ObjectiveCounts.FindOrAdd(Pair.Value->Type, 0)++;
                 }
             }
 
-            Combo.Add(Follower, Command);
+            // Compute combined prior for this assignment
+            // Use geometric mean of individual objective priors
+            float CombinedPrior = 1.0f;
+            int32 TotalObjectives = 0;
+
+            for (const auto& CountPair : ObjectiveCounts)
+            {
+                int32 ObjTypeIndex = static_cast<int32>(CountPair.Key);
+                if (ObjTypeIndex >= 0 && ObjTypeIndex < BasePriors.Num())
+                {
+                    // Weight by count (multiple followers with same objective)
+                    for (int32 i = 0; i < CountPair.Value; ++i)
+                    {
+                        CombinedPrior *= BasePriors[ObjTypeIndex];
+                        TotalObjectives++;
+                    }
+                }
+            }
+
+            // Take Nth root to get geometric mean
+            if (TotalObjectives > 0)
+            {
+                CombinedPrior = FMath::Pow(CombinedPrior, 1.0f / TotalObjectives);
+            }
+
+            // Bonus for tactical diversity (multiple objective types)
+            if (ObjectiveCounts.Num() >= 2)
+            {
+                CombinedPrior *= 1.2f;  // 20% bonus for diverse tactics
+            }
+
+            ObjectivePriors.Add(CombinedPrior);
         }
 
-        Combinations.Add(Combo);
+        // Normalize priors to sum to 1.0
+        float Sum = 0.0f;
+        for (float Prior : ObjectivePriors)
+        {
+            Sum += Prior;
+        }
+        if (Sum > 0.0f)
+        {
+            for (int32 i = 0; i < ObjectivePriors.Num(); ++i)
+            {
+                ObjectivePriors[i] /= Sum;
+            }
+        }
+
+        UE_LOG(LogTemp, Display, TEXT("🎯 MCTS: Computed %d action priors (min=%.3f, max=%.3f, sum=%.3f)"),
+            ObjectivePriors.Num(),
+            ObjectivePriors.Num() > 0 ? *Algo::MinElement(ObjectivePriors) : 0.0f,
+            ObjectivePriors.Num() > 0 ? *Algo::MaxElement(ObjectivePriors) : 0.0f,
+            Sum);
+    }
+    else
+    {
+        // Fallback to uniform priors if no RL policy available
+        ObjectivePriors.Init(1.0f / FMath::Max(1, ObjectiveAssignments.Num()), ObjectiveAssignments.Num());
+        UE_LOG(LogTemp, Warning, TEXT("🎯 MCTS: Using uniform priors (no RL policy available)"));
     }
 
-    UE_LOG(LogTemp, Verbose, TEXT("Generated %d command combinations for %d followers"),
-        Combinations.Num(), Followers.Num());
+    // Store objective assignments as untried actions (convert to command format for compatibility)
+    // NOTE: This is a temporary bridge - TeamMCTSNode will be updated to support objectives natively in future
+    for (const auto& ObjAssignment : ObjectiveAssignments)
+    {
+        TMap<AActor*, FStrategicCommand> BridgeCommands;
+        for (const auto& Pair : ObjAssignment)
+        {
+            FStrategicCommand Cmd;
+            // Store objective type as metadata in command
+            if (Pair.Value)
+            {
+                // Map objective type to command type (temporary bridge)
+                switch (Pair.Value->Type)
+                {
+                    case EObjectiveType::Eliminate:
+                        Cmd.CommandType = EStrategicCommandType::Assault;
+                        break;
+                    case EObjectiveType::CaptureObjective:
+                        Cmd.CommandType = EStrategicCommandType::Advance;
+                        break;
+                    case EObjectiveType::DefendObjective:
+                        Cmd.CommandType = EStrategicCommandType::TakeCover;
+                        break;
+                    case EObjectiveType::SupportAlly:
+                        Cmd.CommandType = EStrategicCommandType::Support;
+                        break;
+                    case EObjectiveType::FormationMove:
+                        Cmd.CommandType = EStrategicCommandType::Advance;
+                        break;
+                    case EObjectiveType::Retreat:
+                        Cmd.CommandType = EStrategicCommandType::Retreat;
+                        break;
+                    case EObjectiveType::RescueAlly:
+                        Cmd.CommandType = EStrategicCommandType::Support;
+                        break;
+                }
+                Cmd.TargetActor = Pair.Value->TargetActor.Get();
+                Cmd.TargetLocation = Pair.Value->TargetLocation;
+                Cmd.Priority = Pair.Value->Priority;
+            }
+            BridgeCommands.Add(Pair.Key, Cmd);
+        }
+        TeamRootNode->UntriedActions.Add(BridgeCommands);
+    }
 
-    return Combinations;
+    // Assign computed priors to root node (Sprint 4)
+    TeamRootNode->ActionPriors = ObjectivePriors;
+
+    // Run MCTS simulations (same as before)
+    for (int32 i = 0; i < MaxSimulations; ++i)
+    {
+        TSharedPtr<FTeamMCTSNode> LeafNode = SelectNode(TeamRootNode);
+
+        if (!LeafNode.IsValid())
+        {
+            break;
+        }
+
+        TSharedPtr<FTeamMCTSNode> NodeToSimulate = LeafNode;
+
+        if (!LeafNode->IsTerminal() && LeafNode->VisitCount > 0)
+        {
+            NodeToSimulate = ExpandNode(LeafNode, Followers);
+            if (!NodeToSimulate.IsValid())
+            {
+                NodeToSimulate = LeafNode;
+            }
+        }
+
+        float Reward = SimulateNode(NodeToSimulate, TeamObs);
+        NodeToSimulate->Backpropagate(Reward);
+    }
+
+    // Find best child
+    TSharedPtr<FTeamMCTSNode> BestChild = nullptr;
+    int32 MaxVisits = 0;
+
+    for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
+    {
+        if (Child.IsValid() && Child->VisitCount > MaxVisits)
+        {
+            MaxVisits = Child->VisitCount;
+            BestChild = Child;
+        }
+    }
+
+    // Convert best commands back to objective assignments
+    TMap<AActor*, UObjective*> BestObjectives;
+
+    if (BestChild.IsValid())
+    {
+        float AvgReward = BestChild->TotalReward / FMath::Max(1, BestChild->VisitCount);
+        UE_LOG(LogTemp, Warning, TEXT("🎯 MCTS OBJECTIVE SEARCH: Best child found (Visits: %d, Avg Reward: %.1f)"),
+            MaxVisits, AvgReward);
+
+        // Find corresponding objective assignment
+        int32 BestIndex = TeamRootNode->Children.Find(BestChild);
+        if (BestIndex >= 0 && BestIndex < ObjectiveAssignments.Num())
+        {
+            BestObjectives = ObjectiveAssignments[BestIndex];
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("🎯 MCTS: Could not map best child to objective assignment, using first"));
+            if (ObjectiveAssignments.Num() > 0)
+            {
+                BestObjectives = ObjectiveAssignments[0];
+            }
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("🎯 MCTS OBJECTIVE SEARCH FAILED: No valid solution found"));
+        if (ObjectiveAssignments.Num() > 0)
+        {
+            BestObjectives = ObjectiveAssignments[0];
+        }
+    }
+
+    return BestObjectives;
 }
 
 
-float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, FStrategicCommand>& Commands) const
+float UMCTS::CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, UObjective*>& Objectives) const
 {
     // Base team reward
     float BaseReward = CalculateTeamReward(TeamObs);
 
-    // Command synergy bonuses
-    float SynergyBonus = 0.0f;
+    // Objective-specific bonuses
+    float ObjectiveBonus = 0.0f;
 
-    // Count command types
-    TMap<EStrategicCommandType, int32> CommandCounts;
-    for (const auto& Pair : Commands)
+    // Count objective types
+    TMap<EObjectiveType, int32> ObjectiveCounts;
+    for (const auto& Pair : Objectives)
     {
-        CommandCounts.FindOrAdd(Pair.Value.CommandType, 0)++;
-    }
-
-    int32 TotalFollowers = Commands.Num();
-
-    // Bonus for tactical diversity (avoid all-assault or all-defend)
-    if (CommandCounts.Num() >= 2)
-    {
-        SynergyBonus += 20.0f; // +20 for having multiple tactics
-    }
-
-    // Bonus for balanced composition in combat
-    if (TeamObs.TotalVisibleEnemies > 0)
-    {
-        int32 AssaultCount = CommandCounts.FindRef(EStrategicCommandType::Assault);
-        int32 SupportCount = CommandCounts.FindRef(EStrategicCommandType::Support);
-        int32 DefendCount = CommandCounts.FindRef(EStrategicCommandType::TakeCover);
-
-        // Reward having frontline + support + defense mix
-        if (AssaultCount > 0 && (SupportCount > 0 || DefendCount > 0))
+        if (Pair.Value)
         {
-            SynergyBonus += 30.0f; // +30 for combined arms
+            ObjectiveCounts.FindOrAdd(Pair.Value->Type, 0)++;
         }
     }
 
-    // Penalty for poor situational choices
-    if (TeamObs.bOutnumbered && CommandCounts.FindRef(EStrategicCommandType::Assault) == TotalFollowers)
+    int32 TotalFollowers = Objectives.Num();
+
+    // Bonus for tactical diversity
+    if (ObjectiveCounts.Num() >= 2)
     {
-        SynergyBonus -= 50.0f; // -50 for all-assault when outnumbered
+        ObjectiveBonus += 25.0f; // Higher bonus for diversity
     }
 
-    if (TeamObs.AverageTeamHealth < 40.0f && CommandCounts.FindRef(EStrategicCommandType::Retreat) == 0)
+    // Context-aware objective rewards
+    if (TeamObs.TotalVisibleEnemies > 0)
     {
-        SynergyBonus -= 30.0f; // -30 for not retreating when low health
+        int32 EliminateCount = ObjectiveCounts.FindRef(EObjectiveType::Eliminate);
+        int32 SupportCount = ObjectiveCounts.FindRef(EObjectiveType::SupportAlly);
+        int32 DefendCount = ObjectiveCounts.FindRef(EObjectiveType::DefendObjective);
+
+        // Reward combined arms (attack + support/defense)
+        if (EliminateCount > 0 && (SupportCount > 0 || DefendCount > 0))
+        {
+            ObjectiveBonus += 35.0f; // Combined tactics bonus
+        }
+
+        // Penalty for poor tactical choices
+        if (TeamObs.bOutnumbered && EliminateCount == TotalFollowers)
+        {
+            ObjectiveBonus -= 60.0f; // Heavy penalty for all-assault when outnumbered
+        }
+
+        if (TeamObs.AverageTeamHealth < 40.0f && ObjectiveCounts.FindRef(EObjectiveType::Retreat) == 0)
+        {
+            ObjectiveBonus -= 40.0f; // Penalty for not retreating when low health
+        }
     }
 
-    return BaseReward + SynergyBonus;
+    // Bonus for high-priority objectives
+    for (const auto& Pair : Objectives)
+    {
+        if (Pair.Value && Pair.Value->Priority >= 7)
+        {
+            ObjectiveBonus += 10.0f;
+        }
+    }
+
+    float TotalReward = BaseReward + ObjectiveBonus;
+
+    UE_LOG(LogTemp, Verbose, TEXT("🎯 MCTS Objective Reward: %.1f (Base=%.1f, ObjBonus=%.1f)"),
+        TotalReward, BaseReward, ObjectiveBonus);
+
+    return TotalReward;
+}
+
+//==============================================================================
+// MCTS STATISTICS EXPORT (Sprint 3 - Curriculum Learning)
+//==============================================================================
+
+void UMCTS::GetMCTSStatistics(float& OutValueVariance, float& OutPolicyEntropy, float& OutAverageValue) const
+{
+    OutValueVariance = 0.0f;
+    OutPolicyEntropy = 0.0f;
+    OutAverageValue = 0.0f;
+
+    if (!TeamRootNode.IsValid() || TeamRootNode->Children.Num() == 0)
+    {
+        return;
+    }
+
+    // Calculate average value from root
+    OutAverageValue = TeamRootNode->TotalReward / FMath::Max(1, TeamRootNode->VisitCount);
+
+    // Calculate value variance across child nodes
+    TArray<float> ChildValues;
+    float SumValues = 0.0f;
+
+    for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
+    {
+        if (Child.IsValid() && Child->VisitCount > 0)
+        {
+            float ChildValue = Child->TotalReward / Child->VisitCount;
+            ChildValues.Add(ChildValue);
+            SumValues += ChildValue;
+        }
+    }
+
+    if (ChildValues.Num() > 0)
+    {
+        float MeanValue = SumValues / ChildValues.Num();
+        float VarianceSum = 0.0f;
+
+        for (float Value : ChildValues)
+        {
+            float Diff = Value - MeanValue;
+            VarianceSum += Diff * Diff;
+        }
+
+        OutValueVariance = FMath::Sqrt(VarianceSum / ChildValues.Num());
+    }
+
+    // Calculate policy entropy from visit count distribution
+    TArray<float> VisitProbabilities;
+    int32 TotalVisits = 0;
+
+    for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
+    {
+        if (Child.IsValid())
+        {
+            TotalVisits += Child->VisitCount;
+        }
+    }
+
+    if (TotalVisits > 0)
+    {
+        for (const TSharedPtr<FTeamMCTSNode>& Child : TeamRootNode->Children)
+        {
+            if (Child.IsValid() && Child->VisitCount > 0)
+            {
+                float Prob = static_cast<float>(Child->VisitCount) / TotalVisits;
+                VisitProbabilities.Add(Prob);
+            }
+        }
+
+        // Calculate entropy: H(p) = -Σ p_i * log(p_i)
+        for (float Prob : VisitProbabilities)
+        {
+            if (Prob > 0.0f)
+            {
+                OutPolicyEntropy -= Prob * FMath::Loge(Prob);
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Verbose, TEXT("MCTS Statistics: ValueVariance=%.3f, PolicyEntropy=%.3f, AvgValue=%.1f"),
+        OutValueVariance, OutPolicyEntropy, OutAverageValue);
+}
+
+int32 UMCTS::GetRootVisitCount() const
+{
+    if (TeamRootNode.IsValid())
+    {
+        return TeamRootNode->VisitCount;
+    }
+    return 0;
 }

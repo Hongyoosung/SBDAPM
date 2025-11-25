@@ -32,25 +32,26 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 	}
 
 	// Query the policy immediately on entry
-	ETacticalAction SelectedAction = QueryPolicy(Context);
+	FTacticalAction SelectedAction = QueryPolicy(Context);
 
 	// Write selected action to SHARED context (so other tasks can read it)
-	SharedContext.CurrentTacticalAction = SelectedAction;
+	SharedContext.CurrentAtomicAction = SelectedAction;
 	SharedContext.TimeInTacticalAction = 0.0f;
 	InstanceData.bHasQueriedOnce = true;
 
 	// ALWAYS log to diagnose binding issue
-	UE_LOG(LogTemp, Warning, TEXT("🔍 [QUERY RL] '%s': WROTE action to SHARED context: %s (Context addr: %p)"),
+	UE_LOG(LogTemp, Warning, TEXT("🔍 [QUERY RL] '%s': WROTE action to SHARED context (Context addr: %p)"),
 		*SharedContext.FollowerComponent->GetOwner()->GetName(),
-		*UEnum::GetValueAsString(SelectedAction),
 		&SharedContext);
 
 	// Log if enabled
 	if (InstanceData.bLogActionSelection)
 	{
-		UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Selected action '%s' for '%s'"),
-			*UEnum::GetValueAsString(SelectedAction),
-			*SharedContext.FollowerComponent->GetOwner()->GetName());
+		UE_LOG(LogTemp, Log, TEXT("STTask_QueryRLPolicy: Selected action for '%s' - Move(%.2f, %.2f) Look(%.2f, %.2f) Fire=%d"),
+			*SharedContext.FollowerComponent->GetOwner()->GetName(),
+			SelectedAction.MoveDirection.X, SelectedAction.MoveDirection.Y,
+			SelectedAction.LookDirection.X, SelectedAction.LookDirection.Y,
+			SelectedAction.bFire);
 	}
 
 	// Draw debug if enabled
@@ -58,9 +59,10 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::EnterState(FStateTreeExecutionContext
 	{
 		AActor* Owner = SharedContext.FollowerComponent->GetOwner();
 		FVector Location = Owner->GetActorLocation();
-		FString ActionName = UEnum::GetValueAsString(SelectedAction);
+		FString ActionInfo = FString::Printf(TEXT("Move(%.1f,%.1f) Fire:%d"),
+			SelectedAction.MoveDirection.X, SelectedAction.MoveDirection.Y, SelectedAction.bFire);
 		DrawDebugString(Owner->GetWorld(), Location + FVector(0, 0, 100),
-			*ActionName, nullptr, FColor::Cyan, 2.0f, true);
+			*ActionInfo, nullptr, FColor::Cyan, 2.0f, true);
 	}
 
 	// If interval is 0, complete immediately (one-shot query)
@@ -87,7 +89,7 @@ EStateTreeRunStatus FSTTask_QueryRLPolicy::Tick(FStateTreeExecutionContext& Cont
 		InstanceData.TimeSinceLastQuery = 0.0f;
 
 		// Query the policy
-		ETacticalAction SelectedAction = QueryPolicy(Context);
+		FTacticalAction SelectedAction = QueryPolicy(Context);
 
 		// Update SHARED context
 		SharedContext.CurrentTacticalAction = SelectedAction;
@@ -121,7 +123,7 @@ void FSTTask_QueryRLPolicy::ExitState(FStateTreeExecutionContext& Context, const
 	// No cleanup needed
 }
 
-ETacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& Context) const
+FTacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
@@ -144,7 +146,7 @@ ETacticalAction FSTTask_QueryRLPolicy::QueryPolicy(FStateTreeExecutionContext& C
 	}
 }
 
-ETacticalAction FSTTask_QueryRLPolicy::GetFallbackAction(FStateTreeExecutionContext& Context) const
+FTacticalAction FSTTask_QueryRLPolicy::GetFallbackAction(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();

@@ -27,22 +27,16 @@ class UFollowerAgentComponent;
  * 3. Set FollowerComponent reference (auto-found if on same actor)
  * 4. Component auto-starts State Tree on BeginPlay
  *
- * State Tree Asset Structure:
+ * State Tree Asset Structure (Sprint 3 - Objective-Driven):
  * Root (Selector)
  * ├─ [IsAlive == false] DeadState
- * ├─ [CommandType == Assault] AssaultState
- * │  ├─ QueryRLPolicy
- * │  └─ ExecuteAssault
- * ├─ [CommandType == Defend] DefendState
- * │  ├─ QueryRLPolicy
- * │  └─ ExecuteDefend
- * ├─ [CommandType == Support] SupportState
- * │  ├─ QueryRLPolicy
- * │  └─ ExecuteSupport
+ * ├─ [CurrentObjective != null] ExecuteObjectiveState
+ * │  └─ ExecuteObjective (universal task, handles all objective types)
  * └─ IdleState
  *
  * Evaluators (Global):
  * - UpdateObservation (runs every tick, gathers 71-feature observation)
+ * - SpatialContext (computes FActionSpaceMask based on environment, 5Hz)
  * - SyncCommand (syncs command from FollowerAgentComponent)
  */
 UCLASS(ClassGroup = "StateTree", meta = (BlueprintSpawnableComponent, DisplayName = "Follower StateTree Component"))
@@ -100,10 +94,6 @@ public:
 	/** Get current state name (for debugging) */
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FString GetCurrentStateName() const;
-
-	/** Get current tactical action (from context) */
-	UFUNCTION(BlueprintPure, Category = "State Tree")
-	ETacticalAction GetCurrentTacticalAction() const { return Context.CurrentTacticalAction; }
 
 	/** Get current command (from context) */
 	UFUNCTION(BlueprintPure, Category = "State Tree")

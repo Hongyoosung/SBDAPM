@@ -1,6 +1,7 @@
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
+#include "RL/RewardCalculator.h"
 #include "Perception/AgentPerceptionComponent.h"
 #include "Combat/HealthComponent.h"
 #include "Combat/WeaponComponent.h"
@@ -9,6 +10,11 @@
 #include "AIController.h"
 #include "Kismet/GameplayStatics.h"
 #include "StateTree/FollowerStateTreeComponent.h"
+#include "Team/Objective.h"
+#include "Simulation/StateTransition.h"
+#include "Observation/TeamObservation.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 UFollowerAgentComponent::UFollowerAgentComponent()
 {
@@ -103,6 +109,19 @@ void UFollowerAgentComponent::BeginPlay()
 			*GetOwner()->GetName());
 	}
 
+	// Find or create RewardCalculator (Sprint 4)
+	RewardCalculator = GetOwner()->FindComponentByClass<URewardCalculator>();
+	if (!RewardCalculator)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': No RewardCalculator found, hierarchical rewards disabled"),
+			*GetOwner()->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Found RewardCalculator, hierarchical rewards enabled"),
+			*GetOwner()->GetName());
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgentComponent: Initialized on %s"), *GetOwner()->GetName());
 }
 
@@ -113,6 +132,16 @@ void UFollowerAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType
 
 	// Update command timer
 	UpdateCommandTimer(DeltaTime);
+
+	// Calculate hierarchical rewards if RewardCalculator is available (Sprint 4)
+	if (RewardCalculator)
+	{
+		float TotalReward = RewardCalculator->CalculateTotalReward(DeltaTime);
+		if (FMath::Abs(TotalReward) > 0.01f) // Only provide non-zero rewards
+		{
+			ProvideReward(TotalReward, false);
+		}
+	}
 
 	// Draw debug info if enabled
 	if (bEnableDebugDrawing)
@@ -531,7 +560,6 @@ void UFollowerAgentComponent::ResetEpisode()
 {
 	AccumulatedReward = 0.0f;
 	PreviousObservation = FObservationElement();
-	LastTacticalAction = ETacticalAction::DefensiveHold;
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode reset"), *GetOwner()->GetName());
 }
@@ -677,8 +705,16 @@ void UFollowerAgentComponent::DrawDebugInfo()
 
 void UFollowerAgentComponent::OnDamageTakenEvent(const FDamageEventData& DamageEvent, float CurrentHealth)
 {
-	// Provide negative reward for taking damage
-	ProvideReward(FTacticalRewards::TAKE_DAMAGE, false);
+	// Notify RewardCalculator (Sprint 4)
+	if (RewardCalculator)
+	{
+		RewardCalculator->OnTakeDamage(DamageEvent.DamageAmount);
+	}
+	else
+	{
+		// Fallback to direct reward
+		ProvideReward(FTacticalRewards::TAKE_DAMAGE, false);
+	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Took %.1f damage from %s (Reward: %.1f)"),
 		*GetOwner()->GetName(),
@@ -695,8 +731,16 @@ void UFollowerAgentComponent::OnDamageTakenEvent(const FDamageEventData& DamageE
 
 void UFollowerAgentComponent::OnDamageDealtEvent(AActor* Victim, float DamageAmount)
 {
-	// Provide positive reward for dealing damage
-	ProvideReward(FTacticalRewards::DAMAGE_ENEMY, false);
+	// Notify RewardCalculator (Sprint 4)
+	if (RewardCalculator)
+	{
+		RewardCalculator->OnDealDamage(DamageAmount, Victim);
+	}
+	else
+	{
+		// Fallback to direct reward
+		ProvideReward(FTacticalRewards::DAMAGE_ENEMY, false);
+	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Dealt %.1f damage to %s (Reward: %.1f)"),
 		*GetOwner()->GetName(),
@@ -707,8 +751,16 @@ void UFollowerAgentComponent::OnDamageDealtEvent(AActor* Victim, float DamageAmo
 
 void UFollowerAgentComponent::OnKillEvent(AActor* Victim, float TotalDamage)
 {
-	// Provide large positive reward for kill
-	ProvideReward(FTacticalRewards::KILL_ENEMY, false);
+	// Notify RewardCalculator (Sprint 4)
+	if (RewardCalculator)
+	{
+		RewardCalculator->OnKillEnemy(Victim);
+	}
+	else
+	{
+		// Fallback to direct reward
+		ProvideReward(FTacticalRewards::KILL_ENEMY, false);
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': KILL confirmed on %s (Reward: %.1f)"),
 		*GetOwner()->GetName(),
@@ -724,8 +776,16 @@ void UFollowerAgentComponent::OnKillEvent(AActor* Victim, float TotalDamage)
 
 void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
 {
-	// Provide large negative reward for death (terminal state)
-	ProvideReward(FTacticalRewards::DIE, true);
+	// Notify RewardCalculator (Sprint 4)
+	if (RewardCalculator)
+	{
+		RewardCalculator->OnDeath();
+	}
+	else
+	{
+		// Fallback to direct reward
+		ProvideReward(FTacticalRewards::DIE, true);
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': DIED (Killed by %s, Reward: %.1f)"),
 		*GetOwner()->GetName(),
@@ -739,5 +799,165 @@ void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
 	if (TeamLeader)
 	{
 		SignalEventToLeader(EStrategicEvent::AllyKilled, DeathEvent.Killer, GetOwner()->GetActorLocation(), 10);
+	}
+}
+
+//------------------------------------------------------------------------------
+// OBJECTIVE INTEGRATION (SPRINT 4)
+//------------------------------------------------------------------------------
+
+void UFollowerAgentComponent::SetCurrentObjective(UObjective* Objective)
+{
+	if (RewardCalculator)
+	{
+		RewardCalculator->SetCurrentObjective(Objective);
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Objective set to %s"),
+			*GetOwner()->GetName(),
+			Objective ? *UEnum::GetValueAsString(Objective->Type) : TEXT("None"));
+	}
+}
+
+//------------------------------------------------------------------------------
+// STATE TRANSITION LOGGING (SPRINT 2 - WORLD MODEL)
+//------------------------------------------------------------------------------
+
+void UFollowerAgentComponent::EnableStateTransitionLogging(bool bEnable)
+{
+	bLogStateTransitions = bEnable;
+
+	if (bEnable)
+	{
+		LoggedTransitions.Empty();
+		LastStateLogTime = 0.0f;
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': State transition logging ENABLED"), *GetOwner()->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': State transition logging DISABLED (%d samples collected)"),
+			*GetOwner()->GetName(), LoggedTransitions.Num());
+	}
+}
+
+void UFollowerAgentComponent::LogStateTransition()
+{
+	if (!bLogStateTransitions || !TeamLeader)
+	{
+		return;
+	}
+
+	// Throttle logging (only log at intervals)
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	if (CurrentTime - LastStateLogTime < StateLogInterval)
+	{
+		return;
+	}
+
+	// Get current team observation from leader
+	FTeamObservation CurrentTeamObs = TeamLeader->GetCurrentTeamObservation();
+
+	// Only log if we have a previous observation
+	if (PreviousTeamObservation.AliveFollowers > 0)
+	{
+		FStateTransitionSample Sample;
+
+		// State before
+		Sample.StateBefore = PreviousTeamObservation.Flatten();
+
+		// Actions (get from team leader)
+		Sample.StrategicCommands = TeamLeader->GetLastCommandsIssued();
+		Sample.TacticalActions.Add(LastTacticalAction);
+
+		// State after
+		Sample.StateAfter = CurrentTeamObs.Flatten();
+
+		// Calculate actual delta
+		FTeamStateDelta ActualDelta;
+		ActualDelta.TeamHealthDelta = CurrentTeamObs.AverageTeamHealth - PreviousTeamObservation.AverageTeamHealth;
+		ActualDelta.AliveCountDelta = CurrentTeamObs.AliveFollowers - PreviousTeamObservation.AliveFollowers;
+		ActualDelta.TeamCohesionDelta = CurrentTeamObs.FormationCoherence - PreviousTeamObservation.FormationCoherence;
+		ActualDelta.DeltaTime = StateLogInterval;
+
+		Sample.ActualDelta = ActualDelta;
+		Sample.Timestamp = CurrentTime;
+
+		// Store sample
+		LoggedTransitions.Add(Sample);
+
+		if (LoggedTransitions.Num() % 50 == 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Logged %d state transitions"),
+				*GetOwner()->GetName(), LoggedTransitions.Num());
+		}
+	}
+
+	// Update previous observation
+	PreviousTeamObservation = CurrentTeamObs;
+	LastStateLogTime = CurrentTime;
+}
+
+bool UFollowerAgentComponent::ExportStateTransitions(const FString& FilePath)
+{
+	if (LoggedTransitions.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': No state transitions to export"), *GetOwner()->GetName());
+		return false;
+	}
+
+	// Build JSON
+	FString JsonString = TEXT("{\n  \"transitions\": [\n");
+
+	for (int32 i = 0; i < LoggedTransitions.Num(); ++i)
+	{
+		const FStateTransitionSample& Sample = LoggedTransitions[i];
+
+		JsonString += TEXT("    {\n");
+		JsonString += FString::Printf(TEXT("      \"timestamp\": %.2f,\n"), Sample.Timestamp);
+		JsonString += FString::Printf(TEXT("      \"game_outcome\": %.2f,\n"), Sample.GameOutcome);
+
+		// State before
+		JsonString += TEXT("      \"state_before\": [");
+		for (int32 j = 0; j < Sample.StateBefore.Num(); ++j)
+		{
+			JsonString += FString::Printf(TEXT("%.4f"), Sample.StateBefore[j]);
+			if (j < Sample.StateBefore.Num() - 1) JsonString += TEXT(", ");
+		}
+		JsonString += TEXT("],\n");
+
+		// State after
+		JsonString += TEXT("      \"state_after\": [");
+		for (int32 j = 0; j < Sample.StateAfter.Num(); ++j)
+		{
+			JsonString += FString::Printf(TEXT("%.4f"), Sample.StateAfter[j]);
+			if (j < Sample.StateAfter.Num() - 1) JsonString += TEXT(", ");
+		}
+		JsonString += TEXT("],\n");
+
+		// Actual delta
+		JsonString += TEXT("      \"actual_delta\": {\n");
+		JsonString += FString::Printf(TEXT("        \"team_health_delta\": %.2f,\n"), Sample.ActualDelta.TeamHealthDelta);
+		JsonString += FString::Printf(TEXT("        \"alive_count_delta\": %d,\n"), Sample.ActualDelta.AliveCountDelta);
+		JsonString += FString::Printf(TEXT("        \"team_cohesion_delta\": %.4f\n"), Sample.ActualDelta.TeamCohesionDelta);
+		JsonString += TEXT("      }\n");
+
+		JsonString += TEXT("    }");
+		if (i < LoggedTransitions.Num() - 1) JsonString += TEXT(",");
+		JsonString += TEXT("\n");
+	}
+
+	JsonString += TEXT("  ]\n}\n");
+
+	// Write to file
+	const FString FullPath = FPaths::ProjectDir() / FilePath;
+	if (FFileHelper::SaveStringToFile(JsonString, *FullPath))
+	{
+		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Exported %d transitions to %s"),
+			*GetOwner()->GetName(), LoggedTransitions.Num(), *FullPath);
+		return true;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': Failed to export transitions to %s"),
+			*GetOwner()->GetName(), *FullPath);
+		return false;
 	}
 }

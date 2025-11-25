@@ -29,15 +29,18 @@ public:
     void InitializeTeamMCTS(int32 InMaxSimulations = 500, float InExplorationParam = 1.41f);
 
 
+
     /**
-     * Run team-level MCTS and return strategic commands for each follower
+     * Run team-level MCTS with objectives (v3.0 Combat Refactoring)
      * @param TeamObservation - Current team observation
      * @param Followers - List of follower actors
-     * @return Map of follower to strategic command
+     * @param ObjectiveManager - Manager to create/assign objectives
+     * @return Map of follower to objective assignment
      */
-    TMap<AActor*, struct FStrategicCommand> RunTeamMCTS(
+    TMap<AActor*, class UObjective*> RunTeamMCTSWithObjectives(
         const FTeamObservation& TeamObservation,
-        const TArray<AActor*>& Followers
+        const TArray<AActor*>& Followers,
+        class UObjectiveManager* ObjectiveManager
     );
 
 
@@ -46,15 +49,18 @@ private:
     // TEAM-LEVEL METHODS
     //--------------------------------------------------------------------------
 
+
     /**
-     * Run full MCTS tree search with selection, expansion, simulation, backpropagation
+     * Run full MCTS tree search with objectives (v3.0 Combat Refactoring)
      * @param TeamObs - Current team observation
      * @param Followers - List of followers
-     * @return Best command assignment found
+     * @param ObjectiveManager - Manager to create objectives
+     * @return Best objective assignment found
      */
-    TMap<AActor*, struct FStrategicCommand> RunTeamMCTSTreeSearch(
+    TMap<AActor*, class UObjective*> RunTeamMCTSTreeSearchWithObjectives(
         const FTeamObservation& TeamObs,
-        const TArray<AActor*>& Followers
+        const TArray<AActor*>& Followers,
+        class UObjectiveManager* ObjectiveManager
     );
 
     /**
@@ -72,15 +78,41 @@ private:
      */
     float SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation& TeamObs);
 
+
     /**
-     * Generate possible command combinations for expansion
-     * Uses smart sampling to avoid exponential explosion (11^N combinations)
+     * Generate possible objective assignments for expansion (v3.0 Combat Refactoring)
+     * Much smaller action space: 7 objective types × N agents ≈ 50 combinations (vs 14,641)
+     * @param Followers - List of follower actors
+     * @param TeamObs - Current team observation
+     * @param ObjectiveManager - Manager to create objectives
+     * @param MaxCombinations - Maximum number of combinations to generate
      */
-    TArray<TMap<AActor*, FStrategicCommand>> GenerateCommandCombinations(
+    TArray<TMap<AActor*, class UObjective*>> GenerateObjectiveAssignments(
         const TArray<AActor*>& Followers,
         const FTeamObservation& TeamObs,
-        int32 MaxCombinations = 10
+        class UObjectiveManager* ObjectiveManager,
+        int32 MaxCombinations = 20
     ) const;
+
+    /**
+     * Calculate objective score for follower-objective pair (Sprint 5)
+     * Scores based on context: health, distance, threat level, etc.
+     * @param Follower - The follower actor
+     * @param ObjType - The objective type to score
+     * @param TeamObs - Current team observation for context
+     * @return Score value (higher = better fit)
+     */
+    float CalculateObjectiveScore(AActor* Follower, EObjectiveType ObjType, const FTeamObservation& TeamObs) const;
+
+    /**
+     * Calculate synergy bonus between objectives (Sprint 5)
+     * Rewards tactical diversity and coordinated actions
+     * @param ObjType - New objective being considered
+     * @param ExistingObjectives - Already assigned objectives
+     * @param TeamObs - Current team observation for context
+     * @return Synergy bonus (positive = good synergy, negative = conflict)
+     */
+    float CalculateObjectiveSynergy(EObjectiveType ObjType, const TMap<AActor*, EObjectiveType>& ExistingObjectives, const FTeamObservation& TeamObs) const;
 
     /**
      * Calculate base team-level reward (no command-specific bonuses)
@@ -88,11 +120,12 @@ private:
      */
     float CalculateTeamReward(const FTeamObservation& TeamObs) const;
 
+
     /**
-     * Calculate team-level reward for a given command assignment (with synergy bonuses)
-     * Considers team health, formation, objectives, combat effectiveness, and command synergies
+     * Calculate team-level reward for objective assignments (v3.0 Combat Refactoring)
+     * Evaluates strategic value of assigning followers to specific objectives
      */
-    float CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, FStrategicCommand>& Commands) const;
+    float CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, class UObjective*>& Objectives) const;
 
     /**
      * BASELINE: Generate strategic commands using rule-based heuristics
@@ -103,6 +136,24 @@ private:
         const FTeamObservation& TeamObs,
         const TArray<AActor*>& Followers
     ) const;
+
+    //--------------------------------------------------------------------------
+    // MCTS STATISTICS EXPORT (Sprint 3 - Curriculum Learning)
+    //--------------------------------------------------------------------------
+
+    /**
+     * Extract MCTS statistics from tree search for curriculum learning
+     * Called after RunTeamMCTSTreeSearchWithObjectives to get uncertainty metrics
+     * @param OutValueVariance - Standard deviation of child node values
+     * @param OutPolicyEntropy - Entropy of visit count distribution (action uncertainty)
+     * @param OutAverageValue - Mean value estimate from root node
+     */
+    void GetMCTSStatistics(float& OutValueVariance, float& OutPolicyEntropy, float& OutAverageValue) const;
+
+    /**
+     * Get visit count for root node (indicates search depth)
+     */
+    int32 GetRootVisitCount() const;
 
 
 
@@ -129,7 +180,7 @@ public:
 
 private:
     //--------------------------------------------------------------------------
-    // TEAM-LEVEL STATE 
+    // TEAM-LEVEL STATE
     //--------------------------------------------------------------------------
     /** Root node of team MCTS tree */
     TSharedPtr<FTeamMCTSNode> TeamRootNode;
@@ -137,4 +188,22 @@ private:
     /** Cached team observation for simulation */
     UPROPERTY()
     FTeamObservation CachedTeamObservation;
+
+    /** Cached ObjectiveManager for objective-based MCTS (v3.0) */
+    UPROPERTY()
+    TObjectPtr<class UObjectiveManager> CachedObjectiveManager;
+
+    /** Value Network for leaf node evaluation (v3.0 - replaces heuristics) */
+    UPROPERTY()
+    TObjectPtr<class UTeamValueNetwork> ValueNetwork;
+
+    /** World Model for state prediction during simulation (v3.0 - Sprint 2) */
+    UPROPERTY()
+    TObjectPtr<class UWorldModel> WorldModel;
+
+    /** RL Policy Network for action priors (v3.0 - Sprint 4)
+     * Provides prior probabilities to guide MCTS tree search
+     */
+    UPROPERTY()
+    TObjectPtr<class URLPolicyNetwork> RLPolicyNetwork;
 };

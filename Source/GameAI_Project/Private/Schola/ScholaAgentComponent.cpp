@@ -2,7 +2,6 @@
 
 #include "Schola/ScholaAgentComponent.h"
 #include "Schola/TacticalObserver.h"
-#include "Schola/TacticalActuator.h"
 #include "Schola/TacticalRewardProvider.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Inference/InferenceComponent.h"
@@ -15,7 +14,6 @@ UScholaAgentComponent::UScholaAgentComponent()
 
 	// Create default subobjects for Schola components
 	TacticalObserver = CreateDefaultSubobject<UTacticalObserver>(TEXT("TacticalObserver"));
-	TacticalActuator = CreateDefaultSubobject<UTacticalActuator>(TEXT("TacticalActuator"));
 	RewardProvider = CreateDefaultSubobject<UTacticalRewardProvider>(TEXT("RewardProvider"));
 }
 
@@ -72,7 +70,6 @@ void UScholaAgentComponent::InitializeScholaComponents()
 
 	// Configure components
 	ConfigureObservers();
-	ConfigureActuators();
 	ConfigureRewardProvider();
 
 	UE_LOG(LogTemp, Log, TEXT("[ScholaAgent] %s: Schola components configured successfully"),
@@ -98,28 +95,6 @@ void UScholaAgentComponent::ConfigureObservers()
 	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalObserver configured (71 features)"),
-		*GetOwner()->GetName());
-}
-
-void UScholaAgentComponent::ConfigureActuators()
-{
-	if (!TacticalActuator || !FollowerAgent || !InferenceComponent)
-	{
-		return;
-	}
-
-	// Link actuator to follower agent
-	TacticalActuator->FollowerAgent = FollowerAgent;
-	TacticalActuator->bAutoFindFollower = false;
-	TacticalActuator->InitializeActuator();
-
-	// Add to InferenceComponent's actuators array if not already present
-	if (!InferenceComponent->Actuators.Contains(TacticalActuator))
-	{
-		InferenceComponent->Actuators.Add(TacticalActuator);
-	}
-
-	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalActuator configured (16 actions)"),
 		*GetOwner()->GetName());
 }
 
@@ -193,12 +168,6 @@ void UScholaAgentComponent::ResetEpisode()
 	if (TacticalObserver)
 	{
 		TacticalObserver->ResetObserver();
-	}
-
-	// Reset actuator
-	if (TacticalActuator)
-	{
-		TacticalActuator->ResetActuator();
 	}
 
 	// Reset follower agent episode

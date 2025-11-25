@@ -11,16 +11,12 @@
 #include "RL/RLPolicyNetwork.h"
 #include "StateTree/Conditions/STCondition_IsAlive.h"
 #include "StateTree/Conditions/STCondition_CheckCommandType.h"
-#include "StateTree/Conditions/STCondition_CheckTacticalAction.h"
-#include "StateTree/Tasks/STTask_ExecuteAssault.h"
-#include "StateTree/Tasks/STTask_ExecuteDefend.h"
-#include "StateTree/Tasks/STTask_ExecuteSupport.h"
-#include "StateTree/Tasks/STTask_ExecuteMove.h"
-#include "StateTree/Tasks/STTask_ExecuteRetreat.h"
+#include "StateTree/Tasks/STTask_ExecuteObjective.h"
 #include "StateTree/Tasks/STTask_Dead.h"
 #include "StateTree/Tasks/STTask_QueryRLPolicy.h"
 #include "StateTree/Evaluators/STEvaluator_SyncCommand.h"
 #include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
+#include "StateTree/Evaluators/STEvaluator_SpatialContext.h"
 
 
 UFollowerStateTreeSchema::UFollowerStateTreeSchema()
@@ -91,15 +87,11 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 		// Allow all StateTree node types
 		if (InScriptStruct->IsChildOf(FSTEvaluator_SyncCommand::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTEvaluator_UpdateObservation::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTEvaluator_SpatialContext::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTCondition_IsAlive::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTCondition_CheckCommandType::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTCondition_CheckTacticalAction::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_ExecuteAssault::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_ExecuteDefend::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_ExecuteSupport::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_ExecuteObjective::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTTask_QueryRLPolicy::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_ExecuteMove::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_ExecuteRetreat::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTTask_Dead::StaticStruct()))
 		{
 			return true;

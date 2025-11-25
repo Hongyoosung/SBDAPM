@@ -1,4 +1,5 @@
 #include "Observation/TeamObservation.h"
+#include "Simulation/StateTransition.h"
 
 TArray<float> FTeamObservation::ToFeatureVector() const
 {
@@ -266,4 +267,116 @@ float FTeamObservation::CalculateSimilarity(
 
     // Convert difference to similarity (exponential decay)
     return FMath::Exp(-WeightedDiff * 5.0f);  // [0, 1], higher = more similar
+}
+
+TArray<float> FTeamObservation::Flatten() const
+{
+    // Same as ToFeatureVector, but explicitly named for world model usage
+    return ToFeatureVector();
+}
+
+FTeamObservation FTeamObservation::ApplyDelta(const FTeamStateDelta& Delta) const
+{
+    FTeamObservation NextState = *this;
+
+    // Apply team-level deltas
+    NextState.AverageTeamHealth = FMath::Clamp(AverageTeamHealth + Delta.TeamHealthDelta, 0.0f, 100.0f);
+    NextState.AliveFollowers = FMath::Max(0, AliveFollowers + Delta.AliveCountDelta);
+    NextState.DeadFollowers = FMath::Max(0, DeadFollowers - Delta.AliveCountDelta);
+    NextState.FormationCoherence = FMath::Clamp(FormationCoherence + Delta.TeamCohesionDelta, 0.0f, 1.0f);
+
+    // Apply individual agent deltas
+    for (int32 i = 0; i < FMath::Min(NextState.FollowerObservations.Num(), Delta.AgentDeltas.Num()); ++i)
+    {
+        const FAgentStateDelta& AgentDelta = Delta.AgentDeltas[i];
+        FObservationElement& FollowerObs = NextState.FollowerObservations[i];
+
+        // Apply health change
+        FollowerObs.Health = FMath::Clamp(FollowerObs.Health + AgentDelta.HealthDelta, 0.0f, 100.0f);
+
+        // Apply position change (relative to current centroid)
+        // FollowerObs.Position += AgentDelta.PositionDelta;
+
+        // Apply ammo change
+        // FollowerObs.CurrentAmmo = FMath::Max(0, FollowerObs.CurrentAmmo + AgentDelta.AmmoDelta);
+
+        // Apply status changes
+        if (AgentDelta.bIsDead)
+        {
+            FollowerObs.Health = 0.0f;
+        }
+    }
+
+    // Update combat metrics
+    // Note: These are estimates, actual values would come from simulation
+    const int32 PreviousKills = 0; // Would need to track this
+    const int32 PreviousDeaths = DeadFollowers;
+
+    return NextState;
+}
+
+FTeamObservation FTeamObservation::Clone() const
+{
+    // Deep copy all fields
+    FTeamObservation Cloned = *this;
+
+    // TrackedEnemies is a TSet, needs explicit copy
+    Cloned.TrackedEnemies.Empty();
+    for (AActor* Enemy : TrackedEnemies)
+    {
+        Cloned.TrackedEnemies.Add(Enemy);
+    }
+
+    // FollowerObservations is a TArray, copy should be automatic
+    // but we can be explicit
+    Cloned.FollowerObservations = FollowerObservations;
+
+    return Cloned;
+}
+
+FString FTeamObservation::Serialize() const
+{
+    FString Json = TEXT("{\n");
+
+    // Team composition
+    Json += FString::Printf(TEXT("  \"alive_followers\": %d,\n"), AliveFollowers);
+    Json += FString::Printf(TEXT("  \"dead_followers\": %d,\n"), DeadFollowers);
+    Json += FString::Printf(TEXT("  \"average_team_health\": %.2f,\n"), AverageTeamHealth);
+    Json += FString::Printf(TEXT("  \"min_team_health\": %.2f,\n"), MinTeamHealth);
+    Json += FString::Printf(TEXT("  \"average_team_stamina\": %.2f,\n"), AverageTeamStamina);
+    Json += FString::Printf(TEXT("  \"average_team_ammo\": %.2f,\n"), AverageTeamAmmo);
+
+    // Team formation
+    Json += FString::Printf(TEXT("  \"team_centroid\": [%.2f, %.2f, %.2f],\n"),
+        TeamCentroid.X, TeamCentroid.Y, TeamCentroid.Z);
+    Json += FString::Printf(TEXT("  \"formation_spread\": %.2f,\n"), FormationSpread);
+    Json += FString::Printf(TEXT("  \"formation_coherence\": %.2f,\n"), FormationCoherence);
+    Json += FString::Printf(TEXT("  \"average_distance_to_objective\": %.2f,\n"), AverageDistanceToObjective);
+
+    // Enemy intelligence
+    Json += FString::Printf(TEXT("  \"total_visible_enemies\": %d,\n"), TotalVisibleEnemies);
+    Json += FString::Printf(TEXT("  \"enemies_engaged\": %d,\n"), EnemiesEngaged);
+    Json += FString::Printf(TEXT("  \"average_enemy_health\": %.2f,\n"), AverageEnemyHealth);
+    Json += FString::Printf(TEXT("  \"nearest_enemy_distance\": %.2f,\n"), NearestEnemyDistance);
+
+    // Tactical situation
+    Json += FString::Printf(TEXT("  \"outnumbered\": %s,\n"), bOutnumbered ? TEXT("true") : TEXT("false"));
+    Json += FString::Printf(TEXT("  \"flanked\": %s,\n"), bFlanked ? TEXT("true") : TEXT("false"));
+    Json += FString::Printf(TEXT("  \"cover_advantage\": %s,\n"), bHasCoverAdvantage ? TEXT("true") : TEXT("false"));
+    Json += FString::Printf(TEXT("  \"high_ground\": %s,\n"), bHasHighGround ? TEXT("true") : TEXT("false"));
+    Json += FString::Printf(TEXT("  \"threat_level\": %.2f,\n"), ThreatLevel);
+
+    // Flattened feature vector
+    TArray<float> Features = ToFeatureVector();
+    Json += TEXT("  \"features\": [");
+    for (int32 i = 0; i < Features.Num(); ++i)
+    {
+        Json += FString::Printf(TEXT("%.4f"), Features[i]);
+        if (i < Features.Num() - 1) Json += TEXT(", ");
+    }
+    Json += TEXT("]\n");
+
+    Json += TEXT("}");
+
+    return Json;
 }

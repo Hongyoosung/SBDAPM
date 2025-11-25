@@ -3,6 +3,7 @@
 #include "Team/ObjectiveManager.h"
 #include "Team/Objective.h"
 #include "AI/MCTS/MCTS.h"
+#include "RL/CurriculumManager.h"
 #include "Core/SimulationManagerGameMode.h"
 #include "DrawDebugHelpers.h"
 #include "Async/Async.h"
@@ -36,6 +37,16 @@ void UTeamLeaderComponent::BeginPlay()
 		if (ObjectiveManager)
 		{
 			ObjectiveManager->RegisterComponent();
+		}
+	}
+
+	// Initialize curriculum manager (v3.0 Sprint 3)
+	if (!CurriculumManager)
+	{
+		CurriculumManager = NewObject<UCurriculumManager>(GetOwner());
+		if (CurriculumManager)
+		{
+			UE_LOG(LogTemp, Log, TEXT("TeamLeaderComponent: CurriculumManager initialized for '%s'"), *TeamName);
 		}
 	}
 
@@ -315,11 +326,11 @@ void UTeamLeaderComponent::ProcessStrategicEventWithContext(
 
 		if (bAsyncMCTS)
 		{
-			RunStrategicDecisionMakingAsync();
+			RunObjectiveDecisionMakingAsync();
 		}
 		else
 		{
-			RunStrategicDecisionMaking();
+			RunObjectiveDecisionMaking();
 		}
 	}
 	else
@@ -397,11 +408,11 @@ void UTeamLeaderComponent::ProcessPendingEvents()
 	{
 		if (bAsyncMCTS)
 		{
-			RunStrategicDecisionMakingAsync();
+			RunObjectiveDecisionMakingAsync();
 		}
 		else
 		{
-			RunStrategicDecisionMaking();
+			RunObjectiveDecisionMaking();
 		}
 	}
 }
@@ -431,17 +442,31 @@ FTeamObservation UTeamLeaderComponent::BuildTeamObservation()
 	return TeamObs;
 }
 
-void UTeamLeaderComponent::RunStrategicDecisionMaking()
+
+
+
+
+//==============================================================================
+// v3.0 COMBAT REFACTORING: OBJECTIVE-BASED DECISION MAKING
+//==============================================================================
+
+void UTeamLeaderComponent::RunObjectiveDecisionMaking()
 {
 	if (bMCTSRunning)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': MCTS already running"), *TeamName);
+		UE_LOG(LogTemp, Warning, TEXT("🎯 TeamLeader '%s': MCTS already running"), *TeamName);
+		return;
+	}
+
+	if (!ObjectiveManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🎯 TeamLeader '%s': No ObjectiveManager, cannot run objective-based MCTS"), *TeamName);
 		return;
 	}
 
 	if (GetAliveFollowers().Num() == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': No alive followers, skipping MCTS"), *TeamName);
+		UE_LOG(LogTemp, Warning, TEXT("🎯 TeamLeader '%s': No alive followers, skipping MCTS"), *TeamName);
 		return;
 	}
 
@@ -449,7 +474,7 @@ void UTeamLeaderComponent::RunStrategicDecisionMaking()
 	float StartTime = FPlatformTime::Seconds();
 	LastMCTSTime = StartTime;
 
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS] '%s': MCTS STARTED (SYNC) - %d followers, %d enemies"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS] '%s': MCTS STARTED (SYNC) - %d followers, %d enemies"),
 		*TeamName,
 		GetAliveFollowers().Num(),
 		KnownEnemies.Num());
@@ -457,42 +482,49 @@ void UTeamLeaderComponent::RunStrategicDecisionMaking()
 	// Build observation
 	CurrentTeamObservation = BuildTeamObservation();
 
-	UE_LOG(LogTemp, Display, TEXT("[MCTS] '%s': Observation built (TeamHealth: %.1f%%, TeamCentroid: %s)"),
+	UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Observation built (TeamHealth: %.1f%%)"),
 		*TeamName,
-		CurrentTeamObservation.AverageTeamHealth,
-		*CurrentTeamObservation.TeamCentroid.ToString());
+		CurrentTeamObservation.AverageTeamHealth);
 
-	// Run MCTS to generate strategic commands
-	UE_LOG(LogTemp, Display, TEXT("[MCTS] '%s': Running MCTS with %d simulations..."),
+	// Run objective-based MCTS
+	UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Running MCTS with %d simulations..."),
 		*TeamName,
 		MCTSSimulations);
 
-	TMap<AActor*, FStrategicCommand> NewCommands = StrategicMCTS->RunTeamMCTS(
+	TMap<AActor*, UObjective*> NewObjectives = StrategicMCTS->RunTeamMCTSWithObjectives(
 		CurrentTeamObservation,
-		GetAliveFollowers()
+		GetAliveFollowers(),
+		ObjectiveManager
 	);
 
 	float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // ms
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS] '%s': MCTS COMPLETED in %.2fms - Generated %d commands"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS] '%s': MCTS COMPLETED in %.2fms - Generated %d objectives"),
 		*TeamName,
 		ExecutionTime,
-		NewCommands.Num());
+		NewObjectives.Num());
 
-	// Issue commands
-	OnMCTSComplete(NewCommands);
+	// Process objectives
+	OnObjectiveMCTSComplete(NewObjectives);
 }
 
-void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
+
+void UTeamLeaderComponent::RunObjectiveDecisionMakingAsync()
 {
 	if (bMCTSRunning)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': MCTS already running"), *TeamName);
+		UE_LOG(LogTemp, Warning, TEXT("🎯 TeamLeader '%s': MCTS already running"), *TeamName);
+		return;
+	}
+
+	if (!ObjectiveManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🎯 TeamLeader '%s': No ObjectiveManager, cannot run objective-based MCTS"), *TeamName);
 		return;
 	}
 
 	if (GetAliveFollowers().Num() == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': No alive followers, skipping MCTS"), *TeamName);
+		UE_LOG(LogTemp, Warning, TEXT("🎯 TeamLeader '%s': No alive followers, skipping MCTS"), *TeamName);
 		return;
 	}
 
@@ -500,7 +532,7 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 	float StartTime = FPlatformTime::Seconds();
 	LastMCTSTime = StartTime;
 
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS] '%s': MCTS STARTED (ASYNC) - %d followers, %d enemies"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS] '%s': MCTS STARTED (ASYNC) - %d followers, %d enemies"),
 		*TeamName,
 		GetAliveFollowers().Num(),
 		KnownEnemies.Num());
@@ -508,100 +540,131 @@ void UTeamLeaderComponent::RunStrategicDecisionMakingAsync()
 	// Build observation (on game thread)
 	CurrentTeamObservation = BuildTeamObservation();
 
-	UE_LOG(LogTemp, Display, TEXT("[MCTS] '%s': Observation built, launching async task..."),
+	UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Observation built, launching async task..."),
 		*TeamName);
 
 	// Capture necessary data for async task
 	FTeamObservation TeamObsCopy = CurrentTeamObservation;
 	TArray<AActor*> FollowersCopy = GetAliveFollowers();
-	AActor* ObjectiveCopy = ObjectiveActor;
+	UObjectiveManager* ObjMgrCopy = ObjectiveManager;
 
 	// Capture MCTS pointer for async task
 	UMCTS* MCTSPtr = StrategicMCTS;
 
 	// Launch async task
-	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, MCTSPtr, TeamObsCopy, FollowersCopy, StartTime]()
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, MCTSPtr, TeamObsCopy, FollowersCopy, ObjMgrCopy, StartTime]()
 	{
-		UE_LOG(LogTemp, Display, TEXT("[MCTS] '%s': Background thread executing MCTS..."),
+		UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Background thread executing MCTS..."),
 			*TeamName);
 
-		// Run MCTS on background thread
-		TMap<AActor*, FStrategicCommand> NewCommands = MCTSPtr->RunTeamMCTS(
+		// Run objective-based MCTS on background thread
+		TMap<AActor*, UObjective*> NewObjectives = MCTSPtr->RunTeamMCTSWithObjectives(
 			TeamObsCopy,
-			FollowersCopy
+			FollowersCopy,
+			ObjMgrCopy
 		);
 
 		float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // ms
-		UE_LOG(LogTemp, Warning, TEXT("[MCTS] '%s': MCTS COMPLETED in %.2fms - Generated %d commands"),
+		UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS] '%s': MCTS COMPLETED in %.2fms - Generated %d objectives"),
 			*TeamName,
 			ExecutionTime,
-			NewCommands.Num());
+			NewObjectives.Num());
 
 		// Return to game thread to issue commands
-		AsyncTask(ENamedThreads::GameThread, [this, NewCommands]()
+		AsyncTask(ENamedThreads::GameThread, [this, NewObjectives]()
 		{
-			UE_LOG(LogTemp, Display, TEXT("[MCTS] '%s': Returning to game thread to issue commands"),
+			UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Returning to game thread to assign objectives"),
 				*TeamName);
-			OnMCTSComplete(NewCommands);
+			OnObjectiveMCTSComplete(NewObjectives);
 		});
 	});
 }
 
-void UTeamLeaderComponent::OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCommands)
-{
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS COMPLETE] '%s': MCTS complete, issuing %d commands"),
-		*TeamName, NewCommands.Num());
 
-	// Log command summary
-	TMap<EStrategicCommandType, int32> CommandCounts;
-	for (const auto& Pair : NewCommands)
+void UTeamLeaderComponent::OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> NewObjectives)
+{
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS COMPLETE] '%s': MCTS complete, assigning %d objectives"),
+		*TeamName, NewObjectives.Num());
+
+	if (!ObjectiveManager)
 	{
-		EStrategicCommandType CmdType = Pair.Value.CommandType;
-		CommandCounts.FindOrAdd(CmdType, 0)++;
+		UE_LOG(LogTemp, Error, TEXT("🎯 [OBJECTIVE MCTS COMPLETE] '%s': ObjectiveManager is null!"), *TeamName);
+		bMCTSRunning = false;
+		return;
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("[MCTS COMPLETE] '%s': Command breakdown:"),
+	// Log objective summary
+	TMap<EObjectiveType, int32> ObjectiveCounts;
+	for (const auto& Pair : NewObjectives)
+	{
+		if (Pair.Value)
+		{
+			ObjectiveCounts.FindOrAdd(Pair.Value->Type, 0)++;
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS COMPLETE] '%s': Objective breakdown:"),
 		*TeamName);
-	for (const auto& CountPair : CommandCounts)
+	for (const auto& CountPair : ObjectiveCounts)
 	{
 		UE_LOG(LogTemp, Display, TEXT("   - %s: %d followers"),
 			*UEnum::GetValueAsString(CountPair.Key),
 			CountPair.Value);
 	}
 
-	// ============================================================================
-	// PROXIMITY DIAGNOSIS: Log each agent's command with target location
-	// ============================================================================
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS ASSIGNMENTS] '%s': Detailed command assignments:"), *TeamName);
-	for (const auto& Pair : NewCommands)
+	// Assign objectives to followers using ObjectiveManager
+	for (const auto& Pair : NewObjectives)
 	{
-		AActor* Agent = Pair.Key;
-		const FStrategicCommand& Command = Pair.Value;
+		AActor* Follower = Pair.Key;
+		UObjective* Objective = Pair.Value;
 
-		FString TargetActorName = Command.TargetActor ? Command.TargetActor->GetName() : TEXT("None");
-		FString LocationStr = Command.TargetLocation.ToString();
+		if (!Follower || !Objective) continue;
 
-		UE_LOG(LogTemp, Warning, TEXT("[MCTS] Agent '%s': Command=%s, TargetLoc=%s, TargetActor=%s"),
-			*Agent->GetName(),
-			*UEnum::GetValueAsString(Command.CommandType),
-			*LocationStr,
-			*TargetActorName);
+		// Activate objective
+		ObjectiveManager->ActivateObjective(Objective);
+
+		// Assign agent to objective
+		TArray<AActor*> SingleAgent = { Follower };
+		ObjectiveManager->AssignAgentsToObjective(Objective, SingleAgent);
+
+		UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE ASSIGNMENT] Agent '%s': Objective=%s, Target=%s, Priority=%d"),
+			*Follower->GetName(),
+			*UEnum::GetValueAsString(Objective->Type),
+			Objective->TargetActor ? *Objective->TargetActor->GetName() : TEXT("None"),
+			Objective->Priority);
 	}
 
-	// Issue commands to followers
-	IssueCommands(NewCommands);
+	// Export MCTS statistics for curriculum learning (v3.0 Sprint 3)
+	if (CurriculumManager && StrategicMCTS)
+	{
+		float ValueVariance = 0.0f;
+		float PolicyEntropy = 0.0f;
+		float AverageValue = 0.0f;
 
-	// Wrap commands in FStrategicCommandMap struct for delegate
-	FStrategicCommandMap CommandMap;
-	CommandMap.Commands = NewCommands;
+		StrategicMCTS->GetMCTSStatistics(ValueVariance, PolicyEntropy, AverageValue);
+		int32 VisitCount = StrategicMCTS->GetRootVisitCount();
 
-	// Broadcast event
-	OnStrategicDecisionMade.Broadcast(CommandMap);
+		// Create scenario metrics
+		FMCTSScenarioMetrics ScenarioMetrics;
+		ScenarioMetrics.TeamObservation = CurrentTeamObservation.ToRLObservation();
+		ScenarioMetrics.CommandType = 0; // Objective-based, no single command type
+		ScenarioMetrics.ValueVariance = ValueVariance;
+		ScenarioMetrics.PolicyEntropy = PolicyEntropy;
+		ScenarioMetrics.VisitCount = VisitCount;
+		ScenarioMetrics.AverageValue = AverageValue;
+		ScenarioMetrics.Timestamp = GetWorld()->GetTimeSeconds();
+
+		CurriculumManager->AddScenario(ScenarioMetrics);
+
+		UE_LOG(LogTemp, Verbose, TEXT("🎓 [CURRICULUM] '%s': Recorded MCTS scenario (Variance=%.3f, Entropy=%.3f, Visits=%d)"),
+			*TeamName, ValueVariance, PolicyEntropy, VisitCount);
+	}
 
 	bMCTSRunning = false;
-	UE_LOG(LogTemp, Warning, TEXT("[MCTS COMPLETE] '%s': All commands issued, MCTS cycle complete"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS COMPLETE] '%s': All objectives assigned, MCTS cycle complete"),
 		*TeamName);
 }
+
 
 //------------------------------------------------------------------------------
 // COMMAND ISSUANCE
@@ -976,4 +1039,103 @@ TArray<UObjective*> UTeamLeaderComponent::GetActiveObjectives() const
 	}
 
 	return ObjectiveManager->GetActiveObjectives();
+}
+
+//==============================================================================
+// STRATEGIC REWARDS (Sprint 5 - Hierarchical Rewards)
+//==============================================================================
+
+void UTeamLeaderComponent::OnObjectiveCompleted(UObjective* Objective)
+{
+	if (!Objective)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("🏆 TeamLeader '%s': Objective completed! Type=%d, Priority=%d"),
+		*TeamName, (int32)Objective->Type, Objective->Priority);
+
+	// Distribute team reward (+50)
+	const float ObjectiveReward = 50.0f;
+	DistributeTeamReward(ObjectiveReward, TEXT("Objective Completed"));
+
+	// Notify all followers' reward calculators
+	for (AActor* Follower : Followers)
+	{
+		if (!Follower) continue;
+
+		UFollowerAgentComponent* FollowerComp = Follower->FindComponentByClass<UFollowerAgentComponent>();
+		if (FollowerComp && FollowerComp->GetRewardCalculator())
+		{
+			FollowerComp->GetRewardCalculator()->OnObjectiveComplete(Objective);
+		}
+	}
+}
+
+void UTeamLeaderComponent::OnObjectiveFailed(UObjective* Objective)
+{
+	if (!Objective)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("❌ TeamLeader '%s': Objective FAILED! Type=%d, Priority=%d"),
+		*TeamName, (int32)Objective->Type, Objective->Priority);
+
+	// Distribute team penalty (-30)
+	const float ObjectivePenalty = -30.0f;
+	DistributeTeamReward(ObjectivePenalty, TEXT("Objective Failed"));
+
+	// Notify all followers' reward calculators
+	for (AActor* Follower : Followers)
+	{
+		if (!Follower) continue;
+
+		UFollowerAgentComponent* FollowerComp = Follower->FindComponentByClass<UFollowerAgentComponent>();
+		if (FollowerComp && FollowerComp->GetRewardCalculator())
+		{
+			FollowerComp->GetRewardCalculator()->OnObjectiveFailed(Objective);
+		}
+	}
+}
+
+void UTeamLeaderComponent::OnEnemySquadWiped()
+{
+	UE_LOG(LogTemp, Warning, TEXT("💀 TeamLeader '%s': Enemy squad WIPED!"), *TeamName);
+
+	// Distribute team reward (+30)
+	const float SquadWipeReward = 30.0f;
+	DistributeTeamReward(SquadWipeReward, TEXT("Enemy Squad Wiped"));
+}
+
+void UTeamLeaderComponent::OnOwnSquadWiped()
+{
+	UE_LOG(LogTemp, Error, TEXT("☠️ TeamLeader '%s': Own squad WIPED!"), *TeamName);
+
+	// Distribute team penalty (-30)
+	const float SquadWipePenalty = -30.0f;
+	DistributeTeamReward(SquadWipePenalty, TEXT("Own Squad Wiped"));
+}
+
+void UTeamLeaderComponent::DistributeTeamReward(float Reward, const FString& Reason)
+{
+	int32 AliveCount = 0;
+
+	for (AActor* Follower : Followers)
+	{
+		if (!Follower) continue;
+
+		UFollowerAgentComponent* FollowerComp = Follower->FindComponentByClass<UFollowerAgentComponent>();
+		if (!FollowerComp || !FollowerComp->GetIsAlive())
+		{
+			continue;
+		}
+
+		// Distribute reward to alive followers
+		FollowerComp->ProvideReward(Reward, false);
+		AliveCount++;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Distributed %.1f reward to %d followers (Reason: %s)"),
+		*TeamName, Reward, AliveCount, *Reason);
 }

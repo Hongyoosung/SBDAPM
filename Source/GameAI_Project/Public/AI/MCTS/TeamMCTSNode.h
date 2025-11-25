@@ -43,6 +43,9 @@ public:
 	/** Calculate UCT value for this node */
 	float CalculateUCTValue(float ExplorationParam) const;
 
+	/** Calculate UCT value with prior probability guidance (v3.0 Sprint 4) */
+	float CalculateUCTValueWithPrior(float ExplorationParam, float Prior) const;
+
 public:
 	/** Parent node (nullptr for root) */
 	TWeakPtr<FTeamMCTSNode> Parent;
@@ -64,4 +67,10 @@ public:
 
 	/** List of untried command combinations */
 	TArray<TMap<AActor*, FStrategicCommand>> UntriedActions;
+
+	/** Action priors from RL policy (v3.0 Sprint 4)
+	 * Parallel array to UntriedActions - guides MCTS exploration
+	 * Higher prior = more promising action, should be expanded first
+	 */
+	TArray<float> ActionPriors;
 };

@@ -167,16 +167,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|Observation")
 	FTeamObservation BuildTeamObservation();
 
-	/** Run strategic decision-making (sync) */
-	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
-	void RunStrategicDecisionMaking();
 
-	/** Run strategic decision-making (async) */
+	/** Run objective-based decision-making (sync) - v3.0 Combat Refactoring */
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
-	void RunStrategicDecisionMakingAsync();
+	void RunObjectiveDecisionMaking();
 
-	/** Callback when async MCTS completes */
-	void OnMCTSComplete(TMap<AActor*, FStrategicCommand> NewCommands);
+	/** Run objective-based decision-making (async) - v3.0 Combat Refactoring */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
+	void RunObjectiveDecisionMakingAsync();
+
+	/** Callback when async objective-based MCTS completes (v3.0) */
+	void OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> NewObjectives);
 
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
 	bool IsMCTSRunning() const { return bMCTSRunning; }
@@ -243,6 +244,30 @@ public:
 	/** Get all active objectives */
 	UFUNCTION(BlueprintPure, Category = "Team Leader|Objectives")
 	TArray<UObjective*> GetActiveObjectives() const;
+
+	//--------------------------------------------------------------------------
+	// STRATEGIC REWARDS (Sprint 5 - Hierarchical Rewards)
+	//--------------------------------------------------------------------------
+
+	/** Track objective completion and distribute team reward (+50) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Rewards")
+	void OnObjectiveCompleted(UObjective* Objective);
+
+	/** Track objective failure and distribute team penalty (-30) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Rewards")
+	void OnObjectiveFailed(UObjective* Objective);
+
+	/** Track enemy squad wipe and distribute team reward (+30) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Rewards")
+	void OnEnemySquadWiped();
+
+	/** Track own squad wipe and distribute team penalty (-30) */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Rewards")
+	void OnOwnSquadWiped();
+
+	/** Distribute strategic reward to all alive followers */
+	UFUNCTION(BlueprintCallable, Category = "Team Leader|Rewards")
+	void DistributeTeamReward(float Reward, const FString& Reason);
 
 	//--------------------------------------------------------------------------
 	// METRICS & DEBUGGING
@@ -392,6 +417,10 @@ public:
 	/** Objective manager (v3.0 Combat Refactoring) */
 	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
 	UObjectiveManager* ObjectiveManager;
+
+	/** Curriculum manager for MCTS-guided RL training (v3.0 Sprint 3) */
+	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
+	class UCurriculumManager* CurriculumManager;
 
 	//--------------------------------------------------------------------------
 	// EVENTS

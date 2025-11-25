@@ -48,7 +48,66 @@ class GAMEAI_PROJECT_API UObjective : public UObject
 public:
     UObjective();
 
+    //========================================
+    // Lifecycle methods
+    //========================================
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    virtual void Activate();
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    virtual void Deactivate();
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    virtual void Cancel();
+
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    virtual void Tick(float DeltaTime);
+
+    //========================================
+    // Status queries
+    //========================================
+    UFUNCTION(BlueprintPure, Category = "Objective")
+    virtual bool IsActive() const { return Status == EObjectiveStatus::Active; }
+
+    UFUNCTION(BlueprintPure, Category = "Objective")
+    virtual bool IsCompleted() const { return Status == EObjectiveStatus::Completed; }
+
+    UFUNCTION(BlueprintPure, Category = "Objective")
+    virtual bool IsFailed() const { return Status == EObjectiveStatus::Failed; }
+
+    UFUNCTION(BlueprintPure, Category = "Objective")
+    virtual float GetProgress() const { return Progress; }
+
+    //========================================
+    // Reward calculation for MCTS/RL
+    //========================================
+    UFUNCTION(BlueprintPure, Category = "Objective")
+    virtual float CalculateStrategicReward() const;
+
+    //========================================
+    // Override these in subclasses
+    //========================================
+    virtual bool CheckCompletion();
+    virtual bool CheckFailure();
+    virtual void UpdateProgress(float DeltaTime);
+
+
+protected:
+    //========================================
+    // Helper to check if target actor is still valid
+    //========================================
+    bool IsTargetValid() const;
+
+    //========================================
+    // Helper to check if objective timed out
+    //========================================
+    bool HasTimedOut() const;
+
+
+public:
+    //========================================
     // Core properties
+    //========================================
     UPROPERTY(BlueprintReadWrite, Category = "Objective")
     EObjectiveType Type;
 
@@ -79,46 +138,4 @@ public:
 
     UPROPERTY(BlueprintReadOnly, Category = "Objective")
     float TimeRemaining = 0.0f;  // Time until timeout
-
-    // Lifecycle methods
-    UFUNCTION(BlueprintCallable, Category = "Objective")
-    virtual void Activate();
-
-    UFUNCTION(BlueprintCallable, Category = "Objective")
-    virtual void Deactivate();
-
-    UFUNCTION(BlueprintCallable, Category = "Objective")
-    virtual void Cancel();
-
-    UFUNCTION(BlueprintCallable, Category = "Objective")
-    virtual void Tick(float DeltaTime);
-
-    // Status queries
-    UFUNCTION(BlueprintPure, Category = "Objective")
-    virtual bool IsActive() const { return Status == EObjectiveStatus::Active; }
-
-    UFUNCTION(BlueprintPure, Category = "Objective")
-    virtual bool IsCompleted() const { return Status == EObjectiveStatus::Completed; }
-
-    UFUNCTION(BlueprintPure, Category = "Objective")
-    virtual bool IsFailed() const { return Status == EObjectiveStatus::Failed; }
-
-    UFUNCTION(BlueprintPure, Category = "Objective")
-    virtual float GetProgress() const { return Progress; }
-
-    // Reward calculation for MCTS/RL
-    UFUNCTION(BlueprintPure, Category = "Objective")
-    virtual float CalculateStrategicReward() const;
-
-    // Override these in subclasses
-    virtual bool CheckCompletion();
-    virtual bool CheckFailure();
-    virtual void UpdateProgress(float DeltaTime);
-
-protected:
-    // Helper to check if target actor is still valid
-    bool IsTargetValid() const;
-
-    // Helper to check if objective timed out
-    bool HasTimedOut() const;
 };
