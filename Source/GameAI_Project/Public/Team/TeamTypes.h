@@ -135,6 +135,22 @@ struct GAMEAI_PROJECT_API FStrategicCommand
 	UPROPERTY(BlueprintReadWrite, Category = "Command")
 	float Progress = 0.0f;
 
+	//--------------------------------------------------------------------------
+	// UNCERTAINTY QUANTIFICATION (v3.0 Sprint 6)
+	//--------------------------------------------------------------------------
+
+	/** Confidence level (0-1): visit count / total visits from MCTS */
+	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
+	float Confidence = 1.0f;
+
+	/** Value variance: standard deviation of child values in MCTS tree */
+	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
+	float ValueVariance = 0.0f;
+
+	/** Policy entropy: H(π) - decision uncertainty from action distribution */
+	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
+	float PolicyEntropy = 0.0f;
+
 	// Constructor
 	FStrategicCommand()
 	{

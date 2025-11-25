@@ -11,6 +11,37 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+//------------------------------------------------------------------------------
+// HELPER FUNCTIONS
+//------------------------------------------------------------------------------
+
+namespace
+{
+	/** Convert objective type to strategic command type (v3.0 Sprint 6) */
+	EStrategicCommandType ConvertObjectiveToCommandType(EObjectiveType ObjectiveType)
+	{
+		switch (ObjectiveType)
+		{
+			case EObjectiveType::Attack:
+				return EStrategicCommandType::Assault;
+			case EObjectiveType::Defend:
+				return EStrategicCommandType::Defend;
+			case EObjectiveType::Support:
+				return EStrategicCommandType::Support;
+			case EObjectiveType::Move:
+				return EStrategicCommandType::MoveTo;
+			case EObjectiveType::Patrol:
+				return EStrategicCommandType::Patrol;
+			case EObjectiveType::Hold:
+				return EStrategicCommandType::HoldPosition;
+			case EObjectiveType::Scout:
+				return EStrategicCommandType::Patrol; // Scout as patrol
+			default:
+				return EStrategicCommandType::Idle;
+		}
+	}
+}
+
 UTeamLeaderComponent::UTeamLeaderComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -58,15 +89,42 @@ void UTeamLeaderComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Process pending events
-	ProcessPendingEvents();
-
-
 	// Update team observation (for next decision)
 	if (Followers.Num() > 0)
 	{
 		CurrentTeamObservation = BuildTeamObservation();
 	}
+
+	//--------------------------------------------------------------------------
+	// CONTINUOUS PLANNING (v3.0 Sprint 6)
+	//--------------------------------------------------------------------------
+	if (bContinuousPlanning)
+	{
+		TimeSinceLastPlanning += DeltaTime;
+
+		// Check if we should run proactive planning
+		if (TimeSinceLastPlanning >= ContinuousPlanningInterval &&
+			!bMCTSRunning &&
+			GetAliveFollowers().Num() > 0)
+		{
+			UE_LOG(LogTemp, Display, TEXT("⏰ [CONTINUOUS PLANNING] '%s': Planning interval reached (%.2fs), triggering MCTS"),
+				*TeamName, TimeSinceLastPlanning);
+
+			TimeSinceLastPlanning = 0.0f;
+
+			if (bAsyncMCTS)
+			{
+				RunObjectiveDecisionMakingAsync();
+			}
+			else
+			{
+				RunObjectiveDecisionMaking();
+			}
+		}
+	}
+
+	// Process pending events (can interrupt if critical and bAllowEventInterrupts=true)
+	ProcessPendingEvents();
 
 	// ============================================================================
 	// PROXIMITY DIAGNOSIS: Log inter-agent distances every 2 seconds
@@ -351,6 +409,44 @@ bool UTeamLeaderComponent::ShouldTriggerMCTS(const FStrategicEventContext& Conte
 		return false;
 	}
 
+	// v3.0 Sprint 6: In continuous planning mode, only interrupt for critical events
+	if (bContinuousPlanning)
+	{
+		if (!bAllowEventInterrupts)
+		{
+			// Event interrupts disabled, let continuous planning handle it
+			UE_LOG(LogTemp, Verbose, TEXT("TeamLeader '%s': Continuous planning mode, event interrupts disabled"), *TeamName);
+			return false;
+		}
+
+		// Only trigger on CRITICAL events (priority >= 9)
+		bool bIsCritical = Context.Priority >= 9;
+
+		// Critical event types
+		switch (Context.EventType)
+		{
+			case EStrategicEvent::AllyKilled:
+			case EStrategicEvent::AmbushDetected:
+			case EStrategicEvent::LowTeamHealth:
+			case EStrategicEvent::ObjectiveComplete:
+			case EStrategicEvent::ObjectiveFailed:
+				bIsCritical = true;
+				break;
+			default:
+				break;
+		}
+
+		if (!bIsCritical)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("TeamLeader '%s': Continuous planning mode, non-critical event queued for next cycle"), *TeamName);
+			return false;
+		}
+
+		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': CRITICAL EVENT interrupting continuous planning"), *TeamName);
+		return true;
+	}
+
+	// Legacy event-driven mode
 	// Don't trigger if on cooldown
 	if (IsMCTSOnCooldown())
 	{
@@ -498,6 +594,31 @@ void UTeamLeaderComponent::RunObjectiveDecisionMaking()
 	);
 
 	float ExecutionTime = (FPlatformTime::Seconds() - StartTime) * 1000.0f; // ms
+
+	// Update rolling average (v3.0 Sprint 6 - Performance Profiling)
+	MCTSExecutionCount++;
+	AverageMCTSExecutionTime = ((AverageMCTSExecutionTime * (MCTSExecutionCount - 1)) + ExecutionTime) / MCTSExecutionCount;
+
+	// Performance warning if exceeding target
+	const float TargetTime = 50.0f; // Target: 30-50ms
+	if (ExecutionTime > TargetTime)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ [PERFORMANCE] '%s': MCTS took %.2fms (exceeds target of %.0fms) - Avg: %.2fms over %d runs"),
+			*TeamName,
+			ExecutionTime,
+			TargetTime,
+			AverageMCTSExecutionTime,
+			MCTSExecutionCount);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("✓ [PERFORMANCE] '%s': MCTS took %.2fms (within target) - Avg: %.2fms over %d runs"),
+			*TeamName,
+			ExecutionTime,
+			AverageMCTSExecutionTime,
+			MCTSExecutionCount);
+	}
+
 	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS] '%s': MCTS COMPLETED in %.2fms - Generated %d objectives"),
 		*TeamName,
 		ExecutionTime,
@@ -571,8 +692,32 @@ void UTeamLeaderComponent::RunObjectiveDecisionMakingAsync()
 			NewObjectives.Num());
 
 		// Return to game thread to issue commands
-		AsyncTask(ENamedThreads::GameThread, [this, NewObjectives]()
+		AsyncTask(ENamedThreads::GameThread, [this, NewObjectives, ExecutionTime]()
 		{
+			// Update rolling average (v3.0 Sprint 6 - Performance Profiling)
+			MCTSExecutionCount++;
+			AverageMCTSExecutionTime = ((AverageMCTSExecutionTime * (MCTSExecutionCount - 1)) + ExecutionTime) / MCTSExecutionCount;
+
+			// Performance warning if exceeding target
+			const float TargetTime = 50.0f; // Target: 30-50ms
+			if (ExecutionTime > TargetTime)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("⚠️ [PERFORMANCE] '%s': MCTS took %.2fms (exceeds target of %.0fms) - Avg: %.2fms over %d runs"),
+					*TeamName,
+					ExecutionTime,
+					TargetTime,
+					AverageMCTSExecutionTime,
+					MCTSExecutionCount);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("✓ [PERFORMANCE] '%s': MCTS took %.2fms (within target) - Avg: %.2fms over %d runs"),
+					*TeamName,
+					ExecutionTime,
+					AverageMCTSExecutionTime,
+					MCTSExecutionCount);
+			}
+
 			UE_LOG(LogTemp, Display, TEXT("🎯 [OBJECTIVE MCTS] '%s': Returning to game thread to assign objectives"),
 				*TeamName);
 			OnObjectiveMCTSComplete(NewObjectives);
@@ -634,30 +779,79 @@ void UTeamLeaderComponent::OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> Ne
 			Objective->Priority);
 	}
 
-	// Export MCTS statistics for curriculum learning (v3.0 Sprint 3)
-	if (CurriculumManager && StrategicMCTS)
-	{
-		float ValueVariance = 0.0f;
-		float PolicyEntropy = 0.0f;
-		float AverageValue = 0.0f;
+	// Export MCTS statistics for curriculum learning (v3.0 Sprint 3) & confidence (Sprint 6)
+	float ValueVariance = 0.0f;
+	float PolicyEntropy = 0.0f;
+	float AverageValue = 0.0f;
+	float Confidence = 1.0f;
 
+	if (StrategicMCTS)
+	{
 		StrategicMCTS->GetMCTSStatistics(ValueVariance, PolicyEntropy, AverageValue);
 		int32 VisitCount = StrategicMCTS->GetRootVisitCount();
 
-		// Create scenario metrics
-		FMCTSScenarioMetrics ScenarioMetrics;
-		ScenarioMetrics.TeamObservation = CurrentTeamObservation.ToRLObservation();
-		ScenarioMetrics.CommandType = 0; // Objective-based, no single command type
-		ScenarioMetrics.ValueVariance = ValueVariance;
-		ScenarioMetrics.PolicyEntropy = PolicyEntropy;
-		ScenarioMetrics.VisitCount = VisitCount;
-		ScenarioMetrics.AverageValue = AverageValue;
-		ScenarioMetrics.Timestamp = GetWorld()->GetTimeSeconds();
+		// Calculate confidence (0-1 based on visit count)
+		// Higher visit counts = higher confidence
+		// Normalize: 100 visits = 0.5 confidence, 500 visits = 1.0 confidence
+		Confidence = FMath::Clamp(static_cast<float>(VisitCount) / 500.0f, 0.0f, 1.0f);
 
-		CurriculumManager->AddScenario(ScenarioMetrics);
+		UE_LOG(LogTemp, Display, TEXT("📊 [MCTS STATS] '%s': Confidence=%.2f, Variance=%.3f, Entropy=%.3f, Visits=%d"),
+			*TeamName, Confidence, ValueVariance, PolicyEntropy, VisitCount);
 
-		UE_LOG(LogTemp, Verbose, TEXT("🎓 [CURRICULUM] '%s': Recorded MCTS scenario (Variance=%.3f, Entropy=%.3f, Visits=%d)"),
-			*TeamName, ValueVariance, PolicyEntropy, VisitCount);
+		// Record scenario for curriculum learning
+		if (CurriculumManager)
+		{
+			FMCTSScenarioMetrics ScenarioMetrics;
+			ScenarioMetrics.TeamObservation = CurrentTeamObservation.ToRLObservation();
+			ScenarioMetrics.CommandType = 0; // Objective-based, no single command type
+			ScenarioMetrics.ValueVariance = ValueVariance;
+			ScenarioMetrics.PolicyEntropy = PolicyEntropy;
+			ScenarioMetrics.VisitCount = VisitCount;
+			ScenarioMetrics.AverageValue = AverageValue;
+			ScenarioMetrics.Timestamp = GetWorld()->GetTimeSeconds();
+
+			CurriculumManager->AddScenario(ScenarioMetrics);
+
+			UE_LOG(LogTemp, Verbose, TEXT("🎓 [CURRICULUM] '%s': Recorded MCTS scenario"),
+				*TeamName);
+		}
+	}
+
+	// Generate strategic commands with confidence fields (v3.0 Sprint 6)
+	TMap<AActor*, FStrategicCommand> CommandsWithConfidence;
+	for (const auto& Pair : NewObjectives)
+	{
+		AActor* Follower = Pair.Key;
+		UObjective* Objective = Pair.Value;
+
+		if (!Follower || !Objective) continue;
+
+		// Create strategic command from objective
+		FStrategicCommand Command;
+		Command.CommandType = ConvertObjectiveToCommandType(Objective->Type);
+		Command.TargetLocation = Objective->TargetLocation;
+		Command.TargetActor = Objective->TargetActor;
+		Command.Priority = Objective->Priority;
+
+		// Populate uncertainty fields (v3.0 Sprint 6)
+		Command.Confidence = Confidence;
+		Command.ValueVariance = ValueVariance;
+		Command.PolicyEntropy = PolicyEntropy;
+
+		CommandsWithConfidence.Add(Follower, Command);
+
+		UE_LOG(LogTemp, Display, TEXT("📋 [COMMAND] Agent '%s': %s (Confidence=%.2f, Variance=%.2f, Entropy=%.2f)"),
+			*Follower->GetName(),
+			*UEnum::GetValueAsString(Command.CommandType),
+			Command.Confidence,
+			Command.ValueVariance,
+			Command.PolicyEntropy);
+	}
+
+	// Store commands in CurrentCommands for tracking
+	for (const auto& CmdPair : CommandsWithConfidence)
+	{
+		CurrentCommands.Add(CmdPair.Key, CmdPair.Value);
 	}
 
 	bMCTSRunning = false;

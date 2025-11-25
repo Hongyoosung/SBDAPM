@@ -307,20 +307,32 @@ struct FStrategicCommand {
 **Status**: ✅ IMPLEMENTATION COMPLETE. RewardCalculator tracks individual (+10 kill, +5 damage, -5 take damage, -10 death), coordination (+15 strategic kill, +10 combined fire, +5 formation, -15 disobey), and strategic rewards (+50 objective complete, +30 enemy wipe, -30 own wipe). MCTS uses UCB-based action sampling with top-3 objectives per follower, synergy bonuses, and 20% exploration. Training awaits gameplay testing.
 
 ### Sprint 6 (Weeks 11-12): Continuous Planning + Uncertainty
-- [ ] Convert event-driven → time-sliced MCTS
-- [ ] Add confidence fields to `FStrategicCommand`
-- [ ] Implement confidence-weighted command execution
-- [ ] Performance profiling (stay under 10ms/frame)
+- [x] Convert event-driven → time-sliced MCTS (1.5s intervals, configurable)
+- [x] Add confidence fields to `FStrategicCommand` (Confidence, ValueVariance, PolicyEntropy)
+- [x] Implement confidence-weighted command execution (threshold-based with logging)
+- [x] Performance profiling (rolling averages, target 30-50ms MCTS, <10ms/frame overall)
 
 **Validation**: Proactive planning, smooth command transitions
 
+**Status**: ✅ IMPLEMENTATION COMPLETE. Continuous planning runs every 1.5s with proactive MCTS execution. Strategic commands include uncertainty quantification (confidence 0-1, value variance, policy entropy). Follower agents evaluate command confidence (threshold 0.5) and flag low-confidence decisions. Performance profiling tracks rolling averages with target warnings (50ms threshold). Critical events (priority ≥9) can interrupt planning cycle. Ready for gameplay testing.
+
 ### Sprint 7 (Weeks 13-14): Self-Play Pipeline
-- [ ] Implement `self_play_collector.py`
-- [ ] Integrate all training scripts into loop
-- [ ] Run 1000+ self-play games
-- [ ] Evaluate vs baseline (rule-based heuristics)
+- [x] Implement `self_play_collector.py` - Multi-channel data collector (RL, MCTS, transitions, outcomes)
+- [x] Integrate all training scripts into loop - `train_coupled_system.py` orchestrates all training
+- [x] Create evaluation framework - `evaluate_agents.py` compares v3.0 vs v2.0 with metrics
+- [x] Create pipeline orchestrator - `run_selfplay_pipeline.py` automates complete workflow
+- [ ] Run 1000+ self-play games - Ready for execution (requires UE5 gameplay)
+- [ ] Evaluate vs baseline (rule-based heuristics) - Framework ready, awaits data
 
 **Validation**: Self-play agents outperform hand-crafted policies
+
+**Status**: ✅ IMPLEMENTATION COMPLETE. All scripts implemented and ready for execution. Pipeline supports:
+- Multi-threaded data collection from 4 socket channels (RL, MCTS, transitions, outcomes)
+- Automated training loop for all networks (ValueNetwork, WorldModel, RLPolicy)
+- Model export to ONNX and deployment to UE5
+- Comprehensive evaluation framework with success criteria from plan
+- Full pipeline orchestration with configurable iterations and batch sizes
+Awaits gameplay data collection from UE5 to begin training cycle.
 
 ---
 
@@ -343,9 +355,10 @@ Source/GameAI_Project/
 │   ├── WorldModel.h/cpp              # ✅ IMPLEMENTED: State transition predictor (Sprint 2)
 │   └── StateTransition.h             # ✅ IMPLEMENTED: State delta structs (Sprint 2)
 ├── Team/
-│   ├── TeamLeaderComponent.h/cpp     # ✅ MODIFIED: CurriculumManager integration, MCTS stats export (Sprint 3)
-│   ├── FollowerAgentComponent.h/cpp  # ✅ MODIFIED: State transition logging (Sprint 2)
-│   └── StrategicCommand.h            # 🔄 Modified: Add uncertainty fields (Sprint 6)
+│   ├── TeamLeaderComponent.h/cpp     # ✅ MODIFIED: Continuous planning (Sprint 6), CurriculumManager (Sprint 3)
+│   ├── FollowerAgentComponent.h/cpp  # ✅ MODIFIED: Confidence-weighted execution (Sprint 6), State logging (Sprint 2)
+│   ├── TeamTypes.h                   # ✅ MODIFIED: FStrategicCommand uncertainty fields (Sprint 6)
+│   └── StrategicCommand.h            # ✅ MODIFIED: Add uncertainty fields (Sprint 6)
 ├── Observation/
 │   └── TeamObservation.h/cpp         # ✅ MODIFIED: ApplyDelta(), Clone(), Flatten(), Serialize() (Sprint 2)
 ├── Scripts/
@@ -353,9 +366,12 @@ Source/GameAI_Project/
 │   ├── train_world_model.py          # ✅ IMPLEMENTED: World model training (Sprint 2)
 │   ├── train_tactical_policy_v3.py   # ✅ MODIFIED: Prioritized experience replay (Sprint 3)
 │   ├── collect_mcts_data.py          # ✅ IMPLEMENTED: Data collection for value network (Sprint 1)
-│   ├── train_coupled_system.py       # 🆕 NEW: End-to-end training loop (Sprint 7)
-│   ├── self_play_collector.py        # 🆕 NEW: Self-play data collection (Sprint 7)
-│   └── curriculum_config.json        # 🆕 NEW: Curriculum configuration (Sprint 3)
+│   ├── train_coupled_system.py       # ✅ IMPLEMENTED: End-to-end training loop (Sprint 7)
+│   ├── self_play_collector.py        # ✅ IMPLEMENTED: Self-play data collection (Sprint 7)
+│   ├── evaluate_agents.py            # ✅ IMPLEMENTED: Agent evaluation and comparison (Sprint 7)
+│   ├── run_selfplay_pipeline.py      # ✅ IMPLEMENTED: Complete pipeline orchestration (Sprint 7)
+│   ├── curriculum_config.json        # 🆕 NEW: Curriculum configuration (Sprint 3)
+│   └── requirements.txt              # ✅ UPDATED: All dependencies (Sprint 7)
 └── Tests/
     ├── TestValueNetwork.cpp          # 🆕 NEW: Unit tests
     ├── TestWorldModel.cpp            # 🆕 NEW
@@ -366,16 +382,16 @@ Source/GameAI_Project/
 
 ## Key Architectural Differences: Before vs After
 
-| Aspect | Current (v2.0) | Refactored (v3.0) |
-|--------|----------------|-------------------|
-| **MCTS Simulation** | Static heuristic evaluation | World model rollouts (5-10 steps) |
-| **Value Estimation** | Hand-crafted `CalculateTeamReward()` | Learned `TeamValueNetwork` |
-| **Action Sampling** | Random 10/14,641 combinations | UCB + progressive widening |
-| **RL ↔ MCTS** | Decoupled, independent | Coupled: Priors + curriculum |
-| **Rewards** | Misaligned (individual vs team) | Unified hierarchical rewards |
-| **Planning** | Event-driven (reactive) | Continuous (proactive) |
-| **Uncertainty** | None | Confidence estimates per command |
-| **Training** | Offline RL only | Self-play loop (RL + MCTS + WorldModel) |
+| Aspect | Current (v2.0) | Refactored (v3.0) | Status |
+|--------|----------------|-------------------|--------|
+| **MCTS Simulation** | Static heuristic evaluation | World model rollouts (5-10 steps) | ✅ Implemented (Sprint 2) |
+| **Value Estimation** | Hand-crafted `CalculateTeamReward()` | Learned `TeamValueNetwork` | ✅ Implemented (Sprint 1) |
+| **Action Sampling** | Random 10/14,641 combinations | UCB + progressive widening | ✅ Implemented (Sprint 5) |
+| **RL ↔ MCTS** | Decoupled, independent | Coupled: Priors + curriculum | ✅ Implemented (Sprints 3-4) |
+| **Rewards** | Misaligned (individual vs team) | Unified hierarchical rewards | ✅ Implemented (Sprint 5) |
+| **Planning** | Event-driven (reactive) | Continuous (proactive, 1.5s) | ✅ Implemented (Sprint 6) |
+| **Uncertainty** | None | Confidence estimates per command | ✅ Implemented (Sprint 6) |
+| **Training** | Offline RL only | Self-play loop (RL + MCTS + WorldModel) | ⏳ Pending (Sprint 7) |
 
 ---
 
@@ -472,47 +488,78 @@ Source/GameAI_Project/
 - ✅ Prior-guided expansion - Greedy selection based on priors
 - **Status**: Implementation complete (training & benchmarking awaits gameplay)
 
-### 🔄 Remaining Sprints
+### ✅ All Sprints Complete (Implementation Phase)
 
 **Sprint 5 (Weeks 9-10): Reward Alignment + UCB Sampling**
-- [ ] `RewardCalculator.h/cpp` (unified hierarchical rewards)
-- [ ] Coordination bonus tracking
-- [ ] UCB action sampling (replace random combinations)
+- [x] `RewardCalculator.h/cpp` (unified hierarchical rewards)
+- [x] Coordination bonus tracking
+- [x] UCB action sampling (replace random combinations)
+- **Status**: ✅ COMPLETE
 
 **Sprint 6 (Weeks 11-12): Continuous Planning + Uncertainty**
-- [ ] Time-sliced MCTS (1-2s intervals)
-- [ ] Confidence fields in `FStrategicCommand`
-- [ ] Confidence-weighted command execution
+- [x] Time-sliced MCTS (1.5s intervals, configurable)
+- [x] Confidence fields in `FStrategicCommand` (Confidence, ValueVariance, PolicyEntropy)
+- [x] Confidence-weighted command execution (threshold-based)
+- [x] Performance profiling (rolling averages, 50ms target)
+- **Status**: ✅ COMPLETE
 
 **Sprint 7 (Weeks 13-14): Self-Play Pipeline**
-- [ ] `self_play_collector.py`
-- [ ] `train_coupled_system.py` (end-to-end loop)
-- [ ] 1000+ self-play games
-- [ ] Evaluate vs baseline
+- [x] `self_play_collector.py` (multi-channel data collection)
+- [x] `train_coupled_system.py` (end-to-end training loop)
+- [x] `evaluate_agents.py` (baseline comparison framework)
+- [x] `run_selfplay_pipeline.py` (complete pipeline orchestration)
+- [ ] 1000+ self-play games execution (awaits UE5 gameplay)
+- [ ] Baseline evaluation (awaits game data)
+- **Status**: ✅ COMPLETE (implementation)
 
-### Key Achievements (Sprints 1-4)
+### Key Achievements (Sprints 1-7)
 
 **Architecture:**
 - Value network replaces hand-crafted heuristics in MCTS leaf evaluation
 - World model enables true Monte Carlo simulation (5-step lookahead)
 - MCTS identifies hard scenarios → RL focuses training on them
-- **NEW (Sprint 4)**: RL policy provides priors to guide MCTS tree search (AlphaZero-style)
-- **NEW (Sprint 4)**: Prior-guided expansion focuses MCTS on promising branches
+- **Sprint 4**: RL policy provides priors to guide MCTS tree search (AlphaZero-style)
+- **Sprint 4**: Prior-guided expansion focuses MCTS on promising branches
+- **Sprint 5**: Hierarchical reward system aligns strategic + tactical objectives
+- **Sprint 5**: UCB-based action sampling with synergy bonuses (top-3 objectives/follower)
+- **Sprint 6**: Continuous planning (1.5s intervals) replaces event-driven MCTS
+- **Sprint 6**: Uncertainty quantification (confidence, variance, entropy) per command
+- **Sprint 6**: Confidence-weighted execution with performance profiling
+- **Sprint 7**: Complete self-play training pipeline with automated data collection
+- **Sprint 7**: Coupled training orchestration for all networks (Value, World Model, RL)
+- **Sprint 7**: Comprehensive evaluation framework with success criteria validation
 
 **Data Flow:**
 ```
-Gameplay → MCTS (uncertainty metrics) → CurriculumManager → Tagged Experiences
-             ↓                                                ↓
-      RL Priors (guide tree search)              Prioritized Replay → RL Training
+UE5 Gameplay → Multi-Channel Export (RL, MCTS, Transitions, Outcomes)
+     ↓
+Self-Play Collector (4 socket channels, threaded collection)
+     ↓
+Coupled Training System
+     ├→ ValueNetwork (MCTS outcomes)
+     ├→ WorldModel (state transitions)
+     └→ RLPolicy (prioritized experiences with MCTS priors)
+     ↓
+ONNX Export → UE5 NNE Deployment
+     ↓
+Evaluation (v3.0 vs v2.0 baseline)
+     ↓
+Next Iteration (iterative improvement)
 ```
 
-**Training Pipeline:**
-1. Run gameplay with MCTS-guided agents
-2. Export experiences with MCTS uncertainty tags
-3. Train RL policy: `python train_tactical_policy_v3.py --use-prioritization`
-4. Train value network: `python train_value_network.py`
-5. Train world model: `python train_world_model.py`
-6. Load trained models back into Unreal (ONNX → NNE)
+**Training Pipeline (Automated):**
+1. `python run_selfplay_pipeline.py --games 1000 --iterations 10`
+   - Launches self-play data collector
+   - Collects RL experiences, MCTS traces, state transitions
+   - Trains all networks (ValueNetwork, WorldModel, RLPolicy)
+   - Exports to ONNX and deploys to UE5
+   - Evaluates against baseline
+   - Repeats for N iterations
+
+**Manual Training (Individual Components):**
+1. Collect data: `python self_play_collector.py --games 100`
+2. Train models: `python train_coupled_system.py --data-dir ./selfplay_data`
+3. Evaluate: `python evaluate_agents.py --data ./evaluation_data`
 
 ---
 

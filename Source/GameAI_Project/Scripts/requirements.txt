@@ -1,4 +1,4 @@
-# Python dependencies for RL training
+# Python dependencies for AlphaZero-Inspired Multi-Agent Combat AI
 #
 # Install all: pip install -r requirements.txt
 # For live training: pip install schola[rllib]
@@ -20,10 +20,14 @@ ray[rllib]>=2.7.0
 # Visualization
 tensorboard>=2.12.0
 matplotlib>=3.7.0
+seaborn>=0.12.0
 
 # ONNX support
 onnx>=1.14.0
 onnxruntime>=1.15.0
+
+# Data processing and evaluation (Sprint 7)
+pandas>=2.0.0
 
 # Utilities
 tqdm>=4.65.0

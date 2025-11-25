@@ -279,6 +279,36 @@ void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
 	CurrentCommand = Command;
 	TimeSinceLastCommand = 0.0f;
 
+	//--------------------------------------------------------------------------
+	// CONFIDENCE-WEIGHTED EXECUTION (v3.0 Sprint 6)
+	//--------------------------------------------------------------------------
+
+	// Check command confidence (0-1 scale)
+	const float ConfidenceThreshold = 0.5f; // Below this, RL can override
+	bool bLowConfidence = Command.Confidence < ConfidenceThreshold;
+	bool bHighUncertainty = Command.ValueVariance > 0.3f || Command.PolicyEntropy > 1.5f;
+
+	if (bLowConfidence || bHighUncertainty)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ [COMMAND CONFIDENCE] '%s': LOW confidence command (Conf=%.2f, Var=%.2f, Ent=%.2f)"),
+			*GetOwner()->GetName(),
+			Command.Confidence,
+			Command.ValueVariance,
+			Command.PolicyEntropy);
+
+		// TODO (Sprint 6): Allow RL policy to potentially override with tactical judgment
+		// For now, we execute the command but flag it as low-confidence
+		// Future: Query RL policy, compare action probabilities, potentially blend decisions
+	}
+	else
+	{
+		UE_LOG(LogTemp, Display, TEXT("✓ [COMMAND CONFIDENCE] '%s': HIGH confidence command (Conf=%.2f, Var=%.2f, Ent=%.2f)"),
+			*GetOwner()->GetName(),
+			Command.Confidence,
+			Command.ValueVariance,
+			Command.PolicyEntropy);
+	}
+
 	// Map command to follower state
 	EFollowerState NewState = MapCommandToState(Command.CommandType);
 

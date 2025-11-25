@@ -354,6 +354,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
 	int32 EventPriorityThreshold = 5;
 
+	//--------------------------------------------------------------------------
+	// CONTINUOUS PLANNING (v3.0 Sprint 6)
+	//--------------------------------------------------------------------------
+
+	/** Enable continuous planning (time-sliced MCTS) instead of event-driven */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Planning")
+	bool bContinuousPlanning = true;
+
+	/** Interval for continuous planning (seconds) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Planning")
+	float ContinuousPlanningInterval = 1.5f;
+
+	/** Allow critical events to interrupt continuous planning */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Planning")
+	bool bAllowEventInterrupts = true;
+
 	/** Team name/ID */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
 	FString TeamName = TEXT("Alpha Team");
@@ -454,6 +470,15 @@ private:
 
 	/** Time since last formation distance log (for proximity diagnosis) */
 	float TimeSinceLastFormationLog = 0.0f;
+
+	/** Time since last planning cycle (v3.0 Sprint 6 - Continuous Planning) */
+	float TimeSinceLastPlanning = 0.0f;
+
+	/** Rolling average of MCTS execution times (v3.0 Sprint 6 - Performance Profiling) */
+	float AverageMCTSExecutionTime = 0.0f;
+
+	/** Count of MCTS executions for averaging */
+	int32 MCTSExecutionCount = 0;
 
 	//--------------------------------------------------------------------------
 	// STRATEGIC EXPERIENCE STORAGE
