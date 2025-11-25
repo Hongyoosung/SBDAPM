@@ -91,3 +91,7 @@ DerivedDataCache/*
 .vsconfig
 
 .idea/
+
+.claude
+
+nul
