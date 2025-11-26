@@ -13,6 +13,7 @@
 UENUM(BlueprintType)
 enum class EObjectiveType : uint8
 {
+	None			 UMETA(DisplayName = "None"),                 // No objective
     Eliminate        UMETA(DisplayName = "Eliminate Target"),      // Kill specific enemy
     CaptureObjective UMETA(DisplayName = "Capture Objective"),     // Capture zone/flag
     DefendObjective  UMETA(DisplayName = "Defend Objective"),      // Hold zone/flag

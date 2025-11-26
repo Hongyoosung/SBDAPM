@@ -16,16 +16,16 @@ class UTeamLeaderComponent;
 class UObjective;
 
 /**
- * State Tree Shared Context for Follower Agents
+ * State Tree Shared Context for Follower Agents (v3.0)
  *
  * Contains all data shared between State Tree states, tasks, evaluators, and conditions.
  * Replaces both Blackboard and component polling for better performance.
  *
- * This schema is optimized for command-driven tactical execution:
- * 1. Leader issues strategic command
+ * This schema is optimized for objective-driven tactical execution:
+ * 1. Leader assigns objective to follower
  * 2. State Tree transitions to appropriate state
- * 3. RL policy selects tactical action within state
- * 4. State executes action using observation data
+ * 3. RL policy selects atomic tactical actions (move, aim, fire, crouch)
+ * 4. State executes actions using observation data
  */
 USTRUCT(BlueprintType)
 struct GAMEAI_PROJECT_API FFollowerStateTreeContext
@@ -53,22 +53,6 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	TObjectPtr<URLPolicyNetwork> TacticalPolicy = nullptr;
 
 	//--------------------------------------------------------------------------
-	// STRATEGIC COMMAND (Updated when leader issues new command)
-	//--------------------------------------------------------------------------
-
-	/** Current strategic command from team leader */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	FStrategicCommand CurrentCommand;
-
-	/** Is current command still valid? */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	bool bIsCommandValid = false;
-
-	/** Time since command was received (seconds) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	float TimeSinceCommand = 0.0f;
-
-	//--------------------------------------------------------------------------
 	// TACTICAL STATE (Updated by RL policy and execution tasks)
 	//--------------------------------------------------------------------------
 
@@ -85,12 +69,16 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	float ActionProgress = 0.0f;
 
 	//--------------------------------------------------------------------------
-	// OBJECTIVE & SPATIAL CONTEXT (Sprint 3 - Atomic Actions)
+	// OBJECTIVE & SPATIAL CONTEXT (v3.0 - Objective-based execution)
 	//--------------------------------------------------------------------------
 
 	/** Current objective assigned to this agent */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	TObjectPtr<UObjective> CurrentObjective = nullptr;
+
+	/** Does agent have an active objective? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	bool bHasActiveObjective = false;
 
 	/** Action space mask for spatial constraints */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spatial")

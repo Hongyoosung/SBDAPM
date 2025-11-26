@@ -112,9 +112,9 @@ void UObjectiveManager::UnassignAgentFromObjective(AActor* Agent)
     }
 
     // Find agent's current objective
-    if (UObjective** ObjectivePtr = AgentObjectiveMap.Find(Agent))
+    if (TObjectPtr<UObjective>* ObjectivePtr = AgentObjectiveMap.Find(Agent))
     {
-        UObjective* CurrentObjective = *ObjectivePtr;
+        UObjective* CurrentObjective = ObjectivePtr->Get();
         if (CurrentObjective)
         {
             CurrentObjective->AssignedAgents.Remove(Agent);

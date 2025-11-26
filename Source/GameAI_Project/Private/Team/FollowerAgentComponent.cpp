@@ -12,7 +12,6 @@
 #include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/Objective.h"
 #include "Simulation/StateTransition.h"
-#include "Observation/TeamObservation.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -130,10 +129,10 @@ void UFollowerAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// Update command timer
-	UpdateCommandTimer(DeltaTime);
+	// Update tactical action timer (v3.0)
+	TimeSinceLastTacticalAction += DeltaTime;
 
-	// Calculate hierarchical rewards if RewardCalculator is available (Sprint 4)
+	// Calculate hierarchical rewards if RewardCalculator is available
 	if (RewardCalculator)
 	{
 		float TotalReward = RewardCalculator->CalculateTotalReward(DeltaTime);
@@ -242,22 +241,34 @@ void UFollowerAgentComponent::SignalEventToLeader(
 	OnEventSignaled.Broadcast(Event, Instigator, Priority);
 }
 
-void UFollowerAgentComponent::ReportCommandComplete(bool bSuccess)
+void UFollowerAgentComponent::ReportObjectiveComplete(bool bSuccess)
 {
-	if (!IsCommandValid()) return;
+	if (!HasActiveObjective()) return;
 
-	CurrentCommand.bCompleted = true;
-	CurrentCommand.Progress = 1.0f;
+	// Mark objective as completed or failed
+	if (bSuccess)
+	{
+		CurrentObjective->Status = EObjectiveStatus::Completed;
+		CurrentObjective->Progress = 1.0f;
+	}
+	else
+	{
+		CurrentObjective->Status = EObjectiveStatus::Failed;
+	}
 
-	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Command %s completed (%s)"),
+	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Objective %s completed (%s)"),
 		*GetOwner()->GetName(),
-		*UEnum::GetValueAsString(CurrentCommand.CommandType),
+		*UEnum::GetValueAsString(CurrentObjective->Type),
 		bSuccess ? TEXT("Success") : TEXT("Failed"));
 
 	// Signal completion event to leader (low priority)
 	if (bSuccess)
 	{
-		SignalEventToLeader(EStrategicEvent::Custom, GetOwner(), FVector::ZeroVector, 2);
+		SignalEventToLeader(EStrategicEvent::ObjectiveComplete, GetOwner(), FVector::ZeroVector, 2);
+	}
+	else
+	{
+		SignalEventToLeader(EStrategicEvent::ObjectiveFailed, GetOwner(), FVector::ZeroVector, 2);
 	}
 }
 
@@ -270,129 +281,17 @@ void UFollowerAgentComponent::RequestAssistance(int32 Priority)
 }
 
 //------------------------------------------------------------------------------
-// COMMAND EXECUTION
+// OBJECTIVE EXECUTION (v3.0)
 //------------------------------------------------------------------------------
 
-void UFollowerAgentComponent::ExecuteCommand(const FStrategicCommand& Command)
+bool UFollowerAgentComponent::HasActiveObjective() const
 {
-	// Store command
-	CurrentCommand = Command;
-	TimeSinceLastCommand = 0.0f;
-
-	//--------------------------------------------------------------------------
-	// CONFIDENCE-WEIGHTED EXECUTION (v3.0 Sprint 6)
-	//--------------------------------------------------------------------------
-
-	// Check command confidence (0-1 scale)
-	const float ConfidenceThreshold = 0.5f; // Below this, RL can override
-	bool bLowConfidence = Command.Confidence < ConfidenceThreshold;
-	bool bHighUncertainty = Command.ValueVariance > 0.3f || Command.PolicyEntropy > 1.5f;
-
-	if (bLowConfidence || bHighUncertainty)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("⚠️ [COMMAND CONFIDENCE] '%s': LOW confidence command (Conf=%.2f, Var=%.2f, Ent=%.2f)"),
-			*GetOwner()->GetName(),
-			Command.Confidence,
-			Command.ValueVariance,
-			Command.PolicyEntropy);
-
-		// TODO (Sprint 6): Allow RL policy to potentially override with tactical judgment
-		// For now, we execute the command but flag it as low-confidence
-		// Future: Query RL policy, compare action probabilities, potentially blend decisions
-	}
-	else
-	{
-		UE_LOG(LogTemp, Display, TEXT("✓ [COMMAND CONFIDENCE] '%s': HIGH confidence command (Conf=%.2f, Var=%.2f, Ent=%.2f)"),
-			*GetOwner()->GetName(),
-			Command.Confidence,
-			Command.ValueVariance,
-			Command.PolicyEntropy);
-	}
-
-	// Map command to follower state
-	EFollowerState NewState = MapCommandToState(Command.CommandType);
-
-	FString TargetInfo = Command.TargetActor ?
-		FString::Printf(TEXT("Target: %s"), *Command.TargetActor->GetName()) :
-		(!Command.TargetLocation.IsZero() ?
-			FString::Printf(TEXT("Location: %s"), *Command.TargetLocation.ToCompactString()) :
-			TEXT("No target"));
-
-	UE_LOG(LogTemp, Warning, TEXT("[COMMAND RECEIVED] '%s': 📥 Executing command '%s' → State '%s'"),
-		*GetOwner()->GetName(),
-		*UEnum::GetValueAsString(Command.CommandType),
-		*GetStateName(NewState));
-
-	UE_LOG(LogTemp, Display, TEXT("[COMMAND RECEIVED] '%s':    Priority: %d, %s, Duration: %.1fs"),
-		*GetOwner()->GetName(),
-		Command.Priority,
-		*TargetInfo,
-		Command.ExpectedDuration);
-
-	// Transition FSM
-	TransitionToState(NewState);
-
-	UE_LOG(LogTemp, Warning, TEXT("[COMMAND RECEIVED] '%s': ✅ Command execution initiated"),
-		*GetOwner()->GetName());
-
-	// Broadcast event
-	OnCommandReceived.Broadcast(Command, NewState);
-}
-
-bool UFollowerAgentComponent::IsCommandValid() const
-{
-	// Command is valid if not completed and not idle
-	return !CurrentCommand.bCompleted && CurrentCommand.CommandType != EStrategicCommandType::Idle;
-}
-
-bool UFollowerAgentComponent::HasActiveCommand() const
-{
-	// Has active command if not idle and command is valid
-	return CurrentCommand.CommandType != EStrategicCommandType::Idle && IsCommandValid();
-}
-
-void UFollowerAgentComponent::UpdateCommandProgress(float Progress)
-{
-	CurrentCommand.Progress = FMath::Clamp(Progress, 0.0f, 1.0f);
-
-	UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Command progress %.1f%%"),
-		*GetOwner()->GetName(), CurrentCommand.Progress * 100.0f);
+	return CurrentObjective != nullptr && CurrentObjective->IsActive();
 }
 
 //------------------------------------------------------------------------------
 // STATE MANAGEMENT
 //------------------------------------------------------------------------------
-
-EFollowerState UFollowerAgentComponent::MapCommandToState(EStrategicCommandType CommandType)
-{
-	switch (CommandType)
-	{
-		// Offensive
-		case EStrategicCommandType::Assault:
-			return EFollowerState::Assault;
-
-		// Defensive
-		case EStrategicCommandType::Defend:
-			return EFollowerState::Defend;
-
-		// Support
-		case EStrategicCommandType::Support:
-			return EFollowerState::Support;
-
-		// Movement
-		case EStrategicCommandType::MoveTo:
-			return EFollowerState::Move;
-
-		// Retreat
-		case EStrategicCommandType::Retreat:
-			return EFollowerState::Retreat;
-
-		// Idle
-		case EStrategicCommandType::Idle:
-		default:
-			return EFollowerState::Idle;
-	}
-}
 
 void UFollowerAgentComponent::TransitionToState(EFollowerState NewState)
 {
@@ -448,10 +347,8 @@ void UFollowerAgentComponent::MarkAsAlive()
 			*GetOwner()->GetName(), HealthComp->GetCurrentHealth(), HealthComp->GetMaxHealth());
 	}
 
-	// Reset episode and clear old commands
+	// Reset episode (v3.0: objectives are cleared via ObjectiveManager)
 	ResetEpisode();
-	CurrentCommand = FStrategicCommand(); // Clear old command
-	TimeSinceLastCommand = 0.0f;
 
 	// Transition to Idle state
 	TransitionToState(EFollowerState::Idle);
@@ -554,14 +451,10 @@ FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 
 TArray<float> UFollowerAgentComponent::GetRLActionProbabilities()
 {
-	if (!bUseRLPolicy || !TacticalPolicy)
-	{
-		TArray<float> EmptyProbs;
-		return EmptyProbs;
-	}
-
-	FObservationElement CurrentObs = GetLocalObservation();
-	return TacticalPolicy->GetActionProbabilities(CurrentObs);
+	// v3.0: No longer using discrete action probabilities, uses atomic actions instead
+	// Return empty array for backward compatibility
+	TArray<float> EmptyProbs;
+	return EmptyProbs;
 }
 
 void UFollowerAgentComponent::ProvideReward(float Reward, bool bTerminal)
@@ -650,26 +543,6 @@ FString UFollowerAgentComponent::GetStateName(EFollowerState State)
 	return UEnum::GetValueAsString(State);
 }
 
-void UFollowerAgentComponent::UpdateCommandTimer(float DeltaTime)
-{
-	TimeSinceLastCommand += DeltaTime;
-	TimeSinceLastTacticalAction += DeltaTime;
-
-	// Check for command expiration
-	if (IsCommandValid())
-	{
-		if (CurrentCommand.ExpectedDuration > 0.0f &&
-			TimeSinceLastCommand > CurrentCommand.ExpectedDuration)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Command %s expired after %.1fs"),
-				*GetOwner()->GetName(),
-				*UEnum::GetValueAsString(CurrentCommand.CommandType),
-				TimeSinceLastCommand);
-
-			ReportCommandComplete(false);
-		}
-	}
-}
 
 //------------------------------------------------------------------------------
 // DEBUG VISUALIZATION
@@ -684,40 +557,43 @@ void UFollowerAgentComponent::DrawDebugInfo()
 
 	FVector FollowerPos = GetOwner()->GetActorLocation();
 
-	// Draw state above follower
-	FString StateText = FString::Printf(TEXT("State: %s\nCommand: %s\nProgress: %.1f%%"),
+	// Draw state above follower (v3.0)
+	FString ObjectiveStr = CurrentObjective ? UEnum::GetValueAsString(CurrentObjective->Type) : TEXT("None");
+	float Progress = CurrentObjective ? CurrentObjective->GetProgress() : 0.0f;
+
+	FString StateText = FString::Printf(TEXT("State: %s\nObjective: %s\nProgress: %.1f%%"),
 		*GetStateName(CurrentFollowerState),
-		*UEnum::GetValueAsString(CurrentCommand.CommandType),
-		CurrentCommand.Progress * 100.0f);
+		*ObjectiveStr,
+		Progress * 100.0f);
 
 	DrawDebugString(World, FollowerPos + FVector(0, 0, 120), StateText, nullptr, FColor::Cyan, 0.1f, true);
 
-	// Draw line to command target (actor or location)
-	if (IsCommandValid())
+	// Draw line to objective target (actor or location)
+	if (HasActiveObjective())
 	{
 		// Check if target actor exists and is alive
-		if (CurrentCommand.TargetActor && IsValid(CurrentCommand.TargetActor))
+		if (CurrentObjective->TargetActor && IsValid(CurrentObjective->TargetActor))
 		{
 			// Check if target has health component and is alive
-			UHealthComponent* TargetHealth = CurrentCommand.TargetActor->FindComponentByClass<UHealthComponent>();
+			UHealthComponent* TargetHealth = CurrentObjective->TargetActor->FindComponentByClass<UHealthComponent>();
 			bool bTargetAlive = !TargetHealth || TargetHealth->IsAlive();
 
 			if (bTargetAlive)
 			{
-				FVector TargetPos = CurrentCommand.TargetActor->GetActorLocation();
+				FVector TargetPos = CurrentObjective->TargetActor->GetActorLocation();
 				DrawDebugLine(World, FollowerPos, TargetPos, FColor::Red, false, 0.1f, 0, 2.0f);
 				DrawDebugSphere(World, TargetPos, 50.0f, 8, FColor::Red, false, 0.1f);
 
 				// Draw target name
-				FString TargetName = FString::Printf(TEXT("Target: %s"), *CurrentCommand.TargetActor->GetName());
+				FString TargetName = FString::Printf(TEXT("Target: %s"), *CurrentObjective->TargetActor->GetName());
 				DrawDebugString(World, TargetPos + FVector(0, 0, 100), TargetName, nullptr, FColor::Red, 0.1f, true);
 			}
 		}
 		// Draw to target location if no valid actor
-		else if (!CurrentCommand.TargetLocation.IsZero())
+		else if (!CurrentObjective->TargetLocation.IsZero())
 		{
-			DrawDebugLine(World, FollowerPos, CurrentCommand.TargetLocation, FColor::Yellow, false, 0.1f, 0, 2.0f);
-			DrawDebugSphere(World, CurrentCommand.TargetLocation, 50.0f, 8, FColor::Yellow, false, 0.1f);
+			DrawDebugLine(World, FollowerPos, CurrentObjective->TargetLocation, FColor::Yellow, false, 0.1f, 0, 2.0f);
+			DrawDebugSphere(World, CurrentObjective->TargetLocation, 50.0f, 8, FColor::Yellow, false, 0.1f);
 		}
 	}
 
@@ -883,7 +759,7 @@ void UFollowerAgentComponent::LogStateTransition()
 	}
 
 	// Get current team observation from leader
-	FTeamObservation CurrentTeamObs = TeamLeader->GetCurrentTeamObservation();
+	FTeamObservation CurrentTeamObs = TeamLeader->CurrentTeamObservation;
 
 	// Only log if we have a previous observation
 	if (PreviousTeamObservation.AliveFollowers > 0)
@@ -893,8 +769,7 @@ void UFollowerAgentComponent::LogStateTransition()
 		// State before
 		Sample.StateBefore = PreviousTeamObservation.Flatten();
 
-		// Actions (get from team leader)
-		Sample.StrategicCommands = TeamLeader->GetLastCommandsIssued();
+		// Actions (tactical actions only in v3.0)
 		Sample.TacticalActions.Add(LastTacticalAction);
 
 		// State after

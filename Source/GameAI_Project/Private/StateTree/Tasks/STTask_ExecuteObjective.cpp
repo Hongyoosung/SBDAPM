@@ -99,7 +99,7 @@ void FSTTask_ExecuteObjective::ExecuteAtomicAction(FStateTreeExecutionContext& C
 		// Get action with objective context and mask
 		RawAction = SharedContext.TacticalPolicy->GetActionWithMask(
 			SharedContext.CurrentObservation,
-			SharedContext.CurrentObjective->Type,
+			SharedContext.CurrentObjective,
 			SharedContext.ActionMask);
 	}
 	else

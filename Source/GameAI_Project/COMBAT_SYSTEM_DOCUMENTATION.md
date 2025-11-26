@@ -1,6 +1,6 @@
 # Combat System Documentation
 
-**Version:** 2.0
+**Version:** 3.0
 **Engine:** Unreal Engine 5.6
 **Language:** C++17
 **Last Updated:** 2025-11-26
@@ -34,23 +34,27 @@ The combat system is designed for **AI-driven tactical combat** with seamless in
 ### System Architecture
 
 ```
+Team Leader (Objective Manager)
+    ↓ Objectives (Eliminate, Capture, Defend, Support)
+    ↓
 FollowerAgentComponent (AI Controller)
+    ↓ RL Policy Network (atomic actions)
     ↓
 StateTree (Execution Framework)
-    ├─ ExecuteAssault Task → WeaponComponent::Fire()
-    ├─ ExecuteDefend Task → WeaponComponent::SuppressiveFire()
-    └─ ExecuteSupport Task → (Future: Healing/Buffs)
+    └─ ExecuteObjective Task → Atomic Actions
+        ├─ Movement (MoveDirection, MoveSpeed)
+        ├─ Aiming (LookDirection)
+        └─ Discrete Actions (Fire, Crouch, UseAbility)
     ↓
-HealthComponent (Target)
+WeaponComponent::Fire() / HealthComponent
     ├─ ApplyDamage() → Damage calculation
     ├─ OnDeath Event → FollowerAgentComponent::OnAllyKilled/OnEnemyKilled
     └─ Regen/Armor logic
     ↓
-RewardCalculator
-    ├─ +10 Kill reward
-    ├─ +5 Damage dealt reward
-    ├─ -5 Damage taken penalty
-    └─ -10 Death penalty
+RewardCalculator (Hierarchical)
+    ├─ Individual: +10 Kill, +5 Damage, -5 Take Damage, -10 Death
+    ├─ Coordination: +15 Objective kill, +10 Combined fire, +5 Formation
+    └─ Strategic: +50 Objective complete, +30 Squad wipe
 ```
 
 ### Key Features
@@ -67,9 +71,11 @@ RewardCalculator
    - Trace-based hit detection (hitscan)
 
 3. **AI Integration**
-   - Automatic reward calculation on damage/death
-   - Observation integration (health, ammo, cooldown)
-   - StateTree task integration
+   - Objective-driven execution (Eliminate, Capture, Defend, Support)
+   - RL policy outputs atomic actions (8-dimensional continuous space)
+   - Hierarchical reward calculation (individual + coordination + strategic)
+   - Observation integration (health, ammo, cooldown, current objective)
+   - Single unified StateTree task (ExecuteObjective)
 
 ---
 
@@ -712,124 +718,173 @@ FObservationElement UFollowerAgentComponent::BuildObservation()
 
 ## StateTree Integration
 
-### Execute Assault Task
+### Execute Objective Task (v3.0)
 
-**File:** StateTree/Tasks/STTask_ExecuteAssault.cpp:50-120
+**File:** StateTree/Tasks/STTask_ExecuteObjective.cpp
+
+The v3.0 system uses a **single unified task** that handles all objective types through atomic action execution.
 
 ```cpp
-EStateTreeRunStatus USTTask_ExecuteAssault::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
+EStateTreeRunStatus USTTask_ExecuteObjective::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
-    FSTTask_ExecuteAssaultInstanceData& InstanceData = Context.GetInstanceData(*this);
-    FFollowerStateTreeContext& FollowerContext = InstanceData.Context;
+    FSTTask_ExecuteObjectiveInstanceData& InstanceData = Context.GetInstanceData(*this);
+    FFollowerStateTreeContext& SharedContext = GetSharedContext(Context);
 
     AActor* Owner = Context.GetOwner();
     UFollowerAgentComponent* Follower = Owner->FindComponentByClass<UFollowerAgentComponent>();
-
-    if (!Follower || !Follower->GetWeaponComponent())
+    if (!Follower)
         return EStateTreeRunStatus::Failed;
 
-    UWeaponComponent* Weapon = Follower->GetWeaponComponent();
-
-    // Get current target
-    AActor* Target = FollowerContext.CurrentTarget;
-    if (!Target)
+    // 1. Get current objective from team leader
+    UObjective* CurrentObjective = SharedContext.TeamLeader->GetObjectiveForFollower(Follower);
+    if (!CurrentObjective)
     {
-        // Find target via perception
-        Target = Follower->GetPerceptionComponent()->GetNearestEnemy();
-        FollowerContext.CurrentTarget = Target;
-    }
-
-    if (!Target)
-    {
-        UE_LOG(LogStateTree, Warning, TEXT("ExecuteAssault: No target available"));
+        UE_LOG(LogStateTree, Verbose, TEXT("No objective assigned, waiting"));
         return EStateTreeRunStatus::Running;
     }
 
-    // Move toward target if out of range
-    if (!Weapon->IsInRange(Target))
-    {
-        FVector TargetLocation = Target->GetActorLocation();
-        Follower->MoveToLocation(TargetLocation, Weapon->GetRange() * 0.8f);
-        return EStateTreeRunStatus::Running;
-    }
+    // 2. Query RL policy for atomic actions (includes objective context)
+    FTacticalAction Action = SharedContext.TacticalPolicy->GetAction(
+        SharedContext.CurrentObservation,
+        CurrentObjective
+    );
 
-    // Fire at target
-    if (Weapon->CanFire())
-    {
-        bool bHit = Weapon->Fire(Target);
+    // 3. Execute atomic actions (no switch logic!)
+    ExecuteMovement(Context, Action.MoveDirection, Action.MoveSpeed);
+    ExecuteAiming(Context, Action.LookDirection);
 
-        if (bHit)
-        {
-            UE_LOG(LogStateTree, Log, TEXT("ExecuteAssault: Hit target %s"),
-                   *Target->GetName());
-        }
-    }
+    if (Action.bFire)
+        ExecuteFire(Context);
 
-    // Check if target is dead
-    if (UHealthComponent* TargetHealth = Target->FindComponentByClass<UHealthComponent>())
+    if (Action.bCrouch)
+        ExecuteCrouch(Context);
+
+    if (Action.bUseAbility)
+        ExecuteAbility(Context, Action.AbilityID);
+
+    // 4. Calculate hierarchical reward
+    float Reward = CalculateReward(Context, CurrentObjective, Action, DeltaTime);
+    SharedContext.FollowerComponent->ProvideReward(Reward);
+
+    // 5. Check objective completion
+    if (CurrentObjective->IsCompleted())
     {
-        if (!TargetHealth->IsAlive())
-        {
-            FollowerContext.CurrentTarget = nullptr;
-            return EStateTreeRunStatus::Succeeded;
-        }
+        UE_LOG(LogStateTree, Log, TEXT("Objective completed: %s"),
+               *CurrentObjective->GetName());
+        return EStateTreeRunStatus::Succeeded;
     }
 
     return EStateTreeRunStatus::Running;
 }
 ```
 
-### Execute Defend Task
+### Atomic Action Executors
 
-**File:** StateTree/Tasks/STTask_ExecuteDefend.cpp:50-100
+**File:** StateTree/Tasks/STTask_ExecuteObjective.cpp:100-250
 
 ```cpp
-EStateTreeRunStatus USTTask_ExecuteDefend::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
+void USTTask_ExecuteObjective::ExecuteMovement(
+    FStateTreeExecutionContext& Context,
+    FVector2D Direction,
+    float Speed) const
 {
-    FSTTask_ExecuteDefendInstanceData& InstanceData = Context.GetInstanceData(*this);
-    FFollowerStateTreeContext& FollowerContext = InstanceData.Context;
+    AActor* Owner = Context.GetOwner();
+    APawn* Pawn = Cast<APawn>(Owner);
+    if (!Pawn) return;
 
+    // Convert 2D direction to 3D world space
+    FVector WorldDirection = FVector(Direction.X, Direction.Y, 0.0f);
+    WorldDirection.Normalize();
+
+    // Apply movement with speed multiplier
+    float MaxSpeed = Pawn->GetMovementComponent()->GetMaxSpeed();
+    FVector Velocity = WorldDirection * MaxSpeed * Speed;
+
+    Pawn->AddMovementInput(WorldDirection, Speed);
+}
+
+void USTTask_ExecuteObjective::ExecuteAiming(
+    FStateTreeExecutionContext& Context,
+    FVector2D LookDirection) const
+{
+    AActor* Owner = Context.GetOwner();
+    APawn* Pawn = Cast<APawn>(Owner);
+    if (!Pawn) return;
+
+    // Convert 2D look direction to rotation
+    FRotator TargetRotation = FVector(LookDirection.X, LookDirection.Y, 0.0f).Rotation();
+    Pawn->SetActorRotation(TargetRotation);
+}
+
+void USTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context) const
+{
     AActor* Owner = Context.GetOwner();
     UFollowerAgentComponent* Follower = Owner->FindComponentByClass<UFollowerAgentComponent>();
+    if (!Follower) return;
 
-    if (!Follower)
-        return EStateTreeRunStatus::Failed;
+    UWeaponComponent* Weapon = Follower->GetWeaponComponent();
+    if (!Weapon || !Weapon->CanFire()) return;
 
-    // Get defend location
-    FVector DefendLocation = FollowerContext.CurrentStrategicCommand.TargetLocation;
-
-    // Move to defend location if not there
-    float DistanceToLocation = FVector::Dist(Owner->GetActorLocation(), DefendLocation);
-    if (DistanceToLocation > 200.0f)  // 2 meters tolerance
-    {
-        Follower->MoveToLocation(DefendLocation);
-        return EStateTreeRunStatus::Running;
-    }
-
-    // Find cover if available
-    if (!FollowerContext.bInCover)
-    {
-        FVector CoverLocation = Follower->FindNearestCover(DefendLocation);
-        if (!CoverLocation.IsZero())
-        {
-            Follower->MoveToLocation(CoverLocation);
-            FollowerContext.bInCover = true;
-        }
-    }
-
-    // Overwatch: Fire at enemies that approach
-    if (UWeaponComponent* Weapon = Follower->GetWeaponComponent())
-    {
-        AActor* ThreatTarget = Follower->GetPerceptionComponent()->GetNearestEnemy();
-
-        if (ThreatTarget && Weapon->IsInRange(ThreatTarget) && Weapon->CanFire())
-        {
-            Weapon->Fire(ThreatTarget);
-        }
-    }
-
-    return EStateTreeRunStatus::Running;
+    // Fire in current look direction (hitscan from weapon component)
+    Weapon->FireInDirection(Owner->GetActorForwardVector());
 }
+
+void USTTask_ExecuteObjective::ExecuteCrouch(FStateTreeExecutionContext& Context) const
+{
+    AActor* Owner = Context.GetOwner();
+    ACharacter* Character = Cast<ACharacter>(Owner);
+    if (Character)
+    {
+        Character->Crouch();
+    }
+}
+
+void USTTask_ExecuteObjective::ExecuteAbility(
+    FStateTreeExecutionContext& Context,
+    int32 AbilityID) const
+{
+    // Future: Ability system integration (healing, buffs, grenades, etc.)
+    UE_LOG(LogStateTree, Verbose, TEXT("Ability %d requested (not implemented)"), AbilityID);
+}
+```
+
+### Tactical Action Structure (v3.0)
+
+**File:** RL/RLTypes.h
+
+```cpp
+// Replaces old ETacticalAction enum (16 types)
+USTRUCT(BlueprintType)
+struct FTacticalAction
+{
+    GENERATED_BODY()
+
+    // Movement (continuous)
+    UPROPERTY(BlueprintReadWrite)
+    FVector2D MoveDirection = FVector2D::ZeroVector;  // [-1,1] x [-1,1]
+
+    UPROPERTY(BlueprintReadWrite)
+    float MoveSpeed = 1.0f;  // [0,1] - percentage of max speed
+
+    // Aiming (continuous)
+    UPROPERTY(BlueprintReadWrite)
+    FVector2D LookDirection = FVector2D::ZeroVector;  // [-1,1] x [-1,1]
+
+    // Discrete actions (one-hot)
+    UPROPERTY(BlueprintReadWrite)
+    bool bFire = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bCrouch = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bUseAbility = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    int32 AbilityID = 0;
+};
+
+// Action space: 2 (move) + 1 (speed) + 2 (look) + 3 (discrete) = 8 dimensions
 ```
 
 ---
@@ -991,6 +1046,22 @@ For large battles (20+ agents), consider:
 
 ---
 
-**Document Version:** 1.0
+## Version History
+
+**v3.0 (Current)** - Objective-based system with atomic actions
+- Replaced strategic commands (Assault/Defend/Support) with objectives (Eliminate/Capture/Defend)
+- Unified tactical execution: Single `STTask_ExecuteObjective` task
+- Atomic action space: 8-dimensional continuous (move, aim, fire, crouch, ability)
+- Hierarchical rewards: Individual + Coordination + Strategic
+- Simpler architecture: 65% code reduction vs v2.0
+
+**v2.0** - Command-based hierarchical system (deprecated)
+- Strategic commands with multiple execution tasks
+- 16-enum tactical action space
+- Separate ExecuteAssault/Defend/Support/Move/Retreat tasks
+
+---
+
+**Document Version:** 3.0
 **Last Updated:** 2025-11-26
 **Maintained By:** SBDAPM Team

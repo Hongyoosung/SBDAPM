@@ -6,9 +6,9 @@
 #include "UObject/NoExportTypes.h"
 #include "NNE.h"
 #include "NNERuntimeCPU.h"
+#include "Observation/TeamObservation.h"
 #include "Observation/TeamObservationTypes.h"
 #include "Simulation/StateTransition.h"
-#include "Team/StrategicCommand.h"
 #include "RL/RLTypes.h"
 #include "WorldModel.generated.h"
 
@@ -97,36 +97,6 @@ public:
 	bool Initialize(const FWorldModelConfig& Config);
 
 	/**
-	 * Predict next state given current state and actions
-	 * @param CurrentState Current team observation
-	 * @param StrategicCommands Strategic commands for each follower
-	 * @param TacticalActions Tactical actions for each follower
-	 * @return Predicted state delta
-	 */
-	UFUNCTION(BlueprintCallable, Category = "World Model")
-	FWorldModelPrediction PredictNextState(
-		const FTeamObservation& CurrentState,
-		const TArray<FStrategicCommand>& StrategicCommands,
-		const TArray<ETacticalAction>& TacticalActions
-	);
-
-	/**
-	 * Predict N steps ahead (rollout)
-	 * @param InitialState Starting state
-	 * @param CommandSequence Strategic commands per step
-	 * @param ActionSequence Tactical actions per step
-	 * @param NumSteps Number of steps to predict
-	 * @return Array of predicted states (length = NumSteps)
-	 */
-	UFUNCTION(BlueprintCallable, Category = "World Model")
-	TArray<FWorldModelPrediction> PredictRollout(
-		const FTeamObservation& InitialState,
-		const TArray<TArray<FStrategicCommand>>& CommandSequence,
-		const TArray<TArray<ETacticalAction>>& ActionSequence,
-		int32 NumSteps
-	);
-
-	/**
 	 * Check if world model is initialized and ready
 	 */
 	UFUNCTION(BlueprintCallable, Category = "World Model")
@@ -143,6 +113,32 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "World Model")
 	int32 GetModelVersion() const { return ModelVersion; }
+
+	/**
+	 * Predict next state given current state and actions
+	 * @param CurrentState Current team observation
+	 * @param TacticalActions Tactical actions being executed
+	 * @return Predicted state delta with confidence
+	 */
+	UFUNCTION(BlueprintCallable, Category = "World Model")
+	FWorldModelPrediction PredictNextState(
+		const FTeamObservation& CurrentState,
+		const TArray<FTacticalAction>& TacticalActions
+	);
+
+	/**
+	 * Predict rollout of future states
+	 * @param InitialState Starting state
+	 * @param ActionSequence Sequence of actions per step
+	 * @param NumSteps Number of steps to predict
+	 * @return Array of predictions
+	 */
+	UFUNCTION(BlueprintCallable, Category = "World Model")
+	TArray<FWorldModelPrediction> PredictRollout(
+		const FTeamObservation& InitialState,
+		const TArray<FActionSequence>& ActionSequence,
+		int32 NumSteps
+	);
 
 	/**
 	 * Log state transition sample for training
@@ -185,8 +181,7 @@ private:
 	 */
 	TArray<float> EncodeInput(
 		const FTeamObservation& State,
-		const TArray<FStrategicCommand>& Commands,
-		const TArray<ETacticalAction>& Actions
+		const TArray<FTacticalAction>& Actions
 	);
 
 	/**
@@ -199,24 +194,6 @@ private:
 	 */
 	void ApplyStochasticSampling(FTeamStateDelta& Delta);
 
-	/**
-	 * Blend learned prediction with heuristic prediction
-	 */
-	FTeamStateDelta BlendWithHeuristic(
-		const FTeamStateDelta& LearnedDelta,
-		const FTeamObservation& State,
-		const TArray<FStrategicCommand>& Commands,
-		const TArray<ETacticalAction>& Actions
-	);
-
-	/**
-	 * Heuristic state prediction (fallback/blend)
-	 */
-	FTeamStateDelta PredictHeuristic(
-		const FTeamObservation& State,
-		const TArray<FStrategicCommand>& Commands,
-		const TArray<ETacticalAction>& Actions
-	);
 
 	/**
 	 * Update performance metrics

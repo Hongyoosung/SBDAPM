@@ -13,20 +13,20 @@ class UObjectiveManager;
 class UObjective;
 
 /**
- * Delegate for strategic decision events
+ * Delegate for strategic decision events (v3.0)
  */
 USTRUCT(BlueprintType)
-struct FStrategicCommandMap
+struct FObjectiveAssignmentMap
 {
 	GENERATED_BODY()
-    
+
 	UPROPERTY(BlueprintReadWrite)
-	TMap<AActor*, FStrategicCommand> Commands;
+	TMap<AActor*, UObjective*> Objectives;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnStrategicDecisionMade,
-	FStrategicCommandMap, Commands
+	FObjectiveAssignmentMap, Objectives
 );
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -122,9 +122,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Team Leader|Followers")
 	TArray<AActor*> GetFollowers() const { return Followers; }
 
-	/** Get followers with specific command type */
+	/** Get followers with specific objective type (v3.0) */
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|Followers")
-	TArray<AActor*> GetFollowersWithCommand(EStrategicCommandType CommandType) const;
+	TArray<AActor*> GetFollowersWithObjectiveType(EObjectiveType ObjectiveType) const;
 
 	/** Get alive followers */
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|Followers")
@@ -184,30 +184,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Team Leader|MCTS")
 	float GetLastMCTSDecisionTime() const { return LastMCTSTime; }
-
-	//--------------------------------------------------------------------------
-	// COMMAND ISSUANCE
-	//--------------------------------------------------------------------------
-
-	/** Issue command to specific follower */
-	UFUNCTION(BlueprintCallable, Category = "Team Leader|Commands")
-	void IssueCommand(AActor* Follower, const FStrategicCommand& Command);
-
-	/** Issue commands to multiple followers */
-	UFUNCTION(BlueprintCallable, Category = "Team Leader|Commands")
-	void IssueCommands(const TMap<AActor*, FStrategicCommand>& Commands);
-
-	/** Broadcast same command to all followers */
-	UFUNCTION(BlueprintCallable, Category = "Team Leader|Commands")
-	void BroadcastCommand(const FStrategicCommand& Command);
-
-	/** Cancel command for follower */
-	UFUNCTION(BlueprintCallable, Category = "Team Leader|Commands")
-	void CancelCommand(AActor* Follower);
-
-	/** Get current command for follower */
-	UFUNCTION(BlueprintPure, Category = "Team Leader|Commands")
-	FStrategicCommand GetFollowerCommand(AActor* Follower) const;
 
 	//--------------------------------------------------------------------------
 	// ENEMY TRACKING
@@ -394,9 +370,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
 	TArray<AActor*> Followers;
 
-	/** Current commands for each follower */
+	/** Current objectives for each follower (v3.0) */
 	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
-	TMap<AActor*, FStrategicCommand> CurrentCommands;
+	TMap<AActor*, UObjective*> CurrentObjectives;
 
 	/** Is MCTS currently running? */
 	UPROPERTY(BlueprintReadOnly, Category = "Team Leader|State")
@@ -425,10 +401,6 @@ public:
 	/** MCTS decision engine */
 	UPROPERTY()
 	UMCTS* StrategicMCTS;
-
-	/** Communication manager (can be shared across teams) */
-	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")
-	UTeamCommunicationManager* CommunicationManager;
 
 	/** Objective manager (v3.0 Combat Refactoring) */
 	UPROPERTY(BlueprintReadWrite, Category = "Team Leader|Components")

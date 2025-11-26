@@ -10,6 +10,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "StateTreeModule\Public\StateTree.h"
+#include "Team/Objective.h"
 
 #if WITH_EDITOR
 #include "StateTreeDelegates.h" 
@@ -137,11 +138,12 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	if (GetWorld()->GetTimeSeconds() - LastDebugLogTime > 2.0f)
 	{
 		EStateTreeRunStatus Status = GetStateTreeRunStatus();
-		UE_LOG(LogTemp, Display, TEXT("[STATE TREE] '%s': Status=%s, Command=%s, Valid=%d"),
+		FString ObjectiveStr = Context.CurrentObjective ? UEnum::GetValueAsString(Context.CurrentObjective->Type) : TEXT("None");
+		UE_LOG(LogTemp, Display, TEXT("[STATE TREE] '%s': Status=%s, Objective=%s, Active=%d"),
 			*GetOwner()->GetName(),
 			*UEnum::GetValueAsString(Status),
-			*UEnum::GetValueAsString(Context.CurrentCommand.CommandType),
-			Context.bIsCommandValid);
+			*ObjectiveStr,
+			Context.bHasActiveObjective);
 		LastDebugLogTime = GetWorld()->GetTimeSeconds();
 	}
 }
@@ -283,9 +285,9 @@ void UFollowerStateTreeComponent::InitializeContext()
 	Context.bIsAlive = FollowerComponent->bIsAlive;
 	Context.bUseRLPolicy = FollowerComponent->bUseRLPolicy;
 
-	// Initialize command
-	Context.CurrentCommand = FollowerComponent->GetCurrentCommand();
-	Context.bIsCommandValid = FollowerComponent->IsCommandValid();
+	// Initialize objective (v3.0)
+	Context.CurrentObjective = FollowerComponent->GetCurrentObjective();
+	Context.bHasActiveObjective = FollowerComponent->HasActiveObjective();
 
 	// Initialize observation
 	Context.CurrentObservation = FollowerComponent->GetLocalObservation();
@@ -301,12 +303,11 @@ void UFollowerStateTreeComponent::UpdateContextFromFollower()
 		return;
 	}
 
-	// Sync basic state from follower component
+	// Sync basic state from follower component (v3.0)
 	// (Detailed observation updates are handled by STEvaluator_UpdateObservation)
 	Context.bIsAlive = FollowerComponent->bIsAlive;
-	Context.CurrentCommand = FollowerComponent->GetCurrentCommand();
-	Context.bIsCommandValid = FollowerComponent->IsCommandValid();
-	Context.TimeSinceCommand = FollowerComponent->GetTimeSinceLastCommand();
+	Context.CurrentObjective = FollowerComponent->GetCurrentObjective();
+	Context.bHasActiveObjective = FollowerComponent->HasActiveObjective();
 	Context.AccumulatedReward = FollowerComponent->GetAccumulatedReward();
 }
 
@@ -499,23 +500,22 @@ void UFollowerStateTreeComponent::BindToFollowerEvents()
 		return;
 	}
 
-	// Bind to command received event
-	FollowerComponent->OnCommandReceived.AddDynamic(this, &UFollowerStateTreeComponent::OnCommandReceived);
+	// Bind to objective received event (v3.0)
+	FollowerComponent->OnObjectiveReceived.AddDynamic(this, &UFollowerStateTreeComponent::OnObjectiveReceived);
 
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Bound to FollowerAgentComponent events"));
 }
 
-void UFollowerStateTreeComponent::OnCommandReceived(const FStrategicCommand& Command, EFollowerState NewState)
+void UFollowerStateTreeComponent::OnObjectiveReceived(UObjective* Objective, EFollowerState NewState)
 {
-	// Update context immediately when command changes
-	Context.CurrentCommand = Command;
-	Context.bIsCommandValid = true;
-	Context.TimeSinceCommand = 0.0f;
+	// Update context immediately when objective changes (v3.0)
+	Context.CurrentObjective = Objective;
+	Context.bHasActiveObjective = Objective != nullptr && Objective->IsActive();
 
-	// CRITICAL: Immediately set primary target from command (don't wait for evaluator tick)
-	if (Command.TargetActor && Command.TargetActor->IsValidLowLevel() && !Command.TargetActor->IsPendingKillPending())
+	// CRITICAL: Immediately set primary target from objective (don't wait for evaluator tick)
+	if (Objective && Objective->TargetActor && Objective->TargetActor->IsValidLowLevel() && !Objective->TargetActor->IsPendingKillPending())
 	{
-		Context.PrimaryTarget = Command.TargetActor;
+		Context.PrimaryTarget = Objective->TargetActor;
 
 		// Update distance if we have a pawn
 		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
@@ -532,8 +532,9 @@ void UFollowerStateTreeComponent::OnCommandReceived(const FStrategicCommand& Com
 		Context.DistanceToPrimaryTarget = 0.0f;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Command received - Type: %s, State: %s"),
-		*UEnum::GetValueAsString(Command.CommandType),
+	FString ObjectiveStr = Objective ? UEnum::GetValueAsString(Objective->Type) : TEXT("None");
+	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Objective received - Type: %s, State: %s"),
+		*ObjectiveStr,
 		*UEnum::GetValueAsString(NewState));
 
 	// State Tree will handle state transitions automatically via conditions

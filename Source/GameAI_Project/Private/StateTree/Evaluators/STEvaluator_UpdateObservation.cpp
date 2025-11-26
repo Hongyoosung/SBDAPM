@@ -159,19 +159,19 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	}
 
 
-	// Set primary target - PRIORITIZE command target over perception target
-	AActor* CommandTarget = InstanceData.Context.CurrentCommand.TargetActor;
+	// Set primary target - PRIORITIZE objective target over perception target
+	AActor* ObjectiveTarget = InstanceData.Context.CurrentObjective ? InstanceData.Context.CurrentObjective->TargetActor : nullptr;
 
-	if (CommandTarget && CommandTarget->IsValidLowLevel() && !CommandTarget->IsPendingKillPending())
+	if (ObjectiveTarget && ObjectiveTarget->IsValidLowLevel() && !ObjectiveTarget->IsPendingKillPending())
 	{
-		// Use command-specified target if valid
-		InstanceData.Context.PrimaryTarget = CommandTarget;
+		// Use objective-specified target if valid
+		InstanceData.Context.PrimaryTarget = ObjectiveTarget;
 
 		if (InstanceData.bDrawDebugInfo)
 		{
-			FVector TargetLocation = CommandTarget->GetActorLocation();
+			FVector TargetLocation = ObjectiveTarget->GetActorLocation();
 			DrawDebugLine(World, ControlledPawn->GetActorLocation(), TargetLocation,
-				FColor::Orange, false, 0.2f, 0, 3.0f); // Orange for command target
+				FColor::Orange, false, 0.2f, 0, 3.0f); // Orange for objective target
 			DrawDebugSphere(World, TargetLocation, 50.0f, 12, FColor::Orange, false, 0.2f);
 		}
 	}

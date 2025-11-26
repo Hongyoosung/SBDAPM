@@ -24,14 +24,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Game AI")
 	static AActor* FindNearestValidEnemy(const TArray<AActor*>& VisibleEnemies, APawn* FromPawn);
 
-	// Formation offset 계산 (팀 내 에이전트 간 간격 유지)
-	// Calculates spatial offset to prevent agents from clustering at same target
-	// Maintains 400-800cm optimal spacing between teammates
-	UFUNCTION(BlueprintCallable, Category = "Game AI")
-	static FVector CalculateFormationOffset(
-		AActor* Agent,
-		UFollowerAgentComponent* FollowerComponent,
-		EStrategicCommandType CommandType);
 
 protected:
 	static bool bLogVerbosity;

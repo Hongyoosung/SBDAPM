@@ -801,7 +801,7 @@ FTacticalAction URLPolicyNetwork::GetActionRuleBased(const FObservationElement& 
 	{
 		NearestEnemyDistance = Observation.NearbyEnemies[0].Distance;
 		// Approximate direction from bearing (simplified)
-		float Bearing = Observation.NearbyEnemies[0].RelativeBearing;
+		float Bearing = Observation.NearbyEnemies[0].RelativeAngle;
 		EnemyDirection.X = FMath::Sin(FMath::DegreesToRadians(Bearing));
 		EnemyDirection.Y = FMath::Cos(FMath::DegreesToRadians(Bearing));
 	}

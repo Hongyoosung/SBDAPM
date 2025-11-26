@@ -5,23 +5,23 @@
 #include "CoreMinimal.h"
 #include "StateTreeEvaluatorBase.h"
 #include "StateTree/FollowerStateTreeSchema.h"
-#include "Team/TeamTypes.h"
-#include "STEvaluator_SyncCommand.generated.h"
+#include "Team/Objective.h"
+#include "STEvaluator_SyncObjective.generated.h"
 
 /**
- * State Tree Evaluator: Sync Command
+ * State Tree Evaluator: Sync Objective
  *
- * Syncs strategic command from FollowerAgentComponent to State Tree context.
- * Runs every tick to detect command changes from team leader.
+ * Syncs assigned objective from FollowerAgentComponent to State Tree context.
+ * Runs every tick to detect objective changes from team leader.
  *
- * When command changes, this can trigger state transitions via conditions.
+ * When objective changes, this can trigger state transitions via conditions.
  *
- * Replaces: BTService_SyncCommandToBlackboard
+ * Replaces: STEvaluator_SyncCommand (v2.0)
  */
 
 
 USTRUCT()
-struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommandInstanceData
+struct GAMEAI_PROJECT_API FSTEvaluator_SyncObjectiveInstanceData
 {
 	GENERATED_BODY()
 
@@ -31,7 +31,7 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommandInstanceData
 
 	/**
 	 * Shared context struct - automatically bound by StateTree
-	 * Contains all agent state, commands, and components
+	 * Contains all agent state, objectives, and components
 	 */
 	UPROPERTY(EditAnywhere, Category = "Context")
 	FFollowerStateTreeContext Context;
@@ -40,27 +40,31 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommandInstanceData
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
-	/** Log command changes */
+	/** Log objective changes */
 	UPROPERTY(EditAnywhere, Category = "Parameter")
-	bool bLogCommandChanges = true;
+	bool bLogObjectiveChanges = true;
 
 	//--------------------------------------------------------------------------
 	// RUNTIME STATE
 	//--------------------------------------------------------------------------
 
-	/** Last command type (for change detection) */
+	/** Last objective type (for change detection) */
 	UPROPERTY()
-	EStrategicCommandType LastCommandType = EStrategicCommandType::None;
+	EObjectiveType LastObjectiveType = EObjectiveType::Eliminate;
+
+	/** Last objective pointer (for change detection) */
+	UPROPERTY()
+	TObjectPtr<UObjective> LastObjective = nullptr;
 };
 
-USTRUCT(meta = (DisplayName = "Sync Command", BlueprintType))
-struct GAMEAI_PROJECT_API FSTEvaluator_SyncCommand : public FStateTreeEvaluatorBase
+USTRUCT(meta = (DisplayName = "Sync Objective", BlueprintType))
+struct GAMEAI_PROJECT_API FSTEvaluator_SyncObjective : public FStateTreeEvaluatorBase
 {
 	GENERATED_BODY()
 
-	using FInstanceDataType = FSTEvaluator_SyncCommandInstanceData;
+	using FInstanceDataType = FSTEvaluator_SyncObjectiveInstanceData;
 
-	FSTEvaluator_SyncCommand() = default;
+	FSTEvaluator_SyncObjective() = default;
 
 	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
 

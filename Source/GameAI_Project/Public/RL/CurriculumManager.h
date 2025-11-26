@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "RLTypes.h"
+#include "Observation/TeamObservation.h"
 #include "CurriculumManager.generated.h"
 
 /**
@@ -15,13 +16,13 @@ struct FMCTSScenarioMetrics
 {
 	GENERATED_BODY()
 
-	// Team state observation when scenario occurred
-	UPROPERTY()
-	FRLObservation TeamObservation;
-
 	// Strategic command that was executed
 	UPROPERTY()
 	int32 CommandType = 0;
+
+	// Team observation when decision was made
+	UPROPERTY()
+	struct FTeamObservation TeamObservation;
 
 	// MCTS statistics
 	UPROPERTY()

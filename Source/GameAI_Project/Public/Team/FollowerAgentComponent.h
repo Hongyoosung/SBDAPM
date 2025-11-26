@@ -5,6 +5,8 @@
 #include "TeamTypes.h"
 #include "Observation/ObservationElement.h"
 #include "RL/RLTypes.h"
+#include "Observation/TeamObservation.h"
+#include "Simulation/StateTransition.h"
 #include "FollowerAgentComponent.generated.h"
 
 // Forward declarations
@@ -16,11 +18,11 @@ struct FDamageEventData;
 struct FDeathEventData;
 
 /**
- * Delegate for follower events
+ * Delegate for follower events (v3.0)
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FOnCommandReceived,
-	const FStrategicCommand&, Command,
+	FOnObjectiveReceived,
+	UObjective*, Objective,
 	EFollowerState, NewState
 );
 
@@ -88,49 +90,29 @@ public:
 		int32 Priority = 5
 	);
 
-	/** Report command completion */
+	/** Report objective completion (v3.0) */
 	UFUNCTION(BlueprintCallable, Category = "Follower|Team")
-	void ReportCommandComplete(bool bSuccess = true);
+	void ReportObjectiveComplete(bool bSuccess = true);
 
 	/** Request assistance from team */
 	UFUNCTION(BlueprintCallable, Category = "Follower|Team")
 	void RequestAssistance(int32 Priority = 8);
 
 	//--------------------------------------------------------------------------
-	// COMMAND EXECUTION
+	// OBJECTIVE EXECUTION (v3.0)
 	//--------------------------------------------------------------------------
 
-	/** Execute command received from leader */
-	UFUNCTION(BlueprintCallable, Category = "Follower|Commands")
-	void ExecuteCommand(const FStrategicCommand& Command);
+	/** Get current objective assigned by leader */
+	UFUNCTION(BlueprintPure, Category = "Follower|Objective")
+	UObjective* GetCurrentObjective() const { return CurrentObjective; }
 
-	/** Get current command */
-	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
-	FStrategicCommand GetCurrentCommand() const { return CurrentCommand; }
-
-	/** Is command still valid? */
-	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
-	bool IsCommandValid() const;
-
-	/** Has active command (not Idle/None)? */
-	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
-	bool HasActiveCommand() const;
-
-	/** Update command progress */
-	UFUNCTION(BlueprintCallable, Category = "Follower|Commands")
-	void UpdateCommandProgress(float Progress);
-
-	/** Get time since last command received (seconds) */
-	UFUNCTION(BlueprintPure, Category = "Follower|Commands")
-	float GetTimeSinceLastCommand() const { return TimeSinceLastCommand; }
+	/** Has active objective? */
+	UFUNCTION(BlueprintPure, Category = "Follower|Objective")
+	bool HasActiveObjective() const;
 
 	//--------------------------------------------------------------------------
 	// STATE MANAGEMENT
 	//--------------------------------------------------------------------------
-
-	/** Map command to follower state */
-	UFUNCTION(BlueprintPure, Category = "Follower|State")
-	static EFollowerState MapCommandToState(EStrategicCommandType CommandType);
 
 	/** Transition to new follower state */
 	UFUNCTION(BlueprintCallable, Category = "Follower|State")
@@ -323,9 +305,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
 	EFollowerState CurrentFollowerState = EFollowerState::Idle;
 
-	/** Current command from leader */
+	/** Current objective from leader (v3.0) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	FStrategicCommand CurrentCommand;
+	TObjectPtr<UObjective> CurrentObjective = nullptr;
 
 	/** Local observation (71 features) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
@@ -335,10 +317,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
 	bool bIsAlive = true;
 
-	/** Time since last command received */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	float TimeSinceLastCommand = 0.0f;
-
 	/** Time since last tactical action was taken (seconds) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
 	float TimeSinceLastTacticalAction = 0.0f;
@@ -346,6 +324,10 @@ public:
 	/** Previous observation (for experience collection) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
 	FObservationElement PreviousObservation;
+
+	/** Last tactical action taken (for experience collection) */
+	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
+	FTacticalAction LastTacticalAction;
 
 	/** Accumulated reward this episode */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|RL")
@@ -355,9 +337,9 @@ public:
 	// EVENTS
 	//--------------------------------------------------------------------------
 
-	/** Fired when command is received from leader */
+	/** Fired when objective is received from leader */
 	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
-	FOnCommandReceived OnCommandReceived;
+	FOnObjectiveReceived OnObjectiveReceived;
 
 	/** Fired when event is signaled to leader */
 	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
@@ -381,10 +363,10 @@ private:
 	bool bLogStateTransitions = false;
 
 	/** Previous team observation (for transition logging) */
-	struct FTeamObservation PreviousTeamObservation;
+	FTeamObservation PreviousTeamObservation;
 
 	/** Logged state transitions */
-	TArray<struct FStateTransitionSample> LoggedTransitions;
+	TArray<FStateTransitionSample> LoggedTransitions;
 
 	/** Time of last state log */
 	float LastStateLogTime = 0.0f;

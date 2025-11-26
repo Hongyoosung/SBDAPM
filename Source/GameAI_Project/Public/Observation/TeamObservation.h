@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "ObservationElement.h"
 #include "TeamObservationTypes.h"
+#include "Team/Objective.h"
 #include "TeamObservation.generated.h"
 
 /**
@@ -181,6 +182,9 @@ struct GAMEAI_PROJECT_API FTeamObservation
 
     /** Convert to feature vector for MCTS/NN */
     TArray<float> ToFeatureVector() const;
+
+    /** Convert to RL observation (alias for ToFeatureVector for curriculum learning) */
+    TArray<float> ToRLObservation() const { return ToFeatureVector(); }
 
     /** Get total feature count: 40 + (N × 71) */
     int32 GetFeatureCount() const

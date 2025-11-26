@@ -16,20 +16,6 @@ enum class EEngagementRange : uint8
     VeryLong    UMETA(DisplayName = "Very Long (> 50m)")
 };
 
-/**
- * Objective type classification
- */
-UENUM(BlueprintType)
-enum class EObjectiveTypeLegacy : uint8
-{
-    None            UMETA(DisplayName = "No Objective"),
-    Eliminate       UMETA(DisplayName = "Eliminate Enemies"),
-    Defend          UMETA(DisplayName = "Defend Position"),
-    Capture         UMETA(DisplayName = "Capture Point"),
-    Escort          UMETA(DisplayName = "Escort Target"),
-    Retrieve        UMETA(DisplayName = "Retrieve Item"),
-    Survive         UMETA(DisplayName = "Survive")
-};
 
 /**
  * Mission phase classification

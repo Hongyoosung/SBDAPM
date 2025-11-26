@@ -42,39 +42,6 @@ enum class EStrategicEvent : uint8
 };
 
 /**
- * Strategic command types issued by team leader
- */
-UENUM(BlueprintType)
-enum class EStrategicCommandType : uint8
-{
-	None			UMETA(DisplayName = "None"),
-
-	// Idle command
-	Idle            UMETA(DisplayName = "Idle - Hold position"),
-	
-	// Offensive commands
-	Assault         UMETA(DisplayName = "Assault - Aggressive attack"),
-	
-
-	// Defensive commands
-	Defend			UMETA(DisplayName = "Stay Alert - Defensive posture"),
-	HoldPosition    UMETA(DisplayName = "Hold Position - Defend area"),
-
-	// Support commands
-	Support			UMETA(DisplayName = "Support - Help teammate"),
-	
-	// Movement commands
-	Retreat         UMETA(DisplayName = "Retreat - Fall back"),
-	MoveTo          UMETA(DisplayName = "Move To - Navigate to position"),
-	Patrol			UMETA(DisplayName = "Patrol - Move between waypoints"),
-	Advance         UMETA(DisplayName = "Advance - Move forward"),
-
-	// Special commands
-	Regroup         UMETA(DisplayName = "Regroup - Assemble at location"),
-	TakeCover       UMETA(DisplayName = "Take Cover - Find nearest cover"),
-};
-
-/**
  * Event priority levels (affects MCTS trigger threshold)
  */
 UENUM(BlueprintType)
@@ -87,76 +54,6 @@ enum class EEventPriority : uint8
 	Critical = 10   UMETA(DisplayName = "Critical Priority")
 };
 
-/**
- * Strategic command with parameters
- */
-USTRUCT(BlueprintType)
-struct GAMEAI_PROJECT_API FStrategicCommand
-{
-	GENERATED_BODY()
-
-	/** Command type */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	EStrategicCommandType CommandType = EStrategicCommandType::Idle;
-
-	/** Target location (if applicable) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	FVector TargetLocation = FVector::ZeroVector;
-
-	/** Target actor (enemy, ally, objective) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	AActor* TargetActor = nullptr;
-
-	/** Priority level (0-10, higher = more urgent) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	int32 Priority = 5;
-
-	/** Expected duration (0 = indefinite) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	float ExpectedDuration = 0.0f;
-
-	/** Formation offset (for coordinated movements) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	FVector FormationOffset = FVector::ZeroVector;
-
-	/** Additional parameters (key-value pairs) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
-	TMap<FString, FString> Parameters;
-
-	/** Timestamp when issued */
-	UPROPERTY(BlueprintReadOnly, Category = "Command")
-	float IssuedTime = 0.0f;
-
-	/** Is this command completed? */
-	UPROPERTY(BlueprintReadWrite, Category = "Command")
-	bool bCompleted = false;
-
-	/** Command execution progress (0-1) */
-	UPROPERTY(BlueprintReadWrite, Category = "Command")
-	float Progress = 0.0f;
-
-	//--------------------------------------------------------------------------
-	// UNCERTAINTY QUANTIFICATION (v3.0 Sprint 6)
-	//--------------------------------------------------------------------------
-
-	/** Confidence level (0-1): visit count / total visits from MCTS */
-	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
-	float Confidence = 1.0f;
-
-	/** Value variance: standard deviation of child values in MCTS tree */
-	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
-	float ValueVariance = 0.0f;
-
-	/** Policy entropy: H(π) - decision uncertainty from action distribution */
-	UPROPERTY(BlueprintReadWrite, Category = "Command|Uncertainty")
-	float PolicyEntropy = 0.0f;
-
-	// Constructor
-	FStrategicCommand()
-	{
-		IssuedTime = FPlatformTime::Seconds();
-	}
-};
 
 /**
  * Event context information
@@ -203,6 +100,8 @@ USTRUCT(BlueprintType)
 struct GAMEAI_PROJECT_API FTeamMetrics
 {
 	GENERATED_BODY()
+
+public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Metrics")
 	int32 TotalFollowers = 0;

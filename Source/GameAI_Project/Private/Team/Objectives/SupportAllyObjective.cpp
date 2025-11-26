@@ -134,7 +134,7 @@ float USupportAllyObjective::GetAllyHealthPercent() const
 
     if (UHealthComponent* HealthComp = TargetActor->FindComponentByClass<UHealthComponent>())
     {
-        return HealthComp->GetHealthPercent();
+        return HealthComp->GetHealthPercentage();
     }
 
     return 1.0f;

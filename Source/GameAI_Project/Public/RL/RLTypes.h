@@ -54,6 +54,19 @@ struct FTacticalAction
 	// Total dimensions: 8 (move_x, move_y, speed, look_x, look_y, fire, crouch, ability)
 };
 
+
+
+USTRUCT(BlueprintType)
+struct FActionSequence
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTacticalAction> Actions;
+};
+
+
+
 /**
  * Action space mask for spatial awareness
  * Constrains action space based on environment (indoor, cover, edges)

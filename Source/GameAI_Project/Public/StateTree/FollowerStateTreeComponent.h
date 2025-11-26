@@ -95,9 +95,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State Tree")
 	FString GetCurrentStateName() const;
 
-	/** Get current command (from context) */
-	UFUNCTION(BlueprintPure, Category = "State Tree")
-	FStrategicCommand GetCurrentCommand() const { return Context.CurrentCommand; }
 
 	/** Handle follower death */
 	void OnFollowerDied();
@@ -113,9 +110,9 @@ protected:
 	/** Bind to follower component events */
 	void BindToFollowerEvents();
 
-	/** Handle command received from leader */
+	/** Handle objective received from leader (v3.0) */
 	UFUNCTION()
-	void OnCommandReceived(const FStrategicCommand& Command, EFollowerState NewState);
+	void OnObjectiveReceived(UObjective* Objective, EFollowerState NewState);
 
 	bool CheckRequirementsAndStart();
 

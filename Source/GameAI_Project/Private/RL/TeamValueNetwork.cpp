@@ -262,13 +262,13 @@ TArray<float> UTeamValueNetwork::TeamObservationToFeatures(const FTeamObservatio
 	Features.Append(TeamObs.ToFeatureVector());
 
 	// Add individual agent features (N × 71 features)
-	for (int32 i = 0; i < TeamObs.IndividualObservations.Num() && i < MaxAgents; i++)
+	for (int32 i = 0; i < TeamObs.FollowerObservations.Num() && i < MaxAgents; i++)
 	{
-		Features.Append(TeamObs.IndividualObservations[i].ToFeatureVector());
+		Features.Append(TeamObs.FollowerObservations[i].ToFeatureVector());
 	}
 
 	// Pad with zeros if fewer agents than MaxAgents
-	int32 MissingAgents = MaxAgents - TeamObs.IndividualObservations.Num();
+	int32 MissingAgents = MaxAgents - TeamObs.FollowerObservations.Num();
 	if (MissingAgents > 0)
 	{
 		int32 PaddingSize = MissingAgents * 71;

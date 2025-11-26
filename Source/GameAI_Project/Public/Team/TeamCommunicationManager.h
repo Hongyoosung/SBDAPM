@@ -16,15 +16,12 @@ UENUM(BlueprintType)
 enum class ETeamMessageType : uint8
 {
 	// Leader → Follower
-	Command             UMETA(DisplayName = "Command"),
 	FormationUpdate     UMETA(DisplayName = "Formation Update"),
 	Acknowledgement     UMETA(DisplayName = "Acknowledgement"),
-	CancelCommand       UMETA(DisplayName = "Cancel Command"),
 
 	// Follower → Leader
 	EventSignal         UMETA(DisplayName = "Event Signal"),
 	StatusReport        UMETA(DisplayName = "Status Report"),
-	CommandComplete     UMETA(DisplayName = "Command Complete"),
 	RequestAssistance   UMETA(DisplayName = "Request Assistance"),
 
 	// Follower ↔ Follower (optional)
@@ -42,7 +39,7 @@ struct GAMEAI_PROJECT_API FTeamMessage
 
 	/** Message type */
 	UPROPERTY(BlueprintReadWrite, Category = "Message")
-	ETeamMessageType MessageType = ETeamMessageType::Command;
+	ETeamMessageType MessageType = ETeamMessageType::EventSignal;
 
 	/** Sender actor */
 	UPROPERTY(BlueprintReadWrite, Category = "Message")
@@ -59,10 +56,6 @@ struct GAMEAI_PROJECT_API FTeamMessage
 	/** Timestamp when message was sent */
 	UPROPERTY(BlueprintReadOnly, Category = "Message")
 	float Timestamp = 0.0f;
-
-	/** Strategic command (if applicable) */
-	UPROPERTY(BlueprintReadWrite, Category = "Message")
-	FStrategicCommand Command;
 
 	/** Event context (if applicable) */
 	UPROPERTY(BlueprintReadWrite, Category = "Message")
@@ -92,7 +85,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 );
 
 /**
- * Team Communication Manager
+ * Team Communication Manager (v3.0)
  *
  * Responsibilities:
  * - Manage message passing between team leader and followers
@@ -103,9 +96,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
  *
  * Usage:
  * 1. Create one manager per team (or share across teams)
- * 2. TeamLeaderComponent uses SendCommandToFollower()
- * 3. FollowerAgentComponent uses SendEventToLeader()
- * 4. Messages are delivered immediately or queued based on priority
+ * 2. FollowerAgentComponent uses SendEventToLeader()
+ * 3. Messages are delivered immediately or queued based on priority
+ *
+ * Note: v3.0 uses ObjectiveManager for objective assignment (not CommunicationManager)
  */
 UCLASS(BlueprintType)
 class GAMEAI_PROJECT_API UTeamCommunicationManager : public UObject
@@ -119,14 +113,6 @@ public:
 	//--------------------------------------------------------------------------
 	// LEADER → FOLLOWER MESSAGING
 	//--------------------------------------------------------------------------
-
-	/** Send command from leader to follower */
-	UFUNCTION(BlueprintCallable, Category = "Communication|Leader")
-	void SendCommandToFollower(
-		UTeamLeaderComponent* Leader,
-		AActor* Follower,
-		const FStrategicCommand& Command
-	);
 
 	/** Send formation update to follower */
 	UFUNCTION(BlueprintCallable, Category = "Communication|Leader")
@@ -143,13 +129,6 @@ public:
 		UTeamLeaderComponent* Leader,
 		AActor* Follower,
 		const FString& AcknowledgementMessage
-	);
-
-	/** Cancel follower command */
-	UFUNCTION(BlueprintCallable, Category = "Communication|Leader")
-	void SendCommandCancel(
-		UTeamLeaderComponent* Leader,
-		AActor* Follower
 	);
 
 	//--------------------------------------------------------------------------
@@ -172,14 +151,6 @@ public:
 		float Health,
 		float Ammo,
 		const FString& StatusMessage
-	);
-
-	/** Report command completion */
-	UFUNCTION(BlueprintCallable, Category = "Communication|Follower")
-	void SendCommandComplete(
-		UFollowerAgentComponent* Follower,
-		UTeamLeaderComponent* Leader,
-		bool bSuccess
 	);
 
 	/** Request assistance from team */

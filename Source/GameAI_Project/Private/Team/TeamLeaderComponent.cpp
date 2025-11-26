@@ -1,5 +1,5 @@
 #include "Team/TeamLeaderComponent.h"
-#include "Team/TeamCommunicationManager.h"
+#include "Team/FollowerAgentComponent.h"
 #include "Team/ObjectiveManager.h"
 #include "Team/Objective.h"
 #include "AI/MCTS/MCTS.h"
@@ -10,37 +10,9 @@
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "RL/RewardCalculator.h"
 
-//------------------------------------------------------------------------------
-// HELPER FUNCTIONS
-//------------------------------------------------------------------------------
 
-namespace
-{
-	/** Convert objective type to strategic command type (v3.0 Sprint 6) */
-	EStrategicCommandType ConvertObjectiveToCommandType(EObjectiveType ObjectiveType)
-	{
-		switch (ObjectiveType)
-		{
-			case EObjectiveType::Attack:
-				return EStrategicCommandType::Assault;
-			case EObjectiveType::Defend:
-				return EStrategicCommandType::Defend;
-			case EObjectiveType::Support:
-				return EStrategicCommandType::Support;
-			case EObjectiveType::Move:
-				return EStrategicCommandType::MoveTo;
-			case EObjectiveType::Patrol:
-				return EStrategicCommandType::Patrol;
-			case EObjectiveType::Hold:
-				return EStrategicCommandType::HoldPosition;
-			case EObjectiveType::Scout:
-				return EStrategicCommandType::Patrol; // Scout as patrol
-			default:
-				return EStrategicCommandType::Idle;
-		}
-	}
-}
 
 UTeamLeaderComponent::UTeamLeaderComponent()
 {
@@ -55,11 +27,6 @@ void UTeamLeaderComponent::BeginPlay()
 	// Initialize MCTS
 	InitializeMCTS();
 
-	// Get or create communication manager
-	if (!CommunicationManager)
-	{
-		CommunicationManager = NewObject<UTeamCommunicationManager>(GetOwner());
-	}
 
 	// Initialize objective manager (v3.0 Combat Refactoring)
 	if (!ObjectiveManager)
@@ -249,11 +216,6 @@ bool UTeamLeaderComponent::RegisterFollower(AActor* Follower)
 
 	Followers.Add(Follower);
 
-	// Initialize with idle command
-	FStrategicCommand IdleCommand;
-	IdleCommand.CommandType = EStrategicCommandType::Idle;
-	CurrentCommands.Add(Follower, IdleCommand);
-
 	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Registered follower %s (%d/%d)"),
 		*TeamName, *Follower->GetName(), Followers.Num(), MaxFollowers);
 
@@ -275,7 +237,7 @@ void UTeamLeaderComponent::UnregisterFollower(AActor* Follower)
 	}
 
 	Followers.Remove(Follower);
-	CurrentCommands.Remove(Follower);
+	CurrentObjectives.Remove(Follower);
 
 	TotalFollowersLost++;
 
@@ -293,14 +255,14 @@ void UTeamLeaderComponent::UnregisterFollower(AActor* Follower)
 	}
 }
 
-TArray<AActor*> UTeamLeaderComponent::GetFollowersWithCommand(
-	EStrategicCommandType CommandType) const
+TArray<AActor*> UTeamLeaderComponent::GetFollowersWithObjectiveType(
+	EObjectiveType ObjectiveType) const
 {
 	TArray<AActor*> Result;
 
-	for (const auto& Pair : CurrentCommands)
+	for (const auto& Pair : CurrentObjectives)
 	{
-		if (Pair.Value.CommandType == CommandType)
+		if (Pair.Value && Pair.Value->Type == ObjectiveType)
 		{
 			Result.Add(Pair.Key);
 		}
@@ -802,7 +764,7 @@ void UTeamLeaderComponent::OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> Ne
 		if (CurriculumManager)
 		{
 			FMCTSScenarioMetrics ScenarioMetrics;
-			ScenarioMetrics.TeamObservation = CurrentTeamObservation.ToRLObservation();
+			ScenarioMetrics.TeamObservation = CurrentTeamObservation;
 			ScenarioMetrics.CommandType = 0; // Objective-based, no single command type
 			ScenarioMetrics.ValueVariance = ValueVariance;
 			ScenarioMetrics.PolicyEntropy = PolicyEntropy;
@@ -817,120 +779,14 @@ void UTeamLeaderComponent::OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> Ne
 		}
 	}
 
-	// Generate strategic commands with confidence fields (v3.0 Sprint 6)
-	TMap<AActor*, FStrategicCommand> CommandsWithConfidence;
-	for (const auto& Pair : NewObjectives)
-	{
-		AActor* Follower = Pair.Key;
-		UObjective* Objective = Pair.Value;
-
-		if (!Follower || !Objective) continue;
-
-		// Create strategic command from objective
-		FStrategicCommand Command;
-		Command.CommandType = ConvertObjectiveToCommandType(Objective->Type);
-		Command.TargetLocation = Objective->TargetLocation;
-		Command.TargetActor = Objective->TargetActor;
-		Command.Priority = Objective->Priority;
-
-		// Populate uncertainty fields (v3.0 Sprint 6)
-		Command.Confidence = Confidence;
-		Command.ValueVariance = ValueVariance;
-		Command.PolicyEntropy = PolicyEntropy;
-
-		CommandsWithConfidence.Add(Follower, Command);
-
-		UE_LOG(LogTemp, Display, TEXT("📋 [COMMAND] Agent '%s': %s (Confidence=%.2f, Variance=%.2f, Entropy=%.2f)"),
-			*Follower->GetName(),
-			*UEnum::GetValueAsString(Command.CommandType),
-			Command.Confidence,
-			Command.ValueVariance,
-			Command.PolicyEntropy);
-	}
-
-	// Store commands in CurrentCommands for tracking
-	for (const auto& CmdPair : CommandsWithConfidence)
-	{
-		CurrentCommands.Add(CmdPair.Key, CmdPair.Value);
-	}
+	// Store objectives in CurrentObjectives for tracking (v3.0)
+	CurrentObjectives = NewObjectives;
 
 	bMCTSRunning = false;
 	UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE MCTS COMPLETE] '%s': All objectives assigned, MCTS cycle complete"),
 		*TeamName);
 }
 
-
-//------------------------------------------------------------------------------
-// COMMAND ISSUANCE
-//------------------------------------------------------------------------------
-
-void UTeamLeaderComponent::IssueCommand(AActor* Follower, const FStrategicCommand& Command)
-{
-	if (!Follower) return;
-
-	if (!Followers.Contains(Follower))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': Cannot issue command to unregistered follower %s"),
-			*TeamName, *Follower->GetName());
-		return;
-	}
-
-	// Update current commands
-	CurrentCommands.Add(Follower, Command);
-	TotalCommandsIssued++;
-
-	// Send command via communication manager
-	if (CommunicationManager)
-	{
-		CommunicationManager->SendCommandToFollower(this, Follower, Command);
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("TeamLeader '%s': No CommunicationManager! Cannot send command to %s"),
-			*TeamName, *Follower->GetName());
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("🔴 TeamLeader '%s': Issued command '%s' to %s (Priority: %d)"),
-		*TeamName,
-		*UEnum::GetValueAsString(Command.CommandType),
-		*Follower->GetName(),
-		Command.Priority);
-}
-
-void UTeamLeaderComponent::IssueCommands(const TMap<AActor*, FStrategicCommand>& Commands)
-{
-	for (const auto& Pair : Commands)
-	{
-		IssueCommand(Pair.Key, Pair.Value);
-	}
-}
-
-void UTeamLeaderComponent::BroadcastCommand(const FStrategicCommand& Command)
-{
-	for (AActor* Follower : GetAliveFollowers())
-	{
-		IssueCommand(Follower, Command);
-	}
-}
-
-void UTeamLeaderComponent::CancelCommand(AActor* Follower)
-{
-	FStrategicCommand IdleCommand;
-	IdleCommand.CommandType = EStrategicCommandType::Idle;
-	IssueCommand(Follower, IdleCommand);
-}
-
-FStrategicCommand UTeamLeaderComponent::GetFollowerCommand(AActor* Follower) const
-{
-	if (CurrentCommands.Contains(Follower))
-	{
-		return CurrentCommands[Follower];
-	}
-
-	FStrategicCommand IdleCommand;
-	IdleCommand.CommandType = EStrategicCommandType::Idle;
-	return IdleCommand;
-}
 
 //------------------------------------------------------------------------------
 // ENEMY TRACKING
@@ -1026,11 +882,14 @@ void UTeamLeaderComponent::DrawDebugInfo()
 		FVector FollowerPos = Follower->GetActorLocation();
 		DrawDebugLine(World, LeaderPos, FollowerPos, TeamColor.ToFColor(true), false, 0.5f, 0, 2.0f);
 
-		// Draw command type above follower
-		if (CurrentCommands.Contains(Follower))
+		// Draw objective type above follower (v3.0)
+		if (UObjective* const* ObjectivePtr = CurrentObjectives.Find(Follower))
 		{
-			FString CommandText = UEnum::GetValueAsString(CurrentCommands[Follower].CommandType);
-			DrawDebugString(World, FollowerPos + FVector(0, 0, 150), CommandText, nullptr, FColor::White, 0.5f, true);
+			if (*ObjectivePtr)
+			{
+				FString ObjectiveText = UEnum::GetValueAsString((*ObjectivePtr)->Type);
+				DrawDebugString(World, FollowerPos + FVector(0, 0, 150), ObjectiveText, nullptr, FColor::White, 0.5f, true);
+			}
 		}
 	}
 
@@ -1091,14 +950,17 @@ void UTeamLeaderComponent::RecordPostDecisionActions()
 		return;
 	}
 
-	// Encode current commands as action indices
+	// Encode current objectives as action indices (v3.0)
 	PendingExperience.ActionsTaken.Empty();
 	for (AActor* Follower : GetAliveFollowers())
 	{
-		if (CurrentCommands.Contains(Follower))
+		if (UObjective* const* ObjectivePtr = CurrentObjectives.Find(Follower))
 		{
-			int32 ActionIndex = static_cast<int32>(CurrentCommands[Follower].CommandType);
-			PendingExperience.ActionsTaken.Add(ActionIndex);
+			if (*ObjectivePtr)
+			{
+				int32 ActionIndex = static_cast<int32>((*ObjectivePtr)->Type);
+				PendingExperience.ActionsTaken.Add(ActionIndex);
+			}
 		}
 	}
 

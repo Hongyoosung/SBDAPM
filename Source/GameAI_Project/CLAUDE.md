@@ -193,67 +193,7 @@ Output: NextState (predicted TeamObs)
 - `Team/FollowerAgentComponent.h/cpp`
 - `Team/StrategicCommand.h` - Add confidence fields (Confidence, ValueVariance, PolicyEntropy)
 
----
 
-### 6. State Tree (`StateTree/FollowerStateTreeComponent.h/cpp`)
-**Status:** ✅ v2.0 Implemented (no changes needed for v3.0)
-
-- **PRIMARY execution system** (replaces FSM + BehaviorTree)
-- Command-driven state transitions
-- States: Idle, Assault, Defend, Support, Move, Retreat, Dead
-- **Tasks:** `STTask_QueryRLPolicy`, `STTask_ExecuteDefend`, `STTask_ExecuteAssault`, `STTask_ExecuteSupport`, `STTask_ExecuteMove`, `STTask_ExecuteRetreat`
-- **Evaluators:** `STEvaluator_SyncCommand`, `STEvaluator_UpdateObservation`
-- **Conditions:** `STCondition_CheckCommandType`, `STCondition_CheckTacticalAction`, `STCondition_IsAlive`
-
-#### **UE 5.6 StateTree Binding Pattern (Standardized)**
-**Tasks & Evaluators:**
-```cpp
-USTRUCT()
-struct FMyTaskInstanceData {
-    UPROPERTY(EditAnywhere, Category = "Context")
-    FFollowerStateTreeContext Context;  // Auto-binds to schema
-
-    UPROPERTY(EditAnywhere, Category = "Parameter")
-    float MyConfigValue = 1.0f;  // Optional config
-};
-```
-
-**Conditions:**
-```cpp
-USTRUCT()
-struct FMyConditionInstanceData {
-    UPROPERTY(EditAnywhere, Category = "Input")
-    bool bIsAlive = true;  // Bind specific properties
-};
-```
-
----
-
-### 7. Combat System (`Combat/HealthComponent.h/cpp`, `WeaponComponent.h/cpp`)
-**Status:** ✅ v2.0 Fully Integrated (no changes needed for v3.0)
-
-- **HealthComponent:** Damage/death, armor, regen
-- **WeaponComponent:** Damage, fire rate, predictive aiming, ammo
-- **RL Integration:** Auto-rewards on combat events
-- **StateTree Integration:** Used in ExecuteAssault/Defend tasks
-- **Observation Integration:** Health/ammo/cooldown auto-populated
-
-**Key Integrations:**
-- `FollowerAgentComponent.cpp:426-440` - Damage/kill reward handling
-- `FollowerAgentComponent.cpp:634-699` - Observation population from components
-
----
-
-### 8. Perception System (`Perception/AgentPerceptionComponent.h/cpp`)
-**Status:** ✅ v2.0 Implemented & Validated (no changes needed for v3.0)
-
-- UE5 AI Perception integration (sight-based)
-- Team-based enemy filtering (SimulationManager)
-- Auto-updates RL observations
-- 360° raycasting for environment
-- Auto-reports enemies to Team Leader (triggers MCTS)
-
----
 
 ### 9. EQS Cover System (`EQS/*`)
 **Status:** ✅ v2.0 Implemented (no changes needed for v3.0)
@@ -382,8 +322,8 @@ Source/GameAI_Project/
 ├── Simulation/
 │   ├── WorldModel.h/cpp              # 🆕 NEW: State transition predictor
 │   └── StateTransition.h             # 🆕 NEW: State delta structs
-├── StateTree/                         # ✅ No changes (v2.0 complete)
-│   ├── Tasks/                        # ExecuteDefend, ExecuteAssault, QueryRLPolicy, etc.
+├── StateTree/                         # 🔄 v3.0 Updated (unified execution)
+│   ├── Tasks/                        # ExecuteObjective (replaces ExecuteAssault/Defend/Support/Move/Retreat)
 │   ├── Evaluators/                   # SyncCommand, UpdateObservation
 │   ├── Conditions/                   # CheckCommandType, CheckTacticalAction, IsAlive
 │   └── FollowerStateTreeComponent.h/cpp
@@ -418,37 +358,6 @@ Source/GameAI_Project/
     ├── TestWorldModel.cpp            # 🆕 NEW
     └── TestMCTSIntegration.cpp       # 🆕 NEW
 ```
-
----
-
-## Key Documentation Files
-
-- **`REFACTORING_PLAN.md`** - Detailed v3.0 implementation roadmap (7 sprints, 14 weeks)
-- **`NEXT_STEP.md`** - Current immediate task (v2.0 RL training pipeline)
-- **`EQS_SETUP_GUIDE.md`** - EQS integration instructions
-- **`PERCEPTION_SETUP.md`** - Perception system setup guide
-
----
-
-## Key Files by Component
-
-### Team Leader (MCTS)
-- `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
-- `AI/MCTS/MCTS.cpp` - Tree search implementation
-- `AI/MCTS/TeamMCTSNode.h` - Node structure
-
-### Followers (RL + StateTree)
-- `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
-- `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system
-- `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Assault state execution with weapon firing
-- `StateTree/Tasks/STTask_ExecuteDefend.cpp` - Defend state execution
-
-### Combat & Perception
-- `Combat/HealthComponent.cpp` - Damage/death handling, event broadcasting
-- `Combat/WeaponComponent.cpp` - Weapon firing, predictive aiming
-- `Perception/AgentPerceptionComponent.cpp` - Enemy detection and tracking
-
----
 
 ## Success Metrics (v3.0)
 

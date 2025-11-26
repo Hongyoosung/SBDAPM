@@ -17,44 +17,6 @@ UTeamCommunicationManager::UTeamCommunicationManager()
 // LEADER → FOLLOWER MESSAGING
 //------------------------------------------------------------------------------
 
-void UTeamCommunicationManager::SendCommandToFollower(
-	UTeamLeaderComponent* Leader,
-	AActor* Follower,
-	const FStrategicCommand& Command)
-{
-	if (!Leader || !Follower)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TeamCommunicationManager: Invalid leader or follower for SendCommandToFollower"));
-		return;
-	}
-
-	// Create message
-	FTeamMessage Message;
-	Message.MessageType = ETeamMessageType::Command;
-	Message.Sender = Leader->GetOwner();
-	Message.Recipient = Follower;
-	Message.Priority = Command.Priority;
-	Message.Command = Command;
-
-	// Send or queue
-	if (bEnableMessageQueue)
-	{
-		QueueMessage(Message);
-	}
-	else
-	{
-		DeliverMessage(Message);
-	}
-
-	TotalMessagesSent++;
-	OnMessageSent.Broadcast(Message);
-
-	if (bEnableMessageLogging)
-	{
-		LogMessage(Message, true);
-	}
-}
-
 void UTeamCommunicationManager::SendFormationUpdate(
 	UTeamLeaderComponent* Leader,
 	AActor* Follower,
@@ -115,36 +77,6 @@ void UTeamCommunicationManager::SendAcknowledgement(
 	TotalMessagesSent++;
 }
 
-void UTeamCommunicationManager::SendCommandCancel(
-	UTeamLeaderComponent* Leader,
-	AActor* Follower)
-{
-	if (!Leader || !Follower) return;
-
-	FTeamMessage Message;
-	Message.MessageType = ETeamMessageType::CancelCommand;
-	Message.Sender = Leader->GetOwner();
-	Message.Recipient = Follower;
-	Message.Priority = 7;
-
-	if (bEnableMessageQueue)
-	{
-		QueueMessage(Message);
-	}
-	else
-	{
-		DeliverMessage(Message);
-	}
-
-	TotalMessagesSent++;
-	OnMessageSent.Broadcast(Message);
-
-	if (bEnableMessageLogging)
-	{
-		UE_LOG(LogTemp, Log, TEXT("TeamComm: Leader canceled command for %s"), *Follower->GetName());
-	}
-}
-
 //------------------------------------------------------------------------------
 // FOLLOWER → LEADER MESSAGING
 //------------------------------------------------------------------------------
@@ -203,33 +135,6 @@ void UTeamCommunicationManager::SendStatusReport(
 	}
 
 	TotalMessagesSent++;
-}
-
-void UTeamCommunicationManager::SendCommandComplete(
-	UFollowerAgentComponent* Follower,
-	UTeamLeaderComponent* Leader,
-	bool bSuccess)
-{
-	if (!Follower || !Leader) return;
-
-	FTeamMessage Message;
-	Message.MessageType = ETeamMessageType::CommandComplete;
-	Message.Sender = Follower->GetOwner();
-	Message.Recipient = Leader->GetOwner();
-	Message.Priority = 3;
-	Message.MessageData.Add(TEXT("Success"), bSuccess ? TEXT("true") : TEXT("false"));
-
-	DeliverMessage(Message);
-
-	TotalMessagesSent++;
-	OnMessageSent.Broadcast(Message);
-
-	if (bEnableMessageLogging)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("TeamComm: Follower %s completed command (%s)"),
-			*Follower->GetOwner()->GetName(),
-			bSuccess ? TEXT("Success") : TEXT("Failed"));
-	}
 }
 
 void UTeamCommunicationManager::SendAssistanceRequest(
@@ -384,16 +289,6 @@ void UTeamCommunicationManager::DeliverMessage(const FTeamMessage& Message)
 	// Route message based on type
 	switch (Message.MessageType)
 	{
-		case ETeamMessageType::Command:
-		{
-			// Deliver command to follower
-			if (UFollowerAgentComponent* Follower = Message.Recipient->FindComponentByClass<UFollowerAgentComponent>())
-			{
-				Follower->ExecuteCommand(Message.Command);
-			}
-			break;
-		}
-
 		case ETeamMessageType::EventSignal:
 		{
 			// Deliver event to leader
@@ -411,20 +306,7 @@ void UTeamCommunicationManager::DeliverMessage(const FTeamMessage& Message)
 			break;
 		}
 
-		case ETeamMessageType::CancelCommand:
-		{
-			// Cancel follower command
-			if (UFollowerAgentComponent* Follower = Message.Recipient->FindComponentByClass<UFollowerAgentComponent>())
-			{
-				FStrategicCommand IdleCommand;
-				IdleCommand.CommandType = EStrategicCommandType::Idle;
-				Follower->ExecuteCommand(IdleCommand);
-			}
-			break;
-		}
-
 		case ETeamMessageType::StatusReport:
-		case ETeamMessageType::CommandComplete:
 		case ETeamMessageType::RequestAssistance:
 		{
 			// These are informational, no specific action needed
@@ -470,13 +352,6 @@ void UTeamCommunicationManager::LogMessage(const FTeamMessage& Message, bool bSe
 		*SenderName,
 		*RecipientName,
 		Message.Priority);
-
-	// Log command details if applicable
-	if (Message.MessageType == ETeamMessageType::Command)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("  Command: %s"),
-			*UEnum::GetValueAsString(Message.Command.CommandType));
-	}
 
 	// Log event details if applicable
 	if (Message.MessageType == ETeamMessageType::EventSignal)

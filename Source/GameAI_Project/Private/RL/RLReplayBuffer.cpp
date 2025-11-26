@@ -236,8 +236,17 @@ bool URLReplayBuffer::ExportToJSON(const FString& FilePath)
 		}
 		ExpObject->SetArrayField(TEXT("state"), StateArray);
 
-		// Action
-		ExpObject->SetNumberField(TEXT("action"), static_cast<int32>(Exp.Action));
+		// Action (serialize FTacticalAction as JSON object)
+		TSharedPtr<FJsonObject> ActionObject = MakeShareable(new FJsonObject());
+		ActionObject->SetNumberField(TEXT("move_x"), Exp.Action.MoveDirection.X);
+		ActionObject->SetNumberField(TEXT("move_y"), Exp.Action.MoveDirection.Y);
+		ActionObject->SetNumberField(TEXT("move_speed"), Exp.Action.MoveSpeed);
+		ActionObject->SetNumberField(TEXT("look_x"), Exp.Action.LookDirection.X);
+		ActionObject->SetNumberField(TEXT("look_y"), Exp.Action.LookDirection.Y);
+		ActionObject->SetBoolField(TEXT("fire"), Exp.Action.bFire);
+		ActionObject->SetBoolField(TEXT("crouch"), Exp.Action.bCrouch);
+		ActionObject->SetBoolField(TEXT("use_ability"), Exp.Action.bUseAbility);
+		ExpObject->SetObjectField(TEXT("action"), ActionObject);
 
 		// Reward
 		ExpObject->SetNumberField(TEXT("reward"), Exp.Reward);
@@ -397,17 +406,12 @@ int32 URLReplayBuffer::GetTerminalCount() const
 
 TArray<int32> URLReplayBuffer::GetActionDistribution() const
 {
+	// NOTE: Action distribution not applicable for continuous action space (FTacticalAction)
+	// This method was designed for discrete actions and is kept for compatibility
 	TArray<int32> Distribution;
-	Distribution.Init(0, 16);  // 16 actions
 
-	for (const FRLExperience& Exp : Experiences)
-	{
-		int32 ActionIndex = static_cast<int32>(Exp.Action);
-		if (ActionIndex >= 0 && ActionIndex < 16)
-		{
-			Distribution[ActionIndex]++;
-		}
-	}
+	// Return empty distribution for continuous action space
+	// TODO: Consider implementing action statistics for continuous actions (e.g., avg values per dimension)
 
 	return Distribution;
 }

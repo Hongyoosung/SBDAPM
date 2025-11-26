@@ -169,9 +169,10 @@ bool UCurriculumManager::ExportToFile(const FString& FilePath) const
 		JsonScenario->SetNumberField(TEXT("Timestamp"), Scenario.Timestamp);
 		JsonScenario->SetNumberField(TEXT("Priority"), Scenario.CalculatePriority());
 
-		// Export observation data
+		// Export observation data (v3.0: use Flatten() instead of .Data)
 		TArray<TSharedPtr<FJsonValue>> ObsArray;
-		for (float Value : Scenario.TeamObservation.Data)
+		TArray<float> FlattenedObs = Scenario.TeamObservation.Flatten();
+		for (float Value : FlattenedObs)
 		{
 			ObsArray.Add(MakeShared<FJsonValueNumber>(Value));
 		}

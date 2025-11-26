@@ -1,10 +1,16 @@
 """
-SBDAPM Environment Wrapper for Schola/RLlib Training
+SBDAPM Environment Wrapper for Schola/RLlib Training (v3.0)
 
 Wraps the Unreal Engine environment via Schola gRPC for RLlib compatibility.
 
-Observation: 71 features (FObservationElement)
-Action: 16 discrete (ETacticalAction)
+Observation: 78 features (71 FObservationElement + 7 current objective embedding)
+Action: 8-dimensional (FTacticalAction)
+  - MoveDirection (2D continuous): [-1, 1] x [-1, 1]
+  - MoveSpeed (1D continuous): [0, 1]
+  - LookDirection (2D continuous): [-1, 1] x [-1, 1]
+  - Fire (discrete): {0, 1}
+  - Crouch (discrete): {0, 1}
+  - UseAbility (discrete): {0, 1}
 """
 
 from gymnasium import spaces
@@ -20,40 +26,15 @@ except ImportError:
 
 class SBDAPMEnv:
     """
-    SBDAPM tactical action environment.
+    SBDAPM atomic action environment (v3.0).
 
     Connects to Unreal Engine via Schola gRPC and exposes:
-    - Observation: 71 float features from FObservationElement
-    - Action: 16 discrete tactical actions (ETacticalAction)
-    - Reward: Combat events (+10 kill, +5 damage, -5 take damage, -10 die)
+    - Observation: 78 float features (71 FObservationElement + 7 objective embedding)
+    - Action: 8-dimensional atomic actions (FTacticalAction)
+      - Continuous: move_x, move_y, speed, look_x, look_y (5D)
+      - Discrete: fire, crouch, use_ability (3D binary)
+    - Reward: Hierarchical (individual + coordination + strategic)
     """
-
-    # Action mapping to ETacticalAction enum
-    ACTION_NAMES = [
-        # Combat Tactics (0-3)
-        "AggressiveAssault",       # 0 (AggressiveAssault)
-        "CautiousAdvance",         # 1 (CautiousAdvance)
-        "DefensiveHold",           # 2 (DefensiveHold)
-        "TacticalRetreat",         # 3 (TacticalRetreat)
-
-        # Positioning Tactics (4-7)
-        "SeekCover",               # 4 (SeekCover)
-        "FlankLeft",               # 5 (FlankLeft)
-        "FlankRight",              # 6 (FlankRight)
-        "MaintainDistance",        # 7 (MaintainDistance)
-
-        # Support Tactics (8-11)
-        "SuppressiveFire",         # 8 (SuppressiveFire)
-        "ProvideCoveringFire",     # 9 (ProvideCoveringFire)
-        "Reload",                  # 10 (Reload)
-        "UseAbility",              # 11 (UseAbility)
-
-        # Movement Tactics (12-15)
-        "Sprint",                  # 12 (Sprint)
-        "Crouch",                  # 13 (Crouch)
-        "Patrol",                  # 14 (Patrol)
-        "Hold"                     # 15 (Hold)
-    ]
 
     def __init__(self, host="localhost", port=50051, **kwargs):
         """
@@ -70,10 +51,18 @@ class SBDAPMEnv:
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(71,),
+            shape=(78,),  # 71 observation + 7 objective embedding
             dtype=np.float32
         )
-        self.action_space = spaces.Discrete(16)
+        # Atomic action space: 5D continuous + 3D discrete
+        self.action_space = spaces.Dict({
+            "move_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            "move_speed": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+            "look_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            "fire": spaces.Discrete(2),
+            "crouch": spaces.Discrete(2),
+            "use_ability": spaces.Discrete(2)
+        })
 
         # Episode tracking
         self.episode_steps = 0
@@ -89,7 +78,7 @@ class SBDAPMEnv:
         self.total_reward = 0.0
 
         # Return initial observation (zeros until connected)
-        obs = np.zeros(71, dtype=np.float32)
+        obs = np.zeros(78, dtype=np.float32)  # 71 + 7 objective embedding
         info = {"episode_steps": 0}
 
         return obs, info
@@ -99,7 +88,13 @@ class SBDAPMEnv:
         Execute action and return result.
 
         Args:
-            action: int in [0, 15] corresponding to ETacticalAction
+            action: Dict with keys:
+                - move_direction: (2,) array in [-1, 1]
+                - move_speed: (1,) array in [0, 1]
+                - look_direction: (2,) array in [-1, 1]
+                - fire: int in {0, 1}
+                - crouch: int in {0, 1}
+                - use_ability: int in {0, 1}
 
         Returns:
             observation, reward, terminated, truncated, info
@@ -107,7 +102,7 @@ class SBDAPMEnv:
         self.episode_steps += 1
 
         # Default values (will be overwritten by Schola callbacks)
-        observation = np.zeros(71, dtype=np.float32)
+        observation = np.zeros(78, dtype=np.float32)
         reward = 0.0
         terminated = False
         truncated = self.episode_steps >= self.max_episode_steps
@@ -116,7 +111,14 @@ class SBDAPMEnv:
 
         info = {
             "episode_steps": self.episode_steps,
-            "action_name": self.ACTION_NAMES[action] if 0 <= action < 16 else "Unknown",
+            "action": {
+                "move": action["move_direction"].tolist() if isinstance(action["move_direction"], np.ndarray) else action["move_direction"],
+                "speed": float(action["move_speed"][0]) if isinstance(action["move_speed"], np.ndarray) else action["move_speed"],
+                "look": action["look_direction"].tolist() if isinstance(action["look_direction"], np.ndarray) else action["look_direction"],
+                "fire": bool(action["fire"]),
+                "crouch": bool(action["crouch"]),
+                "ability": bool(action["use_ability"])
+            },
             "total_reward": self.total_reward
         }
 
@@ -134,7 +136,7 @@ class SBDAPMEnv:
 if SCHOLA_AVAILABLE:
     class SBDAPMScholaEnv(UnrealEnv):
         """
-        Full Schola-integrated environment.
+        Full Schola-integrated environment (v3.0).
 
         This class inherits from UnrealEnv to get proper gRPC integration.
         Schola handles the observation/action/reward exchange.
@@ -143,14 +145,21 @@ if SCHOLA_AVAILABLE:
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
-            # Override spaces to match our agent
+            # Override spaces to match our agent (v3.0 atomic actions)
             self.observation_space = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(71,),
+                shape=(78,),  # 71 observation + 7 objective embedding
                 dtype=np.float32
             )
-            self.action_space = spaces.Discrete(16)
+            self.action_space = spaces.Dict({
+                "move_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+                "move_speed": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
+                "look_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+                "fire": spaces.Discrete(2),
+                "crouch": spaces.Discrete(2),
+                "use_ability": spaces.Discrete(2)
+            })
 
             self.episode_steps = 0
             self.max_episode_steps = kwargs.get("max_episode_steps", 1000)

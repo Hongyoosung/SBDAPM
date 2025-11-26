@@ -7,7 +7,34 @@
 #include "Observation/ObservationElement.h"
 #include "AI/MCTS/TeamMCTSNode.h"
 #include "Observation/TeamObservation.h"
+#include "Team/Objective.h"
 #include "MCTS.generated.h"
+
+/**
+ * Monte Carlo Tree Search (MCTS) for team-level strategic decision making
+ *
+ * Implements MCTS to assign strategic objectives to follower agents
+ * based on the current team observation. Uses UCT for node selection,
+ * random simulations for rollout, and backpropagation of rewards.
+ *
+ * New Architecture (v3.0 Combat Refactoring):
+ * - Focuses on assigning high-level objectives rather than low-level commands
+ * - Integrates with ObjectiveManager to create/manage objectives
+ * * - Uses Value Network for leaf evaluation instead of heuristics
+ * * - Supports RL Policy Network for action priors during selection
+ * *
+ * * Sprint 2:
+ * * - Integrates World Model for state prediction during simulations
+ * *
+ * * Sprint 3:
+ * * - Exports MCTS statistics for curriculum learning
+ * *
+ * * Sprint 4:
+ * * - Incorporates RL Policy Network to guide tree search with priors
+ * *
+ * * Sprint 5:
+ * * - Enhanced objective scoring and synergy calculations for better assignments
+ * */
 
 
 UCLASS()
@@ -127,16 +154,9 @@ private:
      */
     float CalculateTeamReward(const FTeamObservation& TeamObs, const TMap<AActor*, class UObjective*>& Objectives) const;
 
-    /**
-     * BASELINE: Generate strategic commands using rule-based heuristics
-     * This is NOT part of MCTS - it's a separate rule-based baseline for research comparison
-     * Use this to compare MCTS performance against traditional decision-making
-     */
-    TMap<AActor*, struct FStrategicCommand> GenerateStrategicCommandsHeuristic(
-        const FTeamObservation& TeamObs,
-        const TArray<AActor*>& Followers
-    ) const;
 
+
+public:
     //--------------------------------------------------------------------------
     // MCTS STATISTICS EXPORT (Sprint 3 - Curriculum Learning)
     //--------------------------------------------------------------------------
@@ -156,8 +176,6 @@ private:
     int32 GetRootVisitCount() const;
 
 
-
-public:
     //--------------------------------------------------------------------------
     // CONFIGURATION (Team-Level)
     //--------------------------------------------------------------------------

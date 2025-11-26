@@ -10,10 +10,10 @@ FTeamMCTSNode::FTeamMCTSNode()
 {
 }
 
-void FTeamMCTSNode::Initialize(TSharedPtr<FTeamMCTSNode> InParent, const TMap<AActor*, FStrategicCommand>& InCommands)
+void FTeamMCTSNode::Initialize(TSharedPtr<FTeamMCTSNode> InParent, const TMap<AActor*, UObjective*>& InObjectives)
 {
 	Parent = InParent;
-	Commands = InCommands;
+	Objectives = InObjectives;
 	TotalReward = 0.0f;
 	VisitCount = 0;
 
@@ -132,7 +132,7 @@ TSharedPtr<FTeamMCTSNode> FTeamMCTSNode::Expand(const TArray<AActor*>& Followers
 			SelectedIndex, UntriedActions.Num());
 	}
 
-	TMap<AActor*, FStrategicCommand> NewCommands = UntriedActions[SelectedIndex];
+	TMap<AActor*, UObjective*> NewObjectives = UntriedActions[SelectedIndex];
 	UntriedActions.RemoveAt(SelectedIndex);
 
 	// Also remove the corresponding prior
@@ -142,7 +142,7 @@ TSharedPtr<FTeamMCTSNode> FTeamMCTSNode::Expand(const TArray<AActor*>& Followers
 	}
 
 	TSharedPtr<FTeamMCTSNode> Child = MakeShared<FTeamMCTSNode>();
-	Child->Initialize(AsShared(), NewCommands);
+	Child->Initialize(AsShared(), NewObjectives);
 	Children.Add(Child);
 
 	return Child;

@@ -1,226 +1,233 @@
-# SBDAPM: Hierarchical Multi-Agent AI System
+# SBDAPM: AlphaZero-Inspired Multi-Agent Combat AI
 
 **Engine:** Unreal Engine 5.6 | **Language:** C++17 | **Platform:** Windows
 
-## Architecture (v2.0)
+---
 
-**Hierarchical Team System:** Leader (MCTS strategic) → Followers (RL tactical + StateTree execution)
+## Architecture Overview
+
+**Design Goal:** Real-time multi-agent combat system with coupled MCTS+RL, learned value functions, and world model simulation.
 
 ```
-Team Leader (per team) → Event-driven MCTS → Strategic commands
-    ↓
-Followers (N agents) → RL Policy + State Tree → Tactical execution
+Team Leader (per team)
+  ↓ Continuous MCTS (value network guided, 1-2s intervals)
+  ↓ World Model (predicts 5-10 steps ahead)
+  ↓ Strategic Commands (with confidence estimates)
+  ↓
+Followers (N agents)
+  ↓ RL Policy Network (provides MCTS priors + tactical actions)
+  ↓ State Tree Execution (command-driven states)
+  ↓ Feedback Loop (RL experiences → MCTS curriculum)
 ```
 
-**Key Benefits:**
-- MCTS: O(1) instead of O(n) - runs once per team, not per agent
-- Event-driven: Only on significant events (enemy spotted, ally killed)
-- Async: Background thread, non-blocking
-- Observations: 71 features (follower) + 40 (team leader)
+**Key Innovations:**
+- **Value Network**: Learned team state evaluation (replaces heuristics)
+- **World Model**: State transition predictor (enables true Monte Carlo simulation)
+- **Coupled Training**: MCTS guides RL curriculum, RL provides MCTS priors
+- **Unified Rewards**: Hierarchical rewards align strategic + tactical objectives
+- **Continuous Planning**: Proactive planning (1-2s intervals) with uncertainty quantification
+
+---
 
 ## Core Components
 
 ### 1. Team Leader (`Team/TeamLeaderComponent.h/cpp`)
-- Event-driven MCTS (async, 500-1000 simulations)
-- **Pure MCTS tree search** - Full selection/expansion/simulation/backpropagation
-- **Research baseline available** - `GenerateStrategicCommandsHeuristic()` for comparison
-- Issues strategic commands to followers
-- Aggregates team observations (40 + N×71 features)
-- Runs on background thread (50-100ms, non-blocking)
+- **Continuous MCTS**: Runs at 1-2s intervals, proactive planning.
+- **Value Network Guided**: Uses learned value function for tree search.
+- **World Model Rollouts**: Predicts 5-10 steps ahead.
+- **Strategic Commands**: Includes confidence estimates (visit count, value variance, entropy).
+- **Exports MCTS Statistics**: Used for RL curriculum.
 
-### 2. Followers (`Team/FollowerAgentComponent.h/cpp`)
-- Receives commands from leader
-- RL policy selects tactical actions
-- Signals events to leader
-- Integrates with StateTree for execution
+**Files:**
+- `Team/TeamLeaderComponent.h/cpp`
+- `AI/MCTS/MCTS.h/cpp`
+- `AI/MCTS/TeamMCTSNode.h`
 
-### 3. State Tree (`StateTree/FollowerStateTreeComponent.h/cpp`)
-- **v2.0 PRIMARY:** Unified execution system replacing FSM + BehaviorTree
-- Command-driven state transitions (NO per-agent MCTS)
-- States: Idle, Assault, Defend, Support, Move, Retreat, Dead
-- **Tasks:** `STTask_QueryRLPolicy`, `STTask_ExecuteDefend`, `STTask_ExecuteAssault`, `STTask_ExecuteSupport`, `STTask_ExecuteMove`, `STTask_ExecuteRetreat`
-- **Evaluators:** `STEvaluator_SyncCommand`, `STEvaluator_UpdateObservation`
-- **Conditions:** `STCondition_CheckCommandType`, `STCondition_CheckTacticalAction`, `STCondition_IsAlive`
-- **Status:** ✅ Implemented, replaces FSM + BehaviorTree
+### 2. Value Network (`RL/TeamValueNetwork.h/cpp`)
+**Purpose:** Estimate team state value to guide MCTS tree search.
 
-#### **UE 5.6 StateTree Binding Pattern (Standardized)**
-All tasks/evaluators use **direct context binding** for consistency and simplicity:
-
-**Tasks & Evaluators:**
-```cpp
-USTRUCT()
-struct FMyTaskInstanceData {
-    // AUTO-BINDS to FFollowerStateTreeContext from schema
-    UPROPERTY(EditAnywhere, Category = "Context")
-    FFollowerStateTreeContext Context;
-
-    // Config properties (Parameter category)
-    UPROPERTY(EditAnywhere, Category = "Parameter")
-    float MyConfigValue = 1.0f;
-
-    // Task-specific runtime state (no category)
-    UPROPERTY()
-    float MyRuntimeState = 0.0f;
-};
+**Architecture:**
+```
+Input: FTeamObservation (40 team + N×71 individual features)
+  ↓ Embedding Layer (256 neurons, ReLU)
+  ↓ Shared Trunk (256→256→128, ReLU)
+  ↓ Value Head (128→64→1, Tanh)
+Output: Team state value [-1, 1] (loss → win probability)
 ```
 
-**Conditions (lightweight - use individual bindings):**
-```cpp
-USTRUCT()
-struct FMyConditionInstanceData {
-    // Bind only the specific property needed
-    UPROPERTY(EditAnywhere, Category = "Input")
-    bool bIsAlive = true;
-};
+**Integration:**
+- `MCTS.cpp:SimulateNode()` - Query value network for leaf evaluation
+- `TeamLeaderComponent.cpp` - Load ONNX model via NNE
+
+### 3. World Model (`Simulation/WorldModel.h/cpp`)
+**Purpose:** Predict future states for true Monte Carlo simulation.
+
+**Architecture:**
+```
+Input: CurrentState (TeamObs) + AllActions (commands + tactical actions)
+  ↓ Action Encoder (commands → embeddings)
+  ↓ State Encoder (observations → embeddings)
+  ↓ Fusion Layer (concat + MLP)
+  ↓ Transition Predictor (outputs state deltas)
+Output: NextState (predicted TeamObs)
 ```
 
-**Key Rules:**
-- **Context category**: Auto-binds to matching struct name from schema (`FollowerContext`)
-- **Parameter category**: Optional config values (can bind OR set in editor)
-- **Input/Output categories**: For individual property bindings (conditions only)
-- NO manual `FStateTreeExternalDataHandle` usage (outdated UE 5.4 pattern)
-- Tasks/evaluators access shared state via `InstanceData.Context.PropertyName`
+**Predictions:**
+- Health changes, Position changes, Status effects.
+- Stochastic sampling for uncertainty.
 
-### 4. RL Policy (`RL/RLPolicyNetwork.h/cpp`, `RL/RLReplayBuffer.h/cpp`)
-- 3-layer network (128→128→64 neurons)
-- PPO training algorithm (offline, Python)
-- 16 tactical actions (`ETacticalAction` enum)
-- Reward: +10 kill, +5 damage, -5 take damage, -10 die
-- **Experience Collection:** Auto-stores transitions, exports to JSON
-- **Training:** External Python script
-- **Inference:** UE5 NNE + ONNX Runtime for production
-- **Fallback:** Rule-based heuristics when no trained model
+**Integration:**
+- `MCTS.cpp:SimulateNode()` - Rollout 5-10 steps via WorldModel
+- `TeamObservation.h` - Add `ApplyDelta(FStateTransition)` method
 
+### 4. RL Policy Network (`RL/RLPolicyNetwork.h/cpp`)
+- **Dual-head architecture**: Policy head + Prior head.
+- **Policy Head**: Softmax probabilities for immediate action selection.
+- **Prior Head**: Logits for MCTS node initialization (guide tree search).
+- **Unified rewards**: Individual + coordination bonuses.
+- **MCTS-guided curriculum**: Prioritized replay on high-uncertainty scenarios.
 
-### 5. EQS Cover System (`EQS/*`)
-- **Generator:** `EnvQueryGenerator_CoverPoints` - Grid/tag-based cover candidate generation
-- **Test:** `EnvQueryTest_CoverQuality` - Multi-factor cover scoring (enemy distance, LOS, navigability)
-- **Context:** `EnvQueryContext_CoverEnemies` - Auto-fetches enemies from Team Leader
-- **Status:** ✅ Implemented, tag-based active, EQS available
+**Rewards:**
+```cpp
+// Individual
++10  Kill, +5 Damage, -5 Take Damage, -10 Death
 
-### 6. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
-- **Status:** ✅ Fully updated (71 individual + 40 team features)
+// Coordination bonuses
++15  Kill while executing strategic command
++10  Coordinated action (combined fire, cover)
++5   Formation maintenance
+-15  Disobey strategic command
 
-### 7. Communication (`Team/TeamCommunicationManager.h/cpp`)
-- Leader ↔ Follower message passing
-- Event priority system (triggers MCTS at priority ≥5)
+// Strategic (team-level)
++50  Objective captured
++30  Enemy squad wiped
+-30  Own squad wiped
+```
 
-### 8. Perception System (`Perception/AgentPerceptionComponent.h/cpp`)
-- UE5 AI Perception integration (sight-based detection)
-- Team-based enemy filtering via SimulationManager
-- Auto-updates RL observations with enemy data
-- 360° raycasting for environmental awareness
-- Auto-reports enemies to Team Leader (triggers MCTS)
-- **Status:** ✅ Implemented & Validated (full pipeline tested)
+**Files:**
+- `RL/RLPolicyNetwork.h/cpp`
+- `RL/HybridPolicyNetwork.h/cpp`
+- `RL/RewardCalculator.h/cpp`
+- `RL/CurriculumManager.h/cpp`
 
-### 9. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
-- Team registration and management
-- Enemy relationship tracking (mutual enemies, free-for-all)
-- Actor-to-team mapping (O(1) lookup)
-- **Status:** ✅ Implemented
+### 5. Followers (`Team/FollowerAgentComponent.h/cpp`)
+- **Confidence-weighted execution**: Low confidence commands → RL can override.
+- **Coordination tracking**: Detect combined actions with allies.
+- **Experience tagging**: Mark experiences with MCTS uncertainty.
 
-### 10. Combat System (`Combat/HealthComponent.h/cpp`, `Combat/WeaponComponent.h/cpp`)
-- **HealthComponent:** Damage/death handling, armor mitigation, health regen
-- **WeaponComponent:** Configurable damage/fire rate, predictive aiming, ammo system
-- **RL Integration:** Auto-binds to FollowerAgentComponent for rewards (+10 kill, +5 damage, -5 take damage, -10 die)
-- **StateTree Integration:** WeaponComponent used in ExecuteAssault/Defend tasks
-- **Observation Integration:** Health/ammo/cooldown auto-populated from components
-- **Status:** ✅ Fully Integrated (FollowerAgentComponent.cpp:426-440, 86-102, 634-699)
+### 6. EQS Cover System (`EQS/*`)
+- **Generator:** `EnvQueryGenerator_CoverPoints`
+- **Test:** `EnvQueryTest_CoverQuality`
+- **Context:** `EnvQueryContext_CoverEnemies`
 
-## Current Status
+### 7. Observations (`Observation/ObservationElement.h/cpp`, `TeamObservation.h/cpp`)
+- **Features**: 71 individual + 40 team features.
+- **World Model Support**: `ApplyDelta`, `Clone`, `Serialize`.
 
-**✅ Implemented & Validated:**
-- **Command Pipeline** - Perception → Leader → MCTS (~34ms) → Commands → Followers → State Transitions ✅
-- **Perception system** - Enemy detection, team filtering, auto-reporting ✅
-- **Combat system** - Health/Weapon components, RL reward integration, observation population ✅
-- **State Tree Execution** - Tasks executing properly, agents performing actions ✅
-- **MCTS Decision Making** - Team-level strategic commands working, random actions at simulation start ✅
-- **Comprehensive logging** - Color-coded debug system ✅
-- Enhanced observation system (71+40 features)
-- Team architecture (Leader, Follower, Communication) ✅
-- RL policy network structure (128→128→64)
-- State Tree execution system (Tasks, Evaluators, Conditions) ✅
-- StateTree components for all follower states (Assault, Defend, Support, Move, Retreat) ✅
-- EQS cover system (Generator, Test, Context)
-- Simulation Manager GameMode (team registration, enemy tracking) ✅
+### 8. Simulation Manager (`Core/SimulationManagerGameMode.h/cpp`)
+- Team registration and management.
+- Enemy relationship tracking.
+- Actor-to-team mapping.
 
-**⚠️ Current Focus:**
-- **RL Training Pipeline** - Model currently uses rule-based fallback, not trained neural network
-- See `NEXT_STEP.md` for training pipeline implementation
+### 9. Communication (`Team/TeamCommunicationManager.h/cpp`)
+- Leader ↔ Follower message passing.
+- Event priority system.
+- MCTS statistics export.
+- Coordination event tracking.
 
-**🔄 Next Steps (see NEXT_STEP.md):**
-1. **Enable NNE Plugin** - Enable NNE + NNERuntimeORT plugins in Editor
-2. **Collect Training Data** - Run simulation, export experiences to JSON
-3. **Train Model** - `python Scripts/train_tactical_policy.py`
-4. **Load ONNX Model** - `LoadPolicy("tactical_policy.onnx")`
-5. **Iterate** - Collect more data, retrain, evaluate
+---
 
-**📋 Planned:**
-- Online training (in-engine PPO updates)
-- Distributed training (Ray RLlib integration)
-- Full multi-team scenarios (Red vs Blue vs Green)
-- Performance profiling and optimization
+## Implementation Status
+
+### Implemented & Validated
+- Command Pipeline (Perception → MCTS → Commands → StateTree)
+- MCTS tree search (Event-driven base)
+- StateTree execution (Tasks, Evaluators, Conditions)
+- Combat system (Health, Weapon, Rewards)
+- Perception system
+- Observations
+- EQS cover system
+- Simulation Manager GameMode
+
+### In Progress
+**Value Network + World Model**
+- [ ] Implement `TeamValueNetwork.h/cpp`
+- [ ] Implement `WorldModel.h/cpp`
+- [ ] Modify `MCTS.cpp:SimulateNode()` to use both
+- [ ] Create training scripts
+
+**Coupled Training**
+- [ ] MCTS → RL: Curriculum Manager
+- [ ] RL → MCTS: Policy priors
+- [ ] Dual-head `HybridPolicyNetwork`
+
+**Rewards + Planning**
+- [ ] Unified hierarchical rewards
+- [ ] UCB action sampling
+- [ ] Continuous planning (1-2s intervals)
+- [ ] Confidence estimates in commands
+
+**Self-Play Pipeline**
+- [ ] `self_play_collector.py`
+- [ ] End-to-end training loop
+- [ ] Evaluate vs baseline
+
+---
 
 ## Work Instructions
 
-**CRITICAL - Token Efficiency:**
-1. **NO verbose reports** - Keep all documentation concise and code-focused
-2. **NO long explanations** - Code first, brief comments only when necessary
-3. **NO redundant updates** - Don't repeat what's already in this file
+### Token Efficiency (CRITICAL)
+1. **NO verbose reports** - Code-focused, concise documentation only
+2. **NO long explanations** - Implement first, brief comments when needed
+3. **NO redundant updates** - Don't repeat what's in this file
 4. **Focus on implementation** - Spend tokens on code, not prose
 
-**Code Style:**
-- Prefer direct implementation over planning documents
-- Use file:line references (e.g., `StateMachine.cpp:42`)
-- Minimal comments in code unless logic is complex
+### Code Style
+- Direct implementation over planning documents
+- Use file:line references (e.g., `MCTS.cpp:73`)
+- Minimal comments unless logic is complex
 
-**Architecture Rules:**
-- Followers NEVER run MCTS (only leader does)
-- All MCTS is event-driven and async
-- RL policy runs per follower, not per team
-- State Tree executes RL-selected actions (StateTree replaces FSM + BehaviorTree)
+### Architecture Rules
+- **Followers NEVER run MCTS** (only leader)
+- **MCTS runs continuously** (1-2s intervals)
+- **Value network guides MCTS** (replaces heuristics)
+- **World model enables simulation** (predict 5-10 steps)
+- **RL provides MCTS priors** (dual-head network)
+- **MCTS guides RL curriculum** (prioritized replay on uncertainty)
+- **Rewards are aligned** (individual + coordination + strategic)
 
-**Performance Targets:**
-- Team Leader MCTS: 50-100ms async (1-5 decisions/minute) - **✅ ~34ms achieved**
-- Follower RL inference: 1-5ms per decision
-- StateTree tick: <0.5ms per agent
-- Total frame overhead: 10-20ms for 4-agent team
+### Performance Targets
+- Team Leader MCTS: 30-50ms
+- RL Inference: 1-3ms
+- World Model Prediction: 5-10ms
+- StateTree Tick: <0.5ms per agent
+- Total Frame Budget: 10-20ms for 4-agent team
 
+---
 
 ## File Structure
 
 ```
 Source/GameAI_Project/
-├── MCTS/              # Team leader strategic planning (event-driven)
-├── RL/                # Follower tactical policies (PPO network + NNE inference)
-├── StateTree/         # ⭐ PRIMARY execution system
-│   ├── Tasks/         # ExecuteDefend, ExecuteAssault, QueryRLPolicy, ExecuteMove, ExecuteRetreat
-│   ├── Evaluators/    # SyncCommand, UpdateObservation
-│   ├── Conditions/    # CheckCommandType, CheckTacticalAction, IsAlive
+├── MCTS/
+│   ├── MCTS.h/cpp                    # ValueNetwork + WorldModel integration
+│   ├── TeamMCTSNode.h                # Add ActionPriors
+│   └── CommandSynergy.h/cpp          # Synergy score computation
+├── RL/
+│   ├── RLPolicyNetwork.h/cpp         # Add GetActionPriors()
+│   ├── TeamValueNetwork.h/cpp        # Team state value estimation
+│   ├── HybridPolicyNetwork.h/cpp     # Dual-head (policy + priors)
+│   ├── RewardCalculator.h/cpp        # Unified reward system
+│   ├── CurriculumManager.h/cpp       # MCTS-guided training
+│   └── RLReplayBuffer.h/cpp          # Experience storage
+├── Simulation/
+│   ├── WorldModel.h/cpp              # State transition predictor
+│   └── StateTransition.h             # State delta structs
+├── StateTree/
+│   ├── Tasks/
+│   ├── Evaluators/
+│   ├── Conditions/
 │   └── FollowerStateTreeComponent.h/cpp
-├── Combat/            # ✅ HealthComponent, WeaponComponent (fully integrated)
-├── EQS/               # Environment Query System (cover finding)
-│   ├── Generator      # CoverPoints (grid + tag-based)
-│   ├── Test           # CoverQuality (multi-factor scoring)
-│   └── Context        # CoverEnemies (Team Leader integration)
-├── Perception/        # AgentPerceptionComponent (enemy detection)
-├── Team/              # Leader, Follower, Communication
-├── Observation/       # 71+40 feature observation system
-├── Scripts/           # 🆕 Python training scripts
-│   ├── train_tactical_policy.py  # PPO training → ONNX export
-│   └── requirements.txt          # torch, numpy, tensorboard
-└── Core/              # SimulationManagerGameMode (team management)
+├── Combat/
+...
 ```
-
-**Key Files:**
-- `NEXT_STEP.md` - Current focus: RL training pipeline
-- `Team/TeamLeaderComponent.cpp` - Event-driven MCTS, strategic commands
-- `Team/FollowerAgentComponent.cpp` - RL observation building, combat event handling (lines 426-440, 634-699)
-- `StateTree/FollowerStateTreeComponent.cpp` - Primary execution system
-- `StateTree/Tasks/STTask_ExecuteDefend.cpp` - Defend state execution
-- `StateTree/Tasks/STTask_ExecuteAssault.cpp` - Assault state execution with weapon firing
-- `Combat/HealthComponent.cpp` - Damage/death handling, event broadcasting
-- `Combat/WeaponComponent.cpp` - Weapon firing, predictive aiming
-- `Perception/AgentPerceptionComponent.cpp` - Enemy detection and tracking
-- `EQS_SETUP_GUIDE.md` - EQS integration and setup instructions
-- `PERCEPTION_SETUP.md` - Perception system setup guide

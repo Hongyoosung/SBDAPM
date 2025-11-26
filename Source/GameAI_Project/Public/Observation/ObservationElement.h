@@ -116,13 +116,6 @@ struct GAMEAI_PROJECT_API FObservationElement
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Observation|Temporal")
     int32 LastActionType = -1;  // 1 feature
 
-    //--------------------------------------------------------------------------
-    // LEGACY (1 feature - backward compatibility)
-    //--------------------------------------------------------------------------
-
-    /** Distance to destination/objective */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Observation|Legacy")
-    float DistanceToDestination = 0.0f;  // 1 feature
 
     //--------------------------------------------------------------------------
     // CONSTRUCTOR & UTILITY FUNCTIONS

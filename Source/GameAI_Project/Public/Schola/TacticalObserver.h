@@ -20,7 +20,7 @@ class UFollowerAgentComponent;
  * - Enemies: VisibleEnemyCount, NearbyEnemies (16 features)
  * - Tactical: Cover info, Terrain (5 features)
  * - Temporal: TimeSinceLastAction, LastActionType (2 features)
- * - Legacy: DistanceToDestination (1 feature)
+ * - Combat Proximity: DistanceToNearestEnemy (1 feature)
  */
 UCLASS(BlueprintType, meta = (DisplayName = "Tactical Observer"))
 class GAMEAI_PROJECT_API UTacticalObserver : public UBoxObserver

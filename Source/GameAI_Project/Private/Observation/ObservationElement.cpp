@@ -98,10 +98,10 @@ TArray<float> FObservationElement::ToFeatureVector() const
     Features.Add(static_cast<float>(FMath::Max(LastActionType, 0)) / 20.0f);  // Max 20 actions
 
     // ========================================
-    // LEGACY (1 feature)
+    // COMBAT PROXIMITY (1 feature)
     // ========================================
 
-    Features.Add(FMath::Clamp(DistanceToDestination / 10000.0f, 0.0f, 1.0f));
+    Features.Add(FMath::Clamp(DistanceToNearestEnemy / 10000.0f, 0.0f, 1.0f));  // Max 100m
 
     check(Features.Num() == 71);
     return Features;
@@ -140,8 +140,8 @@ void FObservationElement::Reset()
     TimeSinceLastAction = 0.0f;
     LastActionType = 0;
 
-    // Legacy
-    DistanceToDestination = 0.0f;
+    // Combat Proximity
+    DistanceToNearestEnemy = 99999.0f;
 }
 
 float FObservationElement::CalculateSimilarity(
@@ -150,7 +150,7 @@ float FObservationElement::CalculateSimilarity(
 {
     // Weighted feature comparison
     float HealthDiff = FMath::Abs(A.AgentHealth - B.AgentHealth) / 100.0f;
-    float DistanceDiff = FMath::Abs(A.DistanceToDestination - B.DistanceToDestination) / 10000.0f;
+    float DistanceDiff = FMath::Abs(A.DistanceToNearestEnemy - B.DistanceToNearestEnemy) / 10000.0f;
     float EnemyDiff = FMath::Abs(A.VisibleEnemyCount - B.VisibleEnemyCount) / 10.0f;
 
     // Position similarity

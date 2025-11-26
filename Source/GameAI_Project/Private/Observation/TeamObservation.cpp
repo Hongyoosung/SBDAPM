@@ -292,7 +292,7 @@ FTeamObservation FTeamObservation::ApplyDelta(const FTeamStateDelta& Delta) cons
         FObservationElement& FollowerObs = NextState.FollowerObservations[i];
 
         // Apply health change
-        FollowerObs.Health = FMath::Clamp(FollowerObs.Health + AgentDelta.HealthDelta, 0.0f, 100.0f);
+        FollowerObs.AgentHealth = FMath::Clamp(FollowerObs.AgentHealth + AgentDelta.HealthDelta, 0.0f, 100.0f);
 
         // Apply position change (relative to current centroid)
         // FollowerObs.Position += AgentDelta.PositionDelta;
@@ -303,7 +303,7 @@ FTeamObservation FTeamObservation::ApplyDelta(const FTeamStateDelta& Delta) cons
         // Apply status changes
         if (AgentDelta.bIsDead)
         {
-            FollowerObs.Health = 0.0f;
+            FollowerObs.AgentHealth = 0.0f;
         }
     }
 

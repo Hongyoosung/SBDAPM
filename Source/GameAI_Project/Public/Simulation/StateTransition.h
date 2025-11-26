@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Team/StrategicCommand.h"
+#include "Team/Objective.h"
 #include "RL/RLTypes.h"
 #include "StateTransition.generated.h"
 
@@ -150,12 +150,8 @@ struct FStateTransitionSample
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Training")
 	TArray<float> StateBefore;
 
-	// Actions at time t (strategic commands + tactical actions)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Training")
-	TArray<FStrategicCommand> StrategicCommands;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Training")
-	TArray<ETacticalAction> TacticalActions;
+	TArray<FTacticalAction> TacticalActions;
 
 	// State at time t+1 (flattened team observation)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Training")
@@ -180,18 +176,18 @@ struct FStateTransitionSample
 };
 
 /**
- * Action encoding for world model input
+ * Action encoding for world model input (v3.0)
  */
 USTRUCT(BlueprintType)
 struct FActionEncoding
 {
 	GENERATED_BODY()
 
-	// Strategic command type (one-hot encoded)
+	// Objective type (one-hot encoded)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encoding")
-	TArray<float> CommandTypeOneHot;
+	TArray<float> ObjectiveTypeOneHot;
 
-	// Strategic command parameters (normalized)
+	// Objective parameters (normalized)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Encoding")
 	FVector TargetLocationNormalized = FVector::ZeroVector;
 
@@ -207,11 +203,11 @@ struct FActionEncoding
 		, bHasTargetActor(false)
 	{}
 
-	// Encode strategic command to feature vector
-	static FActionEncoding EncodeStrategicCommand(const FStrategicCommand& Command);
+	// Encode objective to feature vector
+	static FActionEncoding EncodeObjective(const UObjective* Objective);
 
-	// Encode tactical action to one-hot
-	static TArray<float> EncodeTacticalAction(ETacticalAction Action);
+	// Encode tactical action to 8-dimensional continuous space
+	static TArray<float> EncodeTacticalAction(const FTacticalAction& Action);
 
 	// Flatten to single feature vector
 	TArray<float> Flatten() const;

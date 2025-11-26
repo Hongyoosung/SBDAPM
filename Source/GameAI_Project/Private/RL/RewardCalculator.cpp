@@ -165,7 +165,7 @@ float URewardCalculator::CalculateEfficiencyPenalty(float DeltaTime)
 	// Health inefficiency (being at low health)
 	if (HealthComponent)
 	{
-		float HealthRatio = HealthComponent->GetHealth() / HealthComponent->GetMaxHealth();
+		float HealthRatio = HealthComponent->GetCurrentHealth() / HealthComponent->GetMaxHealth();
 		if (HealthRatio < 0.3f) // Below 30% health
 		{
 			Penalty -= 0.02f * DeltaTime; // Small low-health penalty
@@ -256,7 +256,7 @@ bool URewardCalculator::IsOnObjective() const
 
 	// Check distance to objective location
 	FVector OwnerLocation = Owner->GetActorLocation();
-	FVector ObjectiveLocation = CurrentObjective->Location;
+	FVector ObjectiveLocation = CurrentObjective->TargetLocation;
 	float Distance = FVector::Dist(OwnerLocation, ObjectiveLocation);
 
 	return Distance <= ObjectiveRadiusThreshold;
@@ -283,7 +283,7 @@ bool URewardCalculator::IsInFormation() const
 	}
 
 	// Get team members
-	TArray<UFollowerAgentComponent*> TeamMembers = TeamLeader->GetTeamMembers();
+	TArray<AActor*> TeamMembers = TeamLeader->GetFollowers();
 	if (TeamMembers.Num() <= 1)
 	{
 		return false; // No teammates
@@ -293,15 +293,9 @@ bool URewardCalculator::IsInFormation() const
 	FVector OwnerLocation = Owner->GetActorLocation();
 	int32 NearbyCount = 0;
 
-	for (UFollowerAgentComponent* Member : TeamMembers)
+	for (AActor* MemberActor : TeamMembers)
 	{
-		if (Member == FollowerComponent || !Member)
-		{
-			continue;
-		}
-
-		AActor* MemberActor = Member->GetOwner();
-		if (!MemberActor)
+		if (MemberActor == Owner || !MemberActor)
 		{
 			continue;
 		}
