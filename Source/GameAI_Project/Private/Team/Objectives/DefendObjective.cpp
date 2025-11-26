@@ -3,6 +3,7 @@
 #include "Team/Objectives/DefendObjective.h"
 #include "GameFramework/Actor.h"
 #include "Combat/HealthComponent.h"
+#include "Core/SimulationManagerGameMode.h"
 
 UDefendObjective::UDefendObjective()
 {
@@ -142,7 +143,49 @@ int32 UDefendObjective::CountFriendliesInZone() const
 
 int32 UDefendObjective::CountEnemiesInZone() const
 {
-    // TODO: Query team system for enemy agents near TargetLocation
-    // For now, assume no enemies (will implement in full integration)
-    return 0;
+    int32 Count = 0;
+
+    // Get the SimulationManager to query enemy teams
+    UWorld* World = GetWorld();
+    if (!World) return 0;
+
+    ASimulationManagerGameMode* GameMode = World->GetAuthGameMode<ASimulationManagerGameMode>();
+    if (!GameMode) return 0;
+
+    // Find team ID of our agents (assume all assigned agents are on same team)
+    int32 OurTeamID = -1;
+    if (AssignedAgents.Num() > 0 && AssignedAgents[0])
+    {
+        OurTeamID = GameMode->GetTeamIDForActor(AssignedAgents[0]);
+    }
+
+    if (OurTeamID == -1) return 0;
+
+    // Get all enemy actors for our team
+    TArray<AActor*> EnemyActors = GameMode->GetEnemyActors(OurTeamID);
+
+    // Count enemies within defense radius
+    for (AActor* Enemy : EnemyActors)
+    {
+        if (Enemy && IsValid(Enemy))
+        {
+            // Check if enemy is alive
+            if (UHealthComponent* HealthComp = Enemy->FindComponentByClass<UHealthComponent>())
+            {
+                if (HealthComp->IsDead())
+                {
+                    continue;
+                }
+            }
+
+            // Check distance to defense zone
+            float Distance = FVector::Distance(Enemy->GetActorLocation(), TargetLocation);
+            if (Distance <= DefenseRadius)
+            {
+                Count++;
+            }
+        }
+    }
+
+    return Count;
 }

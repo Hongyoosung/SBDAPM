@@ -3,6 +3,7 @@
 #include "Team/Objectives/CaptureObjective.h"
 #include "GameFramework/Actor.h"
 #include "Combat/HealthComponent.h"
+#include "Core/SimulationManagerGameMode.h"
 
 UCaptureObjective::UCaptureObjective()
 {
@@ -129,8 +130,47 @@ int32 UCaptureObjective::CountAgentsInZone() const
 
 bool UCaptureObjective::CheckIfContested() const
 {
-    // TODO: Check if enemy agents are in zone
-    // For now, assume not contested
-    // In full implementation, query team system for enemy agents near TargetLocation
-    return false;
+    // Get the SimulationManager to query enemy teams
+    UWorld* World = GetWorld();
+    if (!World) return false;
+
+    ASimulationManagerGameMode* GameMode = World->GetAuthGameMode<ASimulationManagerGameMode>();
+    if (!GameMode) return false;
+
+    // Find team ID of our agents (assume all assigned agents are on same team)
+    int32 OurTeamID = -1;
+    if (AssignedAgents.Num() > 0 && AssignedAgents[0])
+    {
+        OurTeamID = GameMode->GetTeamIDForActor(AssignedAgents[0]);
+    }
+
+    if (OurTeamID == -1) return false;
+
+    // Get all enemy actors for our team
+    TArray<AActor*> EnemyActors = GameMode->GetEnemyActors(OurTeamID);
+
+    // Check if any enemy is within capture radius
+    for (AActor* Enemy : EnemyActors)
+    {
+        if (Enemy && IsValid(Enemy))
+        {
+            // Check if enemy is alive
+            if (UHealthComponent* HealthComp = Enemy->FindComponentByClass<UHealthComponent>())
+            {
+                if (HealthComp->IsDead())
+                {
+                    continue;
+                }
+            }
+
+            // Check distance to capture zone
+            float Distance = FVector::Distance(Enemy->GetActorLocation(), TargetLocation);
+            if (Distance <= CaptureRadius)
+            {
+                return true;  // Zone is contested
+            }
+        }
+    }
+
+    return false;  // No enemies in zone
 }

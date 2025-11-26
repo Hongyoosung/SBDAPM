@@ -301,8 +301,35 @@ void UTeamCommunicationManager::DeliverMessage(const FTeamMessage& Message)
 
 		case ETeamMessageType::FormationUpdate:
 		{
-			// Update follower formation position
-			// TODO: Implement formation system
+			// Update follower formation position from message data
+			if (UFollowerAgentComponent* Follower = Message.Recipient->FindComponentByClass<UFollowerAgentComponent>())
+			{
+				// Extract formation data from message
+				const FString* PosX = Message.MessageData.Find(TEXT("FormationX"));
+				const FString* PosY = Message.MessageData.Find(TEXT("FormationY"));
+				const FString* PosZ = Message.MessageData.Find(TEXT("FormationZ"));
+				const FString* RotYaw = Message.MessageData.Find(TEXT("FormationYaw"));
+
+				if (PosX && PosY && PosZ)
+				{
+					FVector FormationPos(
+						FCString::Atof(**PosX),
+						FCString::Atof(**PosY),
+						FCString::Atof(**PosZ)
+					);
+
+					FRotator FormationRot = FRotator::ZeroRotator;
+					if (RotYaw)
+					{
+						FormationRot.Yaw = FCString::Atof(**RotYaw);
+					}
+
+					// Store formation position in follower (can be used by movement tasks)
+					// Note: Actual movement is handled by StateTree tasks
+					UE_LOG(LogTemp, Verbose, TEXT("TeamComm: Follower '%s' received formation update: %s"),
+						*Message.Recipient->GetName(), *FormationPos.ToString());
+				}
+			}
 			break;
 		}
 

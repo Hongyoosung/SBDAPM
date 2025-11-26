@@ -195,10 +195,21 @@ void UHybridPolicyNetwork::GetActionAndPriors(
 	FTacticalAction& OutAction,
 	TArray<float>& OutPriors)
 {
-	// For now, run two separate forward passes
-	// TODO: Optimize with batch inference
-	OutAction = GetAction(Observation, nullptr);
-	OutPriors = GetObjectivePriors(TeamObs);
+	// Optimized single forward pass for both outputs
+	// Prepare input combining individual and team observations
+	TArray<float> InputFeatures = Observation.ToFeatureVector();
+	InputFeatures.Append(TeamObs.Flatten());
+
+	// Single forward pass through dual-head network
+	TArray<float> ActionLogits;
+	TArray<float> PriorLogits;
+	ForwardPass(InputFeatures, ActionLogits, PriorLogits);
+
+	// Decode action from logits
+	OutAction = ActionLogitsToTacticalAction(ActionLogits);
+
+	// Store priors directly
+	OutPriors = PriorLogits;
 }
 
 // ========================================

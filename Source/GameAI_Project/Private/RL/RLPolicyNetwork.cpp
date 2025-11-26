@@ -877,9 +877,36 @@ TArray<float> URLPolicyNetwork::GetObjectiveEmbedding(UObjective* CurrentObjecti
 
 	if (CurrentObjective)
 	{
-		// TODO: Get objective type from CurrentObjective->Type
-		// For now, default to first type (Eliminate)
-		Embedding[0] = 1.0f;
+		// Get objective type and encode as one-hot
+		EObjectiveType ObjType = CurrentObjective->Type;
+
+		switch (ObjType)
+		{
+			case EObjectiveType::Eliminate:
+				Embedding[0] = 1.0f;
+				break;
+			case EObjectiveType::CaptureObjective:
+				Embedding[1] = 1.0f;
+				break;
+			case EObjectiveType::DefendObjective:
+				Embedding[2] = 1.0f;
+				break;
+			case EObjectiveType::SupportAlly:
+				Embedding[3] = 1.0f;
+				break;
+			case EObjectiveType::FormationMove:
+				Embedding[4] = 1.0f;
+				break;
+			case EObjectiveType::Retreat:
+				Embedding[5] = 1.0f;
+				break;
+			case EObjectiveType::RescueAlly:
+				Embedding[6] = 1.0f;
+				break;
+			default:
+				// None or unknown - leave as zeros
+				break;
+		}
 	}
 	// If null objective, return all zeros (no objective)
 

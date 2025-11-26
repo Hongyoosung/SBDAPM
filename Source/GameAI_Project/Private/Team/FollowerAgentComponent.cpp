@@ -310,11 +310,12 @@ void UFollowerAgentComponent::TransitionToState(EFollowerState NewState)
 		*GetStateName(OldState),
 		*GetStateName(NewState));
 
-	// Broadcast state change event
+	// Broadcast state change event (StateTree reacts via evaluators/conditions)
 	OnStateChanged.Broadcast(OldState, NewState);
 
-	// TODO: Transition existing FSM to corresponding state
-	// This would require mapping EFollowerState to existing UState classes
+	// State changes are automatically handled by StateTree evaluators and conditions
+	// No explicit FSM transition needed - StateTree evaluates conditions each tick
+	// and transitions based on current objective and alive status
 }
 
 void UFollowerAgentComponent::MarkAsDead()

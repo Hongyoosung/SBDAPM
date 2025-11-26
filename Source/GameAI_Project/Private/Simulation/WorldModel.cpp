@@ -1,9 +1,12 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Simulation/WorldModel.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformTime.h"
+#include "NNE.h"
+#include "NNEModelData.h"
+#include "NNERuntimeCPU.h"
 
 UWorldModel::UWorldModel()
 {
@@ -19,20 +22,94 @@ bool UWorldModel::Initialize(const FWorldModelConfig& InConfig)
 {
 	Config = InConfig;
 
-	// TODO: Load ONNX model via NNE when model is trained
-	// For now, use heuristic fallback
-	UE_LOG(LogTemp, Warning, TEXT("[WorldModel] ONNX model not yet trained, using heuristic predictions"));
 	UE_LOG(LogTemp, Log, TEXT("[WorldModel] Initialize called with model path: %s"), *Config.ModelPath);
 
-	// Set placeholder input/output sizes based on observation structure
-	// Input: TeamObs (750) + Actions (encoded)
-	// Output: State delta (750)
-	InputSize = 750 + 100; // Placeholder
-	OutputSize = 750;
+	const FString ModelFullPath = FPaths::ProjectContentDir() / Config.ModelPath;
 
-	bIsInitialized = true;
-	return true;
+	TArray<uint8> FileData;
+
+	if (FFileHelper::LoadFileToArray(FileData, *ModelFullPath))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[WorldModel] Loaded ONNX model file: %s (%d bytes)"),
+			*ModelFullPath, FileData.Num());
+
+		// ⚠️ 중요: UNNEModelData를 생성하고 Init() 호출
+		UNNEModelData* ModelData = NewObject<UNNEModelData>();
+		ModelData->Init(TEXT("onnx"), FileData, TMap<FString, TConstArrayView64<uint8>>());
+
+		// Get NNE CPU runtime
+		TWeakInterfacePtr<INNERuntimeCPU> Runtime = UE::NNE::GetRuntime<INNERuntimeCPU>(FString("NNERuntimeORTCpu"));
+		if (!Runtime.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[WorldModel] Failed to get NNE CPU runtime"));
+			bIsInitialized = false;
+			return false;
+		}
+
+		// CreateModelCPU: TObjectPtr<UNNEModelData>를 받음
+		TSharedPtr<UE::NNE::IModelCPU> Model = Runtime->CreateModelCPU(ModelData);
+		if (!Model.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[WorldModel] Failed to create NNE model"));
+			bIsInitialized = false;
+			return false;
+		}
+
+		// CreateModelInstanceCPU
+		TSharedPtr<UE::NNE::IModelInstanceCPU> Instance = Model->CreateModelInstanceCPU();
+		if (!Instance.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[WorldModel] Failed to create model instance"));
+			bIsInitialized = false;
+			return false;
+		}
+
+		ModelInstance = Instance;
+
+		// Get tensor information
+		TConstArrayView<UE::NNE::FTensorDesc> InputDescs = ModelInstance->GetInputTensorDescs();
+		TConstArrayView<UE::NNE::FTensorDesc> OutputDescs = ModelInstance->GetOutputTensorDescs();
+
+		if (InputDescs.Num() > 0 && OutputDescs.Num() > 0)
+		{
+			// 1. Symbolic Shape 가져오기
+			UE::NNE::FSymbolicTensorShape InputSymbolicShape = InputDescs[0].GetShape();
+			UE::NNE::FSymbolicTensorShape OutputSymbolicShape = OutputDescs[0].GetShape();
+
+			// 2. Concrete Shape(확정된 크기)인지 확인 (선택 사항이지만 권장)
+			if (InputSymbolicShape.IsConcrete() && OutputSymbolicShape.IsConcrete())
+			{
+				// 3. FTensorShape로 변환하여 Volume() 호출
+				InputSize = UE::NNE::FTensorShape::MakeFromSymbolic(InputSymbolicShape).Volume();
+				OutputSize = UE::NNE::FTensorShape::MakeFromSymbolic(OutputSymbolicShape).Volume();
+
+				UE_LOG(LogTemp, Log, TEXT("[WorldModel] Model loaded - Input: %lld, Output: %lld"),
+					InputSize, OutputSize);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[WorldModel] Model has dynamic shapes (contains -1), cannot calculate fixed volume."));
+				// 동적 셰이프일 경우에 대한 처리 로직 추가 필요 (예: 기본값 설정)
+				InputSize = 0;
+				OutputSize = 0;
+			}
+		}
+
+		bIsInitialized = true;
+		return true;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[WorldModel] Model file not found at %s, using heuristic"),
+			*ModelFullPath);
+
+		InputSize = 750 + 100;
+		OutputSize = 750;
+		bIsInitialized = true;
+		return true;
+	}
 }
+
 
 FWorldModelPrediction UWorldModel::PredictNextState(
 	const FTeamObservation& CurrentState,
@@ -52,10 +129,36 @@ FWorldModelPrediction UWorldModel::PredictNextState(
 	// Encode input
 	TArray<float> InputTensor = EncodeInput(CurrentState, TacticalActions);
 
-	// TODO: Run ONNX inference when model is trained
-	// For now, use heuristic fallback to generate prediction
+	// Run ONNX inference if model is loaded
 	TArray<float> OutputTensor;
-	OutputTensor.Init(0.0f, OutputSize);
+	if (ModelInstance.IsValid())
+	{
+		// Prepare input bindings
+		TArray<UE::NNE::FTensorBindingCPU> InputBindings;
+		UE::NNE::FTensorBindingCPU& InputBinding = InputBindings.AddDefaulted_GetRef();
+		InputBinding.Data = InputTensor.GetData();
+		InputBinding.SizeInBytes = InputTensor.Num() * sizeof(float);
+
+		// Prepare output bindings
+		OutputTensor.SetNumUninitialized(OutputSize);
+		TArray<UE::NNE::FTensorBindingCPU> OutputBindings;
+		UE::NNE::FTensorBindingCPU& OutputBinding = OutputBindings.AddDefaulted_GetRef();
+		OutputBinding.Data = OutputTensor.GetData();
+		OutputBinding.SizeInBytes = OutputTensor.Num() * sizeof(float);
+
+		// Run inference
+		UE::NNE::IModelInstanceCPU::ERunSyncStatus Status = ModelInstance->RunSync(InputBindings, OutputBindings);
+		if (Status != UE::NNE::IModelInstanceCPU::ERunSyncStatus::Ok)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[WorldModel] Inference failed with status %d"), (int32)Status);
+			OutputTensor.Init(0.0f, OutputSize);  // Fallback to zeros
+		}
+	}
+	else
+	{
+		// Heuristic fallback when model not loaded
+		OutputTensor.Init(0.0f, OutputSize);
+	}
 
 	// Decode output to state delta
 	FTeamStateDelta LearnedDelta = DecodeOutput(OutputTensor);
@@ -234,8 +337,40 @@ FTeamStateDelta UWorldModel::DecodeOutput(const TArray<float>& OutputTensor)
 {
 	FTeamStateDelta Delta;
 
-	// TODO: Parse output tensor into state delta
-	// For now, placeholder
+	if (OutputTensor.Num() < 10)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[WorldModel] Output tensor too small (%d elements)"), OutputTensor.Num());
+		return Delta;
+	}
+
+	// Parse output tensor structure:
+	// [0-9]: Key state deltas (health, cohesion, kills, deaths, damage, etc.)
+	// [10+]: Individual agent state deltas (if needed for detailed prediction)
+
+	int32 Idx = 0;
+
+	// Team-level deltas
+	Delta.TeamHealthDelta = OutputTensor[Idx++];       // Expected health change
+	Delta.TeamCohesionDelta = OutputTensor[Idx++];     // Expected cohesion change
+	Delta.AliveCountDelta = FMath::RoundToInt(OutputTensor[Idx++]);  // Expected agent deaths
+	Delta.PredictedKills = FMath::RoundToInt(OutputTensor[Idx++]);   // Expected kills
+	Delta.PredictedDeaths = FMath::RoundToInt(OutputTensor[Idx++]);  // Expected deaths
+	Delta.PredictedDamageDealt = OutputTensor[Idx++];  // Expected damage dealt
+	Delta.PredictedDamageTaken = OutputTensor[Idx++];  // Expected damage taken
+
+	// Tactical outcome predictions
+	Delta.EngagementOutcome = OutputTensor[Idx++];     // Win probability [-1, 1]
+	Delta.ObjectiveProgress = OutputTensor[Idx++];     // Objective completion estimate
+	Delta.Confidence = FMath::Clamp(OutputTensor[Idx++], 0.0f, 1.0f);  // Model confidence
+
+	// Additional predictions can be extracted from remaining tensor elements
+	// For now, we focus on the key 10 dimensions
+
+	if (Config.bEnableLogging)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("[WorldModel] Decoded - Health:%.1f Kills:%d Deaths:%d Conf:%.2f"),
+			Delta.TeamHealthDelta, Delta.PredictedKills, Delta.PredictedDeaths, Delta.Confidence);
+	}
 
 	return Delta;
 }

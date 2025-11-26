@@ -347,9 +347,57 @@ int32 URLReplayBuffer::ImportFromJSON(const FString& FilePath)
 
 		FRLExperience Experience;
 
-		// Parse fields (simplified - would need full FObservationElement parsing)
-		// For now, just add empty experiences as placeholder
-		// TODO: Implement full parsing
+		// Parse observation
+		// Note: FromFlatArray not implemented for FObservationElement
+		// TODO: Implement proper deserialization if needed for replay buffer loading
+		if (ExpObject->HasTypedField<EJson::Array>(TEXT("observation")))
+		{
+			const TArray<TSharedPtr<FJsonValue>>& ObsArray = ExpObject->GetArrayField(TEXT("observation"));
+			if (ObsArray.Num() == 71)  // Expected observation size
+			{
+				// TArray<float> ObsFeatures;
+				// for (const TSharedPtr<FJsonValue>& Val : ObsArray)
+				// {
+				// 	ObsFeatures.Add(Val->AsNumber());
+				// }
+				// Experience.State.FromFlatArray(ObsFeatures);  // Not implemented
+				UE_LOG(LogTemp, Warning, TEXT("URLReplayBuffer: Observation deserialization not implemented"));
+			}
+		}
+
+		// Parse action
+		if (ExpObject->HasTypedField<EJson::Object>(TEXT("action")))
+		{
+			TSharedPtr<FJsonObject> ActionObj = ExpObject->GetObjectField(TEXT("action"));
+			// Parse FTacticalAction fields
+			Experience.Action.MoveDirection.X = ActionObj->GetNumberField(TEXT("move_x"));
+			Experience.Action.MoveDirection.Y = ActionObj->GetNumberField(TEXT("move_y"));
+			Experience.Action.MoveSpeed = ActionObj->GetNumberField(TEXT("move_speed"));
+			Experience.Action.LookDirection.X = ActionObj->GetNumberField(TEXT("look_x"));
+			Experience.Action.LookDirection.Y = ActionObj->GetNumberField(TEXT("look_y"));
+			Experience.Action.bFire = ActionObj->GetBoolField(TEXT("fire"));
+			Experience.Action.bCrouch = ActionObj->GetBoolField(TEXT("crouch"));
+			Experience.Action.bUseAbility = ActionObj->GetBoolField(TEXT("use_ability"));
+		}
+
+		// Parse reward, next_observation, done
+		Experience.Reward = ExpObject->GetNumberField(TEXT("reward"));
+		Experience.bTerminal = ExpObject->GetBoolField(TEXT("done"));
+
+		if (ExpObject->HasTypedField<EJson::Array>(TEXT("next_observation")))
+		{
+			const TArray<TSharedPtr<FJsonValue>>& NextObsArray = ExpObject->GetArrayField(TEXT("next_observation"));
+			if (NextObsArray.Num() == 71)
+			{
+				// TArray<float> NextObsFeatures;
+				// for (const TSharedPtr<FJsonValue>& Val : NextObsArray)
+				// {
+				// 	NextObsFeatures.Add(Val->AsNumber());
+				// }
+				// Experience.NextState.FromFlatArray(NextObsFeatures);  // Not implemented
+				UE_LOG(LogTemp, Warning, TEXT("URLReplayBuffer: NextObservation deserialization not implemented"));
+			}
+		}
 
 		AddExperience(Experience);
 		ImportedCount++;
@@ -442,9 +490,29 @@ float URLReplayBuffer::CalculateInitialPriority() const
 
 void URLReplayBuffer::UpdateSumTree(int32 Index)
 {
-	// TODO: Implement efficient sum tree update
-	// For now, just rebuild entire tree
-	RebuildSumTree();
+	if (!bUsePrioritizedReplay || Index < 0 || Index >= Priorities.Num())
+	{
+		return;
+	}
+
+	// Efficient sum tree update: only update affected nodes
+	// Sum tree is stored as cumulative sums, so we need to update from Index onwards
+
+	if (SumTree.Num() != Priorities.Num())
+	{
+		// Tree not initialized, rebuild from scratch
+		RebuildSumTree();
+		return;
+	}
+
+	// Recalculate cumulative sum from the updated index
+	float PrevSum = (Index > 0) ? SumTree[Index - 1] : 0.0f;
+
+	for (int32 i = Index; i < Priorities.Num(); ++i)
+	{
+		PrevSum += FMath::Pow(Priorities[i], PriorityAlpha);
+		SumTree[i] = PrevSum;
+	}
 }
 
 void URLReplayBuffer::RebuildSumTree()

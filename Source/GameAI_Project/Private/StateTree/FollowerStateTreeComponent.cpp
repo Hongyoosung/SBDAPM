@@ -318,14 +318,27 @@ bool UFollowerStateTreeComponent::IsStateTreeRunning() const
 
 FString UFollowerStateTreeComponent::GetCurrentStateName() const
 {
-	if (!IsStateTreeRunning())
+	// Get run status
+	EStateTreeRunStatus Status = GetStateTreeRunStatus();
+
+	switch (Status)
 	{
-		return TEXT("Not Running");
+		case EStateTreeRunStatus::Running:
+			return TEXT("Running");
+		case EStateTreeRunStatus::Succeeded:
+			return TEXT("Succeeded");
+		case EStateTreeRunStatus::Failed:
+			return TEXT("Failed");
+		case EStateTreeRunStatus::Stopped:
+			return TEXT("Stopped");
+		case EStateTreeRunStatus::Unset:
+		default:
+			return TEXT("Not Running");
 	}
 
-	// Get active state name from State Tree
-	// (UE State Tree API may vary - this is a placeholder)
-	return TEXT("Active"); // TODO: Get actual state name from State Tree API
+	// Note: In UE5.6, accessing individual state names requires accessing the execution context
+	// during callbacks (EnterState, Tick, etc.). Direct access from component is not supported.
+	// For detailed state information, use debug visualization or StateTree logging.
 }
 
 bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionContext& InContext,

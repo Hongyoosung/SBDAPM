@@ -101,6 +101,13 @@ struct FTeamStateDelta
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transition")
 	float ObjectiveProgressDelta = 0.0f;
 
+	// Tactical outcome predictions
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transition")
+	float EngagementOutcome = 0.0f;  // Win probability [-1, 1]
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transition")
+	float ObjectiveProgress = 0.0f;  // Objective completion estimate [0, 1]
+
 	// Time elapsed for this transition (seconds)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Transition")
 	float DeltaTime = 1.0f;
@@ -118,6 +125,8 @@ struct FTeamStateDelta
 		, PredictedDamageDealt(0.0f)
 		, PredictedDamageTaken(0.0f)
 		, ObjectiveProgressDelta(0.0f)
+		, EngagementOutcome(0.0f)
+		, ObjectiveProgress(0.0f)
 		, DeltaTime(1.0f)
 		, Confidence(1.0f)
 	{}
@@ -133,6 +142,8 @@ struct FTeamStateDelta
 		PredictedDamageDealt = 0.0f;
 		PredictedDamageTaken = 0.0f;
 		ObjectiveProgressDelta = 0.0f;
+		EngagementOutcome = 0.0f;
+		ObjectiveProgress = 0.0f;
 		DeltaTime = 1.0f;
 		Confidence = 1.0f;
 	}

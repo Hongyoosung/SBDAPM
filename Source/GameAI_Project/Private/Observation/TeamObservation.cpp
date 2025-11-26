@@ -1,5 +1,6 @@
 #include "Observation/TeamObservation.h"
 #include "Simulation/StateTransition.h"
+#include "Team/FollowerAgentComponent.h"
 
 TArray<float> FTeamObservation::ToFeatureVector() const
 {
@@ -137,13 +138,44 @@ FTeamObservation FTeamObservation::BuildFromTeam(
 {
     FTeamObservation TeamObs;
 
-    // TODO: Implement team observation building
-    // This requires integration with FollowerAgentComponent
-    // which will be implemented in Phase 2 (Week 4-7)
+    // Build team observation from team members
+    // Collect individual observations and aggregate team-level statistics
 
-    // For now, return empty observation
-    TeamObs.AliveFollowers = TeamMembers.Num();
-    TeamObs.DeadFollowers = 0;
+    int32 AliveCount = 0;
+    int32 DeadCount = 0;
+    float TotalHealth = 0.0f;
+
+    // Collect individual follower observations
+    for (AActor* Member : TeamMembers)
+    {
+        if (!Member) continue;
+
+        // Get follower component if available
+        UFollowerAgentComponent* Follower = Member->FindComponentByClass<UFollowerAgentComponent>();
+        if (Follower)
+        {
+            FObservationElement Obs = Follower->GetLocalObservation();
+            TeamObs.FollowerObservations.Add(Obs);
+
+            // Aggregate statistics
+            // Note: AgentHealth is 0-100 scale, consider alive if > 0
+            if (Obs.AgentHealth > 0.0f)
+            {
+                AliveCount++;
+                TotalHealth += Obs.AgentHealth;
+            }
+            else
+            {
+                DeadCount++;
+            }
+        }
+    }
+
+    TeamObs.AliveFollowers = AliveCount;
+    TeamObs.DeadFollowers = DeadCount;
+    // Calculate average health percentage across all team members (alive + dead)
+    int32 TotalMembers = AliveCount + DeadCount;
+    TeamObs.AverageTeamHealth = (TotalMembers > 0) ? (TotalHealth / TotalMembers) : 0.0f;
 
     // Calculate team centroid
     if (TeamMembers.Num() > 0)
