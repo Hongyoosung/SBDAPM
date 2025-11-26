@@ -5,6 +5,9 @@
 #include "Team/Objectives/CaptureObjective.h"
 #include "Team/Objectives/DefendObjective.h"
 #include "Team/Objectives/SupportAllyObjective.h"
+#include "Team/Objectives/FormationMoveObjective.h"
+#include "Team/Objectives/RetreatObjective.h"
+#include "Team/Objectives/RescueAllyObjective.h"
 
 UObjectiveManager::UObjectiveManager()
 {
@@ -42,6 +45,18 @@ UObjective* UObjectiveManager::CreateObjective(EObjectiveType Type, AActor* Targ
         case EObjectiveType::SupportAlly:
             NewObjective = CreateObjectiveOfType<USupportAllyObjective>(Type);
             break;
+        case EObjectiveType::FormationMove:
+            NewObjective = CreateObjectiveOfType<UFormationMoveObjective>(Type);
+            break;
+        case EObjectiveType::Retreat:
+            NewObjective = CreateObjectiveOfType<URetreatObjective>(Type);
+            break;
+        case EObjectiveType::RescueAlly:
+            NewObjective = CreateObjectiveOfType<URescueAllyObjective>(Type);
+            break;
+        case EObjectiveType::None:
+            // None type is valid but creates no objective
+            return nullptr;
         default:
             UE_LOG(LogTemp, Warning, TEXT("ObjectiveManager: Unsupported objective type"));
             return nullptr;

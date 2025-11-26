@@ -734,6 +734,12 @@ void UTeamLeaderComponent::OnObjectiveMCTSComplete(TMap<AActor*, UObjective*> Ne
 		TArray<AActor*> SingleAgent = { Follower };
 		ObjectiveManager->AssignAgentsToObjective(Objective, SingleAgent);
 
+		// Notify follower component of new objective
+		if (UFollowerAgentComponent* FollowerComp = Follower->FindComponentByClass<UFollowerAgentComponent>())
+		{
+			FollowerComp->SetCurrentObjective(Objective);
+		}
+
 		UE_LOG(LogTemp, Warning, TEXT("🎯 [OBJECTIVE ASSIGNMENT] Agent '%s': Objective=%s, Target=%s, Priority=%d"),
 			*Follower->GetName(),
 			*UEnum::GetValueAsString(Objective->Type),

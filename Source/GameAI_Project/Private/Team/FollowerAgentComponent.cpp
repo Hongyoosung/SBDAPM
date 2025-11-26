@@ -715,13 +715,19 @@ void UFollowerAgentComponent::OnDeathEvent(const FDeathEventData& DeathEvent)
 
 void UFollowerAgentComponent::SetCurrentObjective(UObjective* Objective)
 {
+	// Set the current objective
+	CurrentObjective = Objective;
+
+	// Notify reward calculator
 	if (RewardCalculator)
 	{
 		RewardCalculator->SetCurrentObjective(Objective);
-		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Objective set to %s"),
-			*GetOwner()->GetName(),
-			Objective ? *UEnum::GetValueAsString(Objective->Type) : TEXT("None"));
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("📝 [FOLLOWER] '%s': Objective set to %s, Active=%d"),
+		*GetOwner()->GetName(),
+		Objective ? *UEnum::GetValueAsString(Objective->Type) : TEXT("None"),
+		Objective ? Objective->IsActive() : false);
 }
 
 //------------------------------------------------------------------------------
