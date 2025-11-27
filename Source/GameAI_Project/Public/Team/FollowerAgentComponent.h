@@ -173,17 +173,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void ResetEpisode();
 
-	/** Clear collected experiences (e.g., for new episode) */
-	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
-	void ClearExperiences();
-
 	/** Called when episode ends - assigns terminal reward and marks experiences */
 	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
 	void OnEpisodeEnded(float EpisodeReward);
-
-	/** Export collected experiences to JSON */
-	UFUNCTION(BlueprintCallable, Category = "Follower|RL")
-	bool ExportExperiences(const FString& FilePath);
 
 	/** Is tactical policy ready for queries? */
 	UFUNCTION(BlueprintPure, Category = "Follower|RL")
@@ -247,9 +239,6 @@ public:
 
 
 private:
-	/** Update command timer */
-	void UpdateCommandTimer(float DeltaTime);
-
 	/** Combat event handlers */
 	UFUNCTION()
 	void OnDamageTakenEvent(const FDamageEventData& DamageEvent, float CurrentHealth);

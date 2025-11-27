@@ -29,10 +29,11 @@ void UScholaAgentComponent::BeginPlay()
 		InitializeScholaComponents();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[ScholaAgent] %s: Initialized (Training=%s, Port=%d)"),
-		*GetOwner()->GetName(),
-		bEnableScholaTraining ? TEXT("ON") : TEXT("OFF"),
-		ScholaServerPort);
+	// Note: gRPC server is now managed by ScholaCombatEnvironment
+	// This component will be auto-registered by the environment during initialization
+
+	UE_LOG(LogTemp, Log, TEXT("[ScholaAgent] %s: Initialized"),
+		*GetOwner()->GetName());
 }
 
 void UScholaAgentComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -74,6 +75,7 @@ void UScholaAgentComponent::ConfigureObservers()
 {
 	if (!TacticalObserver || !FollowerAgent)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent]: TacticalObserver or FollowerAgent is null!"));
 		return;
 	}
 
@@ -88,7 +90,7 @@ void UScholaAgentComponent::ConfigureObservers()
 		this->Observers.Add(TacticalObserver);
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalObserver configured (71 features)"),
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] %s: TacticalObserver configured (71 features)"),
 		*GetOwner()->GetName());
 }
 
@@ -104,7 +106,7 @@ void UScholaAgentComponent::ConfigureRewardProvider()
 	RewardProvider->bAutoFindFollower = false;
 	RewardProvider->Initialize();
 
-	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: RewardProvider configured"),
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] %s: RewardProvider configured"),
 		*GetOwner()->GetName());
 }
 
@@ -157,7 +159,7 @@ void UScholaAgentComponent::ConfigureActuators()
 		this->Actuators.Add(TacticalActuator);
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalActuator configured (8D actions)"),
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] %s: TacticalActuator configured (8D actions)"),
 		*GetOwner()->GetName());
 }
 

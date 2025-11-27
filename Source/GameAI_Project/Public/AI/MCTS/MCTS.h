@@ -211,16 +211,9 @@ private:
     UPROPERTY()
     TObjectPtr<class UObjectiveManager> CachedObjectiveManager;
 
-    /** Value Network for leaf node evaluation (v3.0 - replaces heuristics) */
-    UPROPERTY()
-    TObjectPtr<class UTeamValueNetwork> ValueNetwork;
-
-    /** World Model for state prediction during simulation (v3.0 - Sprint 2) */
-    UPROPERTY()
-    TObjectPtr<class UWorldModel> WorldModel;
-
-    /** RL Policy Network for action priors (v3.0 - Sprint 4)
-     * Provides prior probabilities to guide MCTS tree search
+    /** RL Policy Network for action selection and value estimation
+     * Uses PPO's actor (action priors) + critic (state value) for MCTS guidance
+     * Trained in real-time via RLlib (no offline self-play needed)
      */
     UPROPERTY()
     TObjectPtr<class URLPolicyNetwork> RLPolicyNetwork;

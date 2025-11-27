@@ -50,14 +50,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schola|Config")
 	bool bAutoConfigureFollower = true;
 
-	/** Enable Schola training (gRPC connection to Python) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schola|Config")
-	bool bEnableScholaTraining = false;
-
-	/** gRPC server port for Schola communication */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Schola|Config")
-	int32 ScholaServerPort = 50051;
-
 	//--------------------------------------------------------------------------
 	// COMPONENTS
 	//--------------------------------------------------------------------------
@@ -77,6 +69,10 @@ public:
 	/** Reference to follower agent component (auto-found) */
 	UPROPERTY(BlueprintReadOnly, Category = "Schola|State")
 	UFollowerAgentComponent* FollowerAgent = nullptr;
+
+	/** Reference to Schola environment (set by environment during registration) */
+	UPROPERTY(BlueprintReadOnly, Category = "Schola|State")
+	class AScholaCombatEnvironment* ScholaEnvironment = nullptr;
 
 	//--------------------------------------------------------------------------
 	// UTILITY

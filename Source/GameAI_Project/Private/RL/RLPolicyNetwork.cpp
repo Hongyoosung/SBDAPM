@@ -15,8 +15,6 @@
 URLPolicyNetwork::URLPolicyNetwork()
 	: bEnableExploration(true)
 	, bUseONNXModel(false)
-	, bCollectExperiences(true)
-	, MaxExperienceBufferSize(100000)
 	, bIsInitialized(false)
 	, CurrentEpisodeReward(0.0f)
 	, CurrentEpisodeSteps(0)
@@ -125,12 +123,13 @@ bool URLPolicyNetwork::LoadPolicy(const FString& ModelPath)
 	UE_LOG(LogTemp, Log, TEXT("  Input tensors: %d"), InputDescs.Num());
 	UE_LOG(LogTemp, Log, TEXT("  Output tensors: %d"), OutputDescs.Num());
 
-	// Setup input buffer (71 features)
+	// Setup input buffer (78 features: 71 obs + 7 objective embedding)
 	InputBuffer.SetNum(Config.InputSize);
 
-	// Setup output buffer (16 actions + optional value head)
-	// The model outputs [action_probs, state_value], but we only need action_probs
-	OutputBuffer.SetNum(Config.OutputSize + 1);  // +1 for value head
+	// Setup output buffers for dual-head PPO model
+	// Output 0: action_logits (8 atomic actions)
+	// Output 1: state_value (1 value estimate)
+	OutputBuffer.SetNum(Config.OutputSize + 1);  // 8 + 1 = 9 total
 
 	bUseONNXModel = true;
 	bIsInitialized = true;
@@ -158,269 +157,10 @@ void URLPolicyNetwork::UnloadPolicy()
 }
 
 // ========================================
-// Experience Collection (v3.0)
+// Experience Collection - REMOVED
+// Real-time PPO training via RLlib handles experience collection automatically
+// No need for C++ side JSON export or offline training
 // ========================================
-
-void URLPolicyNetwork::StoreExperience(const FObservationElement& State, const FTacticalAction& Action, float Reward, const FObservationElement& NextState, bool bTerminal, UObjective* CurrentObjective)
-{
-	if (!bCollectExperiences)
-	{
-		return;
-	}
-
-	// Create experience
-	FRLExperience Experience(State, Action, Reward, NextState, bTerminal);
-	Experience.Timestamp = FPlatformTime::Seconds();
-
-	// Add objective embeddings
-	Experience.ObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
-	Experience.NextObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);  // Assume same objective for now
-
-	// Add to buffer
-	CollectedExperiences.Add(Experience);
-
-	// Update statistics
-	TrainingStats.TotalExperiences++;
-	CurrentEpisodeReward += Reward;
-	CurrentEpisodeSteps++;
-
-	// Handle episode termination
-	if (bTerminal)
-	{
-		TrainingStats.EpisodesCompleted++;
-		TrainingStats.LastEpisodeReward = CurrentEpisodeReward;
-
-		if (CurrentEpisodeReward > TrainingStats.BestEpisodeReward)
-		{
-			TrainingStats.BestEpisodeReward = CurrentEpisodeReward;
-		}
-
-		// Update average reward (exponential moving average)
-		float Alpha = 0.1f;  // Smoothing factor
-		TrainingStats.AverageReward = Alpha * CurrentEpisodeReward + (1.0f - Alpha) * TrainingStats.AverageReward;
-
-		// Update average episode length
-		TrainingStats.AverageEpisodeLength = Alpha * CurrentEpisodeSteps + (1.0f - Alpha) * TrainingStats.AverageEpisodeLength;
-
-		// Reset episode counters
-		CurrentEpisodeReward = 0.0f;
-		CurrentEpisodeSteps = 0;
-
-		UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Episode %d complete. Reward: %.2f, Avg: %.2f, Best: %.2f"),
-			TrainingStats.EpisodesCompleted,
-			TrainingStats.LastEpisodeReward,
-			TrainingStats.AverageReward,
-			TrainingStats.BestEpisodeReward);
-	}
-
-	// Check buffer overflow
-	if (CollectedExperiences.Num() > MaxExperienceBufferSize)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: Experience buffer full (%d), removing oldest experiences"),
-			MaxExperienceBufferSize);
-
-		// Remove oldest 10% of experiences
-		int32 RemoveCount = MaxExperienceBufferSize / 10;
-		CollectedExperiences.RemoveAt(0, RemoveCount);
-	}
-}
-
-void URLPolicyNetwork::StoreExperienceWithUncertainty(
-	const FObservationElement& State,
-	const FTacticalAction& Action,
-	float Reward,
-	const FObservationElement& NextState,
-	bool bTerminal,
-	UObjective* CurrentObjective,
-	float MCTSValueVariance,
-	float MCTSPolicyEntropy,
-	float MCTSVisitCount)
-{
-	if (!bCollectExperiences)
-	{
-		return;
-	}
-
-	// Create experience
-	FRLExperience Experience(State, Action, Reward, NextState, bTerminal);
-	Experience.Timestamp = FPlatformTime::Seconds();
-
-	// Add objective embeddings
-	Experience.ObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
-	Experience.NextObjectiveEmbedding = GetObjectiveEmbedding(CurrentObjective);
-
-	// Add MCTS uncertainty metrics (Sprint 3)
-	Experience.MCTSValueVariance = MCTSValueVariance;
-	Experience.MCTSPolicyEntropy = MCTSPolicyEntropy;
-	Experience.MCTSVisitCount = MCTSVisitCount;
-
-	// Add to buffer
-	CollectedExperiences.Add(Experience);
-
-	// Update statistics
-	TrainingStats.TotalExperiences++;
-	CurrentEpisodeReward += Reward;
-	CurrentEpisodeSteps++;
-
-	// Handle episode termination
-	if (bTerminal)
-	{
-		TrainingStats.EpisodesCompleted++;
-		TrainingStats.LastEpisodeReward = CurrentEpisodeReward;
-
-		if (CurrentEpisodeReward > TrainingStats.BestEpisodeReward)
-		{
-			TrainingStats.BestEpisodeReward = CurrentEpisodeReward;
-		}
-
-		// Update averages
-		float Alpha = 0.1f;
-		TrainingStats.AverageReward = Alpha * CurrentEpisodeReward + (1.0f - Alpha) * TrainingStats.AverageReward;
-		TrainingStats.AverageEpisodeLength = Alpha * CurrentEpisodeSteps + (1.0f - Alpha) * TrainingStats.AverageEpisodeLength;
-
-		// Reset episode counters
-		CurrentEpisodeReward = 0.0f;
-		CurrentEpisodeSteps = 0;
-
-		UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Episode complete (with MCTS tagging). Reward: %.2f, MCTS Variance: %.3f"),
-			TrainingStats.LastEpisodeReward, MCTSValueVariance);
-	}
-
-	// Check buffer overflow
-	if (CollectedExperiences.Num() > MaxExperienceBufferSize)
-	{
-		int32 RemoveCount = MaxExperienceBufferSize / 10;
-		CollectedExperiences.RemoveAt(0, RemoveCount);
-	}
-}
-
-bool URLPolicyNetwork::ExportExperiencesToJSON(const FString& FilePath)
-{
-	if (CollectedExperiences.Num() == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("URLPolicyNetwork: No experiences to export"));
-		return false;
-	}
-
-	// Create JSON array
-	TArray<TSharedPtr<FJsonValue>> ExperiencesArray;
-
-	for (const FRLExperience& Exp : CollectedExperiences)
-	{
-		TSharedPtr<FJsonObject> ExpObject = MakeShareable(new FJsonObject());
-
-		// State (71 features)
-		TArray<TSharedPtr<FJsonValue>> StateArray;
-		TArray<float> StateFeatures = Exp.State.ToFeatureVector();
-		for (float Feature : StateFeatures)
-		{
-			StateArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
-		}
-		ExpObject->SetArrayField(TEXT("state"), StateArray);
-
-		// Objective embedding (7 features)
-		TArray<TSharedPtr<FJsonValue>> ObjectiveArray;
-		for (float Feature : Exp.ObjectiveEmbedding)
-		{
-			ObjectiveArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
-		}
-		ExpObject->SetArrayField(TEXT("objective_embedding"), ObjectiveArray);
-
-		// Action (8-dimensional atomic action)
-		TArray<TSharedPtr<FJsonValue>> ActionArray;
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveDirection.X)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveDirection.Y)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.MoveSpeed)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.LookDirection.X)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.LookDirection.Y)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bFire ? 1.0f : 0.0f)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bCrouch ? 1.0f : 0.0f)));
-		ActionArray.Add(MakeShareable(new FJsonValueNumber(Exp.Action.bUseAbility ? 1.0f : 0.0f)));
-		ExpObject->SetArrayField(TEXT("action"), ActionArray);
-
-		// Reward
-		ExpObject->SetNumberField(TEXT("reward"), Exp.Reward);
-
-		// Next state (71 features)
-		TArray<TSharedPtr<FJsonValue>> NextStateArray;
-		TArray<float> NextStateFeatures = Exp.NextState.ToFeatureVector();
-		for (float Feature : NextStateFeatures)
-		{
-			NextStateArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
-		}
-		ExpObject->SetArrayField(TEXT("next_state"), NextStateArray);
-
-		// Next objective embedding (7 features)
-		TArray<TSharedPtr<FJsonValue>> NextObjectiveArray;
-		for (float Feature : Exp.NextObjectiveEmbedding)
-		{
-			NextObjectiveArray.Add(MakeShareable(new FJsonValueNumber(Feature)));
-		}
-		ExpObject->SetArrayField(TEXT("next_objective_embedding"), NextObjectiveArray);
-
-		// Terminal
-		ExpObject->SetBoolField(TEXT("terminal"), Exp.bTerminal);
-
-		// Timestamp
-		ExpObject->SetNumberField(TEXT("timestamp"), Exp.Timestamp);
-
-		// MCTS uncertainty metrics (Sprint 3 - Curriculum Learning)
-		ExpObject->SetNumberField(TEXT("mcts_value_variance"), Exp.MCTSValueVariance);
-		ExpObject->SetNumberField(TEXT("mcts_policy_entropy"), Exp.MCTSPolicyEntropy);
-		ExpObject->SetNumberField(TEXT("mcts_visit_count"), Exp.MCTSVisitCount);
-
-		ExperiencesArray.Add(MakeShareable(new FJsonValueObject(ExpObject)));
-	}
-
-	// Create root object with metadata
-	TSharedPtr<FJsonObject> RootObject = MakeShareable(new FJsonObject());
-	RootObject->SetArrayField(TEXT("experiences"), ExperiencesArray);
-	RootObject->SetNumberField(TEXT("total_experiences"), CollectedExperiences.Num());
-	RootObject->SetNumberField(TEXT("episodes_completed"), TrainingStats.EpisodesCompleted);
-	RootObject->SetNumberField(TEXT("average_reward"), TrainingStats.AverageReward);
-	RootObject->SetNumberField(TEXT("best_reward"), TrainingStats.BestEpisodeReward);
-
-	// Serialize to JSON string
-	FString OutputString;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
-	if (!FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer))
-	{
-		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to serialize experiences to JSON"));
-		return false;
-	}
-
-	// Write to file
-	FString SafeDirectory = FPaths::ProjectSavedDir() / TEXT("Experiences");
-	FString SafeFilePath = SafeDirectory / TEXT("experiences.json");
-
-	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Using safe path: %s"), *SafeFilePath);
-
-	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-
-	if (!PlatformFile.DirectoryExists(*SafeDirectory))
-	{
-		if (!PlatformFile.CreateDirectoryTree(*SafeDirectory))
-		{
-			UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to create directory: %s"), *SafeDirectory);
-			return false;
-		}
-	}
-
-	// 파일 저장
-	if (!FFileHelper::SaveStringToFile(OutputString, *SafeFilePath))
-	{
-		UE_LOG(LogTemp, Error, TEXT("URLPolicyNetwork: Failed to write file"));
-		return false;
-	}
-
-	return true;
-}
-
-void URLPolicyNetwork::ClearExperiences()
-{
-	CollectedExperiences.Empty();
-	UE_LOG(LogTemp, Log, TEXT("URLPolicyNetwork: Cleared all experiences"));
-}
 
 // ========================================
 // Statistics
@@ -519,7 +259,8 @@ TArray<float> URLPolicyNetwork::ForwardPass(const TArray<float>& InputFeatures)
 		return ZeroAction;
 	}
 
-	// Model already outputs softmax probabilities, return directly
+	// Model outputs raw logits (8 atomic action dimensions)
+	// NetworkOutputToAction() applies appropriate activations per dimension
 	return ActionProbsBuffer;
 }
 
@@ -600,48 +341,49 @@ FTacticalAction URLPolicyNetwork::GetActionWithMask(const FObservationElement& O
 
 float URLPolicyNetwork::GetStateValue(const FObservationElement& Observation, UObjective* CurrentObjective)
 {
-	// TODO: Load and use PPO critic network (team_value_network.onnx) for value estimation
-	// For now, use a simple heuristic based on observation features
-
 	if (!bIsInitialized)
 	{
 		return 0.0f;
 	}
 
-	// Build enhanced input: 71 observation + 7 objective embedding = 78 features
+	// Build input: 71 observation + 7 objective embedding = 78 features
 	TArray<float> InputFeatures = Observation.ToFeatureVector();
 	TArray<float> ObjectiveEmbed = GetObjectiveEmbedding(CurrentObjective);
 	InputFeatures.Append(ObjectiveEmbed);
 
-	// If ONNX model is loaded, try to use critic network
-	// NOTE: Current model only has actor head, critic head will be added in next training
+	// Use PPO critic network if loaded
 	if (bUseONNXModel && ModelInstance.IsValid())
 	{
-		// Future: Export critic head separately and load here
-		// For now, use heuristic value estimation
-		UE_LOG(LogTemp, Verbose, TEXT("URLPolicyNetwork: Critic network not yet loaded, using heuristic value"));
+		// Prepare input tensor
+		InputBuffer = InputFeatures;
+		UE::NNE::FTensorShape InputShape = UE::NNE::FTensorShape::Make({ 1u, static_cast<uint32>(Config.InputSize) });
+
+		// Create buffers
+		TArray<float> ActionBuffer, ValueBuffer;
+		ActionBuffer.SetNum(Config.OutputSize);
+		ValueBuffer.SetNum(1);
+
+		// Bind tensors
+		TArray<UE::NNE::FTensorBindingCPU> InputBindings;
+		InputBindings.Add({ InputBuffer.GetData(), static_cast<uint64>(InputBuffer.Num() * sizeof(float)) });
+
+		TArray<UE::NNE::FTensorBindingCPU> OutputBindings;
+		OutputBindings.Add({ ActionBuffer.GetData(), static_cast<uint64>(ActionBuffer.Num() * sizeof(float)) });
+		OutputBindings.Add({ ValueBuffer.GetData(), static_cast<uint64>(ValueBuffer.Num() * sizeof(float)) });
+
+		// Run inference
+		TArray<UE::NNE::FTensorShape> InputShapes = { InputShape };
+		if (ModelInstance->SetInputTensorShapes(InputShapes) == UE::NNE::EResultStatus::Ok &&
+			ModelInstance->RunSync(InputBindings, OutputBindings) == UE::NNE::EResultStatus::Ok)
+		{
+			return FMath::Clamp(ValueBuffer[0], -1.0f, 1.0f);
+		}
 	}
 
-	// Heuristic value estimation (temporary until critic network is loaded)
-	float Value = 0.0f;
-
-	// Health component: +1.0 at full health, -1.0 at zero health
-	Value += (Observation.AgentHealth - 50.0f) / 50.0f;  // Normalized to [-1, 1]
-
-	// Enemy threat penalty
+	// Fallback heuristic (if model not loaded)
+	float Value = (Observation.AgentHealth - 50.0f) / 50.0f;
 	Value -= Observation.VisibleEnemyCount * 0.2f;
-
-	// Cover bonus
-	if (Observation.bHasCover)
-	{
-		Value += 0.3f;
-	}
-
-	// Ammo consideration
-	if (Observation.CurrentAmmo < 10.0f)
-	{
-		Value -= 0.2f;
-	}
+	if (Observation.bHasCover) Value += 0.3f;
 
 	return FMath::Clamp(Value, -1.0f, 1.0f);
 }
@@ -760,19 +502,20 @@ FTacticalAction URLPolicyNetwork::NetworkOutputToAction(const TArray<float>& Net
 	FTacticalAction Action;
 
 	// Network output format: [move_x, move_y, speed, look_x, look_y, fire_logit, crouch_logit, ability_logit]
+	// Model outputs raw logits - apply activations here
 	if (NetworkOutput.Num() >= 8)
 	{
-		// Continuous actions (already normalized to [-1,1] or [0,1] by network)
-		Action.MoveDirection.X = FMath::Clamp(NetworkOutput[0], -1.0f, 1.0f);
-		Action.MoveDirection.Y = FMath::Clamp(NetworkOutput[1], -1.0f, 1.0f);
-		Action.MoveSpeed = FMath::Clamp(NetworkOutput[2], 0.0f, 1.0f);
-		Action.LookDirection.X = FMath::Clamp(NetworkOutput[3], -1.0f, 1.0f);
-		Action.LookDirection.Y = FMath::Clamp(NetworkOutput[4], -1.0f, 1.0f);
+		// Continuous actions (apply Tanh for [-1,1], Sigmoid for [0,1])
+		Action.MoveDirection.X = FMath::Tanh(NetworkOutput[0]);
+		Action.MoveDirection.Y = FMath::Tanh(NetworkOutput[1]);
+		Action.MoveSpeed = 1.0f / (1.0f + FMath::Exp(-NetworkOutput[2]));  // Sigmoid
+		Action.LookDirection.X = FMath::Tanh(NetworkOutput[3]);
+		Action.LookDirection.Y = FMath::Tanh(NetworkOutput[4]);
 
-		// Discrete actions (use sigmoid threshold: > 0.5 = true)
-		Action.bFire = NetworkOutput[5] > 0.5f;
-		Action.bCrouch = NetworkOutput[6] > 0.5f;
-		Action.bUseAbility = NetworkOutput[7] > 0.5f;
+		// Discrete actions (sigmoid + threshold: > 0.5 = true)
+		Action.bFire = (1.0f / (1.0f + FMath::Exp(-NetworkOutput[5]))) > 0.5f;
+		Action.bCrouch = (1.0f / (1.0f + FMath::Exp(-NetworkOutput[6]))) > 0.5f;
+		Action.bUseAbility = (1.0f / (1.0f + FMath::Exp(-NetworkOutput[7]))) > 0.5f;
 
 		// AbilityID (if more outputs exist)
 		if (NetworkOutput.Num() > 8)

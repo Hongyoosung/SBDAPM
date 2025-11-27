@@ -757,7 +757,6 @@ void ASimulationManagerGameMode::StartNewEpisode()
 			if (FollowerComp)
 			{
 				FollowerComp->MarkAsAlive();
-				FollowerComp->ClearExperiences();
 				UE_LOG(LogTemp, Log, TEXT("  → Marked alive & cleared experiences"));
 			}
 		}

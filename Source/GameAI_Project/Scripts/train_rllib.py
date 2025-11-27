@@ -28,12 +28,12 @@ except ImportError:
     print("Error: ray[rllib] not installed. Run: pip install ray[rllib]")
 
 try:
-    from schola.envs import UnrealEnv
-    from schola.scripts.utils import make_env_creator
+    from schola.gym.env import GymEnv as UnrealEnv
     SCHOLA_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     SCHOLA_AVAILABLE = False
     print("Warning: schola not installed. Run: pip install schola[rllib]")
+    print(f"\n[치명적 오류] Schola import 실패 원인:\n{e}")
 
 import numpy as np
 from gymnasium import spaces
@@ -90,27 +90,28 @@ def create_ppo_config():
             env_config=create_env_config(),
         )
         .framework("torch")
-        .training(
-            lr=SBDAPMConfig.LEARNING_RATE,
-            train_batch_size=SBDAPMConfig.TRAIN_BATCH_SIZE,
-            sgd_minibatch_size=SBDAPMConfig.SGD_MINIBATCH_SIZE,
-            num_sgd_iter=SBDAPMConfig.NUM_SGD_ITER,
-            gamma=SBDAPMConfig.GAMMA,
-            lambda_=SBDAPMConfig.GAE_LAMBDA,
-            clip_param=SBDAPMConfig.CLIP_PARAM,
-            entropy_coeff=SBDAPMConfig.ENTROPY_COEFF,
-            vf_loss_coeff=SBDAPMConfig.VF_LOSS_COEFF,
-            model={
-                "fcnet_hiddens": SBDAPMConfig.HIDDEN_LAYERS,
-                "fcnet_activation": "relu",
-            },
-        )
         .env_runners(
             num_env_runners=SBDAPMConfig.NUM_WORKERS,
             num_envs_per_env_runner=SBDAPMConfig.NUM_ENVS_PER_WORKER,
         )
         .debugging(log_level="INFO")
     )
+
+    # Set training parameters directly on config object (Ray 2.6+ API)
+    config.lr = SBDAPMConfig.LEARNING_RATE
+    config.train_batch_size = SBDAPMConfig.TRAIN_BATCH_SIZE
+    config.sgd_minibatch_size = SBDAPMConfig.SGD_MINIBATCH_SIZE
+    config.num_sgd_iter = SBDAPMConfig.NUM_SGD_ITER
+    config.gamma = SBDAPMConfig.GAMMA
+    config.lambda_ = SBDAPMConfig.GAE_LAMBDA
+    config.clip_param = SBDAPMConfig.CLIP_PARAM
+    config.entropy_coeff = SBDAPMConfig.ENTROPY_COEFF
+    config.vf_loss_coeff = SBDAPMConfig.VF_LOSS_COEFF
+    config.model = {
+        "fcnet_hiddens": SBDAPMConfig.HIDDEN_LAYERS,
+        "fcnet_activation": "relu",
+    }
+
     return config
 
 
@@ -133,7 +134,7 @@ def register_env():
 
 
 def export_onnx(algo, output_dir):
-    """Export trained policy (actor) and value function (critic) to ONNX format."""
+    """Export trained policy with dual heads (actor + critic) to single ONNX model."""
     try:
         import torch
         import torch.nn as nn
@@ -143,10 +144,15 @@ def export_onnx(algo, output_dir):
         model = policy.model
 
         # ========================================
-        # Export Actor Network (Policy)
+        # Export Dual-Head Network (Actor + Critic)
         # ========================================
-        class ActorWrapper(nn.Module):
-            """Wrapper for policy network (actor) - outputs action probabilities."""
+        class DualHeadWrapper(nn.Module):
+            """Wrapper for PPO actor-critic network with dual outputs.
+
+            Outputs:
+                - action_logits: 8-dim atomic actions (continuous + discrete)
+                - state_value: 1-dim state value estimate for MCTS
+            """
             def __init__(self, model):
                 super().__init__()
                 self.model = model
@@ -154,71 +160,45 @@ def export_onnx(algo, output_dir):
             def forward(self, obs):
                 # RLlib models expect dict input
                 model_out, _ = self.model({"obs": obs})
-                # Apply softmax for discrete action probabilities
-                action_probs = torch.softmax(model_out, dim=-1)
-                return action_probs
 
-        actor_wrapper = ActorWrapper(model)
-        actor_wrapper.eval()
+                # Get value estimate from critic head
+                value = self.model.value_function()
 
-        # Dummy input (71 features)
-        dummy_input = torch.randn(1, 71)
+                # Return raw logits (no softmax - atomic actions are mixed continuous/discrete)
+                # C++ will apply appropriate activations per action dimension
+                return model_out, value
 
-        # Export actor
-        actor_path = output_dir / "rl_policy_network.onnx"
+        dual_head_wrapper = DualHeadWrapper(model)
+        dual_head_wrapper.eval()
+
+        # Dummy input: 78 features (71 observation + 7 objective embedding)
+        dummy_input = torch.randn(1, 78)
+
+        # Export unified model with 2 outputs
+        model_path = output_dir / "rl_policy_network.onnx"
         torch.onnx.export(
-            actor_wrapper,
+            dual_head_wrapper,
             dummy_input,
-            str(actor_path),
+            str(model_path),
             input_names=["observation"],
-            output_names=["action_probabilities"],
+            output_names=["action_logits", "state_value"],
             dynamic_axes={
                 "observation": {0: "batch_size"},
-                "action_probabilities": {0: "batch_size"}
-            },
-            opset_version=11
-        )
-
-        print(f"✓ Actor network exported to: {actor_path}")
-
-        # ========================================
-        # Export Critic Network (Value Function)
-        # ========================================
-        class CriticWrapper(nn.Module):
-            """Wrapper for value function (critic) - outputs state value for MCTS."""
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
-
-            def forward(self, obs):
-                # RLlib models have value_function() method
-                # Extract value head from model
-                _, state_out = self.model({"obs": obs})
-                value = self.model.value_function()  # Returns V(s)
-                return value
-
-        critic_wrapper = CriticWrapper(model)
-        critic_wrapper.eval()
-
-        # Export critic
-        critic_path = output_dir / "team_value_network.onnx"
-        torch.onnx.export(
-            critic_wrapper,
-            dummy_input,
-            str(critic_path),
-            input_names=["observation"],
-            output_names=["state_value"],
-            dynamic_axes={
-                "observation": {0: "batch_size"},
+                "action_logits": {0: "batch_size"},
                 "state_value": {0: "batch_size"}
             },
             opset_version=11
         )
 
-        print(f"✓ Critic network exported to: {critic_path}")
-        print(f"\nBoth networks ready for UE5:")
-        print(f"  - Actor (tactical actions): {actor_path.name}")
-        print(f"  - Critic (MCTS evaluation): {critic_path.name}")
+        print(f"✓ Dual-head PPO model exported to: {model_path}")
+        print(f"\nModel structure:")
+        print(f"  - Input: 78 dims (71 obs + 7 objective)")
+        print(f"  - Output 1 (Actor): 8 dims (atomic actions)")
+        print(f"  - Output 2 (Critic): 1 dim (state value)")
+        print(f"\nReady for UE5:")
+        print(f"  - Copy to: Content/Models/rl_policy_network.onnx")
+        print(f"  - RL Policy uses actor head for actions")
+        print(f"  - MCTS uses critic head for value estimation")
 
         return True
 
@@ -287,14 +267,14 @@ def train(args):
     final_checkpoint = algo.save(output_dir)
     print(f"Final checkpoint: {final_checkpoint}")
 
-    # Export ONNX (both actor and critic)
+    # Export ONNX (dual-head actor-critic)
     from pathlib import Path
     if export_onnx(algo, Path(output_dir)):
-        print(f"\nModels exported to: {output_dir}")
+        print(f"\nModel exported to: {output_dir}")
         print("\nTo use in Unreal Engine:")
-        print("  1. Copy ONNX files to Content/Models/")
-        print("  2. RL Policy loads: Models/rl_policy_network.onnx")
-        print("  3. MCTS loads: Models/team_value_network.onnx (PPO critic)")
+        print("  1. Copy rl_policy_network.onnx to Content/Models/")
+        print("  2. RLPolicyNetwork loads single model with dual heads")
+        print("  3. Actor head used for actions, Critic head used by MCTS")
 
     # Cleanup
     algo.stop()

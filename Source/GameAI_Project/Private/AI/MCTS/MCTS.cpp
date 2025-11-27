@@ -3,7 +3,6 @@
 #include "Team/TeamTypes.h"
 #include "Team/ObjectiveManager.h"
 #include "Team/Objective.h"
-#include "RL/TeamValueNetwork.h"
 #include "RL/RLPolicyNetwork.h"
 
 UMCTS::UMCTS()
@@ -153,7 +152,45 @@ TSharedPtr<FTeamMCTSNode> UMCTS::ExpandNode(TSharedPtr<FTeamMCTSNode> Node, cons
 
 float UMCTS::SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation& TeamObs)
 {
-    return 0.0f;
+    if (!Node.IsValid() || !RLPolicyNetwork)
+    {
+        return 0.0f;
+    }
+
+    // AlphaZero-style: Use PPO critic to estimate leaf value (no rollout simulation)
+    // Aggregate individual follower values for team-level estimate
+
+    TMap<AActor*, UObjective*> NodeObjectives = Node->GetObjectives();
+    float TotalValue = 0.0f;
+    int32 ValidCount = 0;
+
+    // For each follower with an objective, estimate their value
+    for (const auto& Pair : NodeObjectives)
+    {
+        AActor* Follower = Pair.Key;
+        UObjective* Objective = Pair.Value;
+
+        if (!Follower || !Objective)
+        {
+            continue;
+        }
+
+        // TODO: Extract individual follower observation from TeamObs
+        // For now, use a simplified approach with team-level features
+        FObservationElement FollowerObs;
+        FollowerObs.AgentHealth = TeamObs.AverageTeamHealth;
+        FollowerObs.VisibleEnemyCount = TeamObs.TotalVisibleEnemies;
+        FollowerObs.bHasCover = TeamObs.bHasCoverAdvantage;
+        FollowerObs.NearestCoverDistance = 500.0f;  // Placeholder
+
+        // Get PPO critic's value estimate for this follower-objective pair
+        float FollowerValue = RLPolicyNetwork->GetStateValue(FollowerObs, Objective);
+        TotalValue += FollowerValue;
+        ValidCount++;
+    }
+
+    // Return averaged team value (normalized to [-1, 1])
+    return ValidCount > 0 ? (TotalValue / ValidCount) : 0.0f;
 }
 
 

@@ -1,6 +1,6 @@
-# SBDAPM: AlphaZero-Inspired Multi-Agent Combat AI
+# SBDAPM: Real-Time Multi-Agent Combat AI with MCTS + PPO
 
-**Engine:** UE5.6 | **Language:** C++17 | **Platform:** Windows | **Version:** v3.0 ✅
+**Engine:** UE5.6 | **Language:** C++17 | **Platform:** Windows | **Version:** v3.1 (Real-Time Only) ✅
 
 ---
 
@@ -18,51 +18,47 @@ Task Type?
 ### Critical Constraints
 | Component | Max Latency | Memory | Notes |
 |-----------|-------------|--------|-------|
-| MCTS | 30-50ms | 2MB | Value network pruning |
-| RL Inference | 1-3ms | 500KB | ONNX/NNE optimized |
-| World Model | 5-10ms | 1MB | 5-step lookahead |
+| MCTS | 30-50ms | 1MB | PPO critic value estimation |
+| RL Inference | 1-3ms | 500KB | ONNX/NNE optimized (actor + critic) |
 | StateTree | <0.5ms/agent | 100KB | Per-tick budget |
-| **Total (4 agents)** | **10-20ms** | **8MB** | Real-time requirement |
+| **Total (4 agents)** | **5-10ms** | **4MB** | Real-time requirement |
 
 ### File Locations (Quick Jump)
 | Feature | Path | Key Methods |
 |---------|------|-------------|
-| MCTS | `AI/MCTS/MCTS.cpp` | `RunMCTS():71`, `SimulateNode():143` |
-| Value Network | `RL/TeamValueNetwork.cpp` | `EvaluateState():34` |
-| World Model | `Simulation/WorldModel.cpp` | `PredictNextState():56` |
-| RL Policy | `RL/RLPolicyNetwork.cpp` | `SelectAction():89`, `GetActionPriors():127` |
+| MCTS | `AI/MCTS/MCTS.cpp` | `RunMCTS():71`, `SimulateNode():153` |
+| RL Policy (Actor + Critic) | `RL/RLPolicyNetwork.cpp` | `GetAction():562`, `GetStateValue():601`, `GetObjectivePriors():649` |
 | Team Leader | `Team/TeamLeaderComponent.cpp` | `TickComponent():182`, `ProcessMCTSResults():245` |
 | Follower | `Team/FollowerAgentComponent.cpp` | `ExecuteCommand():94` |
 
 ### Search Terms (When Unfamiliar)
 - **MCTS:** "UCB1 algorithm 2002", "PUCT AlphaGo", "UE5 async task graph"
-- **Value Networks:** "TD-learning Sutton", "neural network leaf evaluation"
-- **World Models:** "MuZero learned dynamics 2020", "state transition prediction"
-- **PPO:** "Proximal Policy Optimization Schulman 2017", "PPO clipping ratio"
+- **PPO:** "Proximal Policy Optimization Schulman 2017", "PPO critic value function", "actor-critic methods"
+- **RLlib:** "Ray RLlib real-time training", "RLlib PPO algorithm", "RLlib custom environments"
 - **UE5 APIs:** "UE5.6 NNE ONNX runtime", "UStaticMesh performance", "FTimerManager"
 
 ---
 
-## Architecture (v3.0 Complete)
+## Architecture (v3.1 Real-Time Training)
 
 ### System Flow
 ```
 Team Leader (1 per team, continuous 1-2s planning)
-  ├─ MCTS (value network guided, UCB1 selection)
-  │   └─ World Model rollouts (5-10 step lookahead)
+  ├─ MCTS (PPO critic-guided, UCB1 selection)
+  │   └─ Value estimation via aggregated PPO critic queries
   ├─ Confidence Estimates (visit count, value variance, policy entropy)
   └─ Strategic Commands → Followers
                            │
 Followers (N agents, tactical execution)
-  ├─ RL Policy Network (dual-head: action + MCTS priors)
+  ├─ PPO Policy Network (actor + critic, real-time RLlib training)
   ├─ StateTree Execution (command-driven states)
-  └─ Coordination Tracking → Unified Rewards → Training Loop
+  └─ Schola Integration → RLlib Environment → Real-Time PPO Updates
 ```
 
-### Key Innovations (AlphaZero-Inspired)
-1. **Value Network** - Learned state evaluation (no heuristics)
-2. **World Model** - True Monte Carlo simulation (predict future states)
-3. **Coupled Training** - MCTS guides RL curriculum, RL provides MCTS priors
+### Key Features
+1. **Real-Time PPO Training** - Continuous learning via RLlib (no offline batches)
+2. **Integrated Actor-Critic** - Single network for actions + value estimation
+3. **MCTS Guidance** - Strategic planning with PPO critic leaf evaluation
 4. **Unified Rewards** - Hierarchical alignment (individual + coordination + strategic)
 5. **Continuous Planning** - Proactive 1-2s intervals with uncertainty quantification
 
@@ -73,78 +69,34 @@ Followers (N agents, tactical execution)
 ### 1. Team Leader (`Team/TeamLeaderComponent.cpp`)
 **Role:** Strategic planning via continuous MCTS
 
-**v3.0 Features:**
+**v3.1 Features:**
 - Continuous MCTS (1-2s intervals, not event-driven)
-- Value network leaf evaluation (replaces `CalculateTeamReward()` heuristics)
-- World model rollouts (5-10 steps, stochastic sampling)
-- UCB1 action selection (no random sampling)
+- PPO critic leaf evaluation (aggregated individual values → team value)
+- UCB1 action selection with policy priors
 - Exports uncertainty metrics (visit counts, value variance, policy entropy)
 
 **Commands:** Assault, Defend, Move, Support, Retreat (with confidence estimates)
 
-**Performance:** 30-50ms/tick (500-1000 simulations, pruned by value network)
+**Performance:** 30-50ms/tick (500-1000 simulations)
 
 **Files:** `Team/TeamLeaderComponent.h/cpp`, `AI/MCTS/MCTS.h/cpp`, `AI/MCTS/TeamMCTSNode.h`
 
 ---
 
-### 2. Value Network (`RL/TeamValueNetwork.cpp`) ✅
-**Purpose:** Guide MCTS tree search via learned state evaluation
+### 2. PPO Policy Network (`RL/RLPolicyNetwork.cpp`) ✅
+**Purpose:** Tactical action selection + value estimation + MCTS priors
 
-**Architecture:**
+**Dual-Head Architecture (Actor-Critic):**
 ```
-Input: FTeamObservation (40 team + N×71 individual features)
-  → Embedding (256, ReLU)
-  → Trunk (256→256→128, ReLU)
-  → Value Head (128→64→1, Tanh)
-Output: State value ∈ [-1, 1] (loss → win probability)
-```
-
-**Training:** TD-learning on self-play outcomes (see `Scripts/train_value_network.py`)
-
-**Integration:** `MCTS.cpp:SimulateNode():143` - Query network for leaf nodes
-
-**Search Terms:** "value network AlphaZero", "TD temporal difference learning", "UE5 NNE inference"
-
----
-
-### 3. World Model (`Simulation/WorldModel.cpp`) ✅
-**Purpose:** Predict future states for Monte Carlo rollouts
-
-**Architecture:**
-```
-Input: State (TeamObs) + Actions (commands + tactical)
-  → Action Encoder (embeddings)
-  → State Encoder (embeddings)
-  → Fusion (concat + MLP)
-  → Transition Predictor (state deltas)
-Output: NextState (predicted TeamObs)
-```
-
-**Predictions:** Health deltas, position changes, status effects (stochastic)
-
-**Training:** Supervised MSE on real transitions (S_t, A_t, S_{t+1}) from gameplay logs
-
-**Integration:** `MCTS.cpp:SimulateNode():167` - Rollout 5-10 steps ahead
-
-**Search Terms:** "MuZero world model", "learned dynamics model", "state transition prediction"
-
----
-
-### 4. RL Policy Network (`RL/RLPolicyNetwork.cpp` + `RL/HybridPolicyNetwork.cpp`) ✅
-**Purpose:** Tactical action selection + MCTS priors
-
-**Dual-Head Architecture (v3.0):**
-```
-Input: Individual observation (71 features)
+Input: Individual observation (71 features + 7 objective embedding = 78 total)
   → Shared Trunk (128→128→64, ReLU)
-  ├─ Policy Head (Softmax) → Action probabilities (immediate execution)
-  └─ Prior Head (Logits) → MCTS node initialization (guide tree search)
+  ├─ Actor Head (8 dims) → Atomic actions (move, aim, fire, crouch, ability)
+  └─ Critic Head (1 dim) → State value estimate ∈ [-1, 1]
 ```
 
-**Actions:** 16 tactical actions (`ETacticalAction` enum)
+**Actions:** 8-dimensional atomic action space (continuous + discrete)
 
-**Training:** PPO with prioritized replay (MCTS uncertainty-weighted)
+**Training:** Real-time PPO via RLlib (no offline batches)
 
 **Unified Rewards (v3.0):**
 ```cpp
@@ -161,26 +113,30 @@ Input: Individual observation (71 features)
 +50  Objective captured, +30 Enemy squad wiped, -30 Own squad wiped
 ```
 
-**Files:** `RL/RLPolicyNetwork.h/cpp`, `RL/HybridPolicyNetwork.h/cpp`, `RL/RewardCalculator.h/cpp`, `RL/CurriculumManager.h/cpp`
+**MCTS Integration:** `GetObjectivePriors()` provides strategic guidance for MCTS tree initialization
 
-**Search Terms:** "PPO algorithm Schulman", "dual-head network architecture", "prioritized experience replay"
+**Value Estimation:** `GetStateValue()` queries PPO critic for MCTS leaf evaluation (aggregated across team)
+
+**Files:** `RL/RLPolicyNetwork.h/cpp`, `Schola/ScholaAgentComponent.h/cpp`, `Scripts/train_rllib.py`
+
+**Search Terms:** "PPO actor-critic architecture", "RLlib custom environments", "real-time RL training"
 
 ---
 
-### 5. Followers (`Team/FollowerAgentComponent.cpp`) ✅
+### 3. Followers (`Team/FollowerAgentComponent.cpp`) ✅
 **Role:** Tactical execution with coordination tracking
 
-**v3.0 Features:**
+**v3.1 Features:**
 - Confidence-weighted command execution (low confidence → RL override allowed)
 - Coordination detection (combined actions with allies → reward bonuses)
-- Experience tagging (mark with MCTS uncertainty for prioritized replay)
+- Real-time experience collection via Schola → RLlib environment
 - Auto-signals events to leader (enemy spotted, ally killed, low health)
 
-**Integration:** RL policy → StateTree execution → Perception/Combat systems
+**Integration:** PPO policy (via Schola) → StateTree execution → Perception/Combat systems
 
 ---
 
-### 6. StateTree Execution (`StateTree/FollowerStateTreeComponent.cpp`) ✅
+### 4. StateTree Execution (`StateTree/FollowerStateTreeComponent.cpp`) ✅
 **Purpose:** Unified command execution (replaces separate assault/defend/support/move/retreat states)
 
 **Structure:**
@@ -199,29 +155,28 @@ Root
 
 ---
 
-### 7. Observations (`Observation/TeamObservation.cpp`) ✅
+### 5. Observations (`Observation/TeamObservation.cpp`) ✅
 **Individual:** 71 features (health, position, velocity, ammo, enemy distances, combat state)
 
 **Team:** 40 features (avg health, formation metrics, command type, confidence)
 
-**v3.0 Methods:**
-- `ApplyDelta(FStateTransition)` - Apply world model predictions
-- `Clone()` - Deep copy for simulation
-- `Serialize()` - Export for training data
+**Methods:**
+- `ToFeatureVector()` - Convert to neural network input
+- `Clone()` - Deep copy for MCTS simulation
 
 ---
 
-### 8. Combat System (`Combat/HealthComponent.cpp`, `Combat/WeaponComponent.cpp`) ✅
+### 6. Combat System (`Combat/HealthComponent.cpp`, `Combat/WeaponComponent.cpp`) ✅
 **No changes from v2.0** - Damage calculation, health management, death events
 
 ---
 
-### 9. EQS Cover System (`EQS/*`) ✅
+### 7. EQS Cover System (`EQS/*`) ✅
 **No changes from v2.0** - Grid/tag-based cover generation, multi-factor scoring
 
 ---
 
-### 10. Simulation Manager (`Core/SimulationManagerGameMode.cpp`) ✅
+### 8. Simulation Manager (`Core/SimulationManagerGameMode.cpp`) ✅
 **No changes from v2.0** - Team registration, enemy relationship tracking, actor-team mapping
 
 ---
@@ -235,13 +190,13 @@ Root
 | **Open/Closed** | `ETacticalAction` enum extensible, `FStrategicCommand` struct modifiable |
 | **Liskov Substitution** | `UActorComponent` base for Leader/Follower |
 | **Interface Segregation** | `IObservable`, `ICommandReceiver` interfaces |
-| **Dependency Inversion** | MCTS depends on `IValueNetwork`, `IWorldModel` abstractions |
+| **Dependency Inversion** | MCTS depends on `URLPolicyNetwork` abstraction (actor + critic) |
 
 ### Key Patterns
 - **Strategy Pattern:** `RLPolicyNetwork` (action selection strategy)
 - **Observer Pattern:** Team communication (leader → followers, event signals)
 - **State Pattern:** StateTree states (assault, defend, move, support, retreat)
-- **Facade Pattern:** `TeamLeaderComponent` (MCTS + ValueNet + WorldModel facade)
+- **Facade Pattern:** `TeamLeaderComponent` (MCTS + RLPolicy facade)
 - **Template Method:** `MCTS::SimulateNode()` (expansion, simulation, backprop steps)
 
 ---
@@ -286,33 +241,30 @@ if (StateEvaluationScore > BestValueSoFar) {
 
 1. **ONLY Leaders run MCTS** (followers NEVER touch MCTS)
 2. **MCTS runs continuously** (1-2s timer, not event-driven)
-3. **Value network replaces heuristics** (no `CalculateTeamReward()` manual scoring)
-4. **World model enables simulation** (predict 5-10 steps, no static evaluation)
-5. **RL provides MCTS priors** (`HybridPolicyNetwork::GetActionPriors()`)
-6. **MCTS guides RL curriculum** (`CurriculumManager` prioritizes high-uncertainty experiences)
-7. **Rewards are hierarchical** (individual + coordination + strategic, aligned across levels)
-8. **Commands include confidence** (visit count, value variance, policy entropy fields)
+3. **PPO critic provides values** (MCTS queries `RLPolicyNetwork::GetStateValue()`, aggregates individual values)
+4. **No offline training** (all training via real-time RLlib, no JSON export/self-play)
+5. **RL provides MCTS priors** (`RLPolicyNetwork::GetObjectivePriors()`)
+6. **Rewards are hierarchical** (individual + coordination + strategic, aligned across levels)
+7. **Commands include confidence** (visit count, value variance, policy entropy fields)
+8. **Single PPO model** (actor + critic in one network, no separate value/world models)
 
 ---
 
-## File Structure (v3.0)
+## File Structure (v3.1 Real-Time)
 
 ```
 Source/GameAI_Project/
 ├── AI/MCTS/
-│   ├── MCTS.h/cpp                        # ✅ ValueNet + WorldModel integration
+│   ├── MCTS.h/cpp                        # ✅ PPO critic integration
 │   ├── TeamMCTSNode.h                    # ✅ ActionPriors added
 │   └── CommandSynergy.h/cpp              # ✅ Synergy scoring
 ├── RL/
-│   ├── RLPolicyNetwork.h/cpp             # ✅ GetActionPriors() method
-│   ├── TeamValueNetwork.h/cpp            # ✅ NEW v3.0
-│   ├── HybridPolicyNetwork.h/cpp         # ✅ NEW v3.0 (dual-head)
-│   ├── RewardCalculator.h/cpp            # ✅ NEW v3.0 (unified rewards)
-│   ├── CurriculumManager.h/cpp           # ✅ NEW v3.0 (MCTS-guided)
-│   └── RLReplayBuffer.h/cpp              # ✅ Prioritized replay
-├── Simulation/
-│   ├── WorldModel.h/cpp                  # ✅ NEW v3.0
-│   └── StateTransition.h                 # ✅ NEW v3.0
+│   ├── RLPolicyNetwork.h/cpp             # ✅ Actor + Critic + Priors
+│   ├── RewardCalculator.h/cpp            # ✅ Unified rewards
+│   └── RLReplayBuffer.h/cpp              # ✅ RLlib integration
+├── Schola/
+│   ├── ScholaAgentComponent.h/cpp        # ✅ RLlib environment bridge
+│   └── TacticalActuator.h/cpp            # ✅ Action execution
 ├── StateTree/
 │   ├── Tasks/STTask_ExecuteObjective.*   # ✅ Unified execution
 │   ├── Evaluators/STEvaluator_SyncCommand.*
@@ -320,78 +272,76 @@ Source/GameAI_Project/
 │   ├── Conditions/STCondition_CheckCommandType.*
 │   ├── Conditions/STCondition_CheckTacticalAction.*
 │   ├── Conditions/STCondition_IsAlive.*
-│   └── FollowerStateTreeComponent.h/cpp  # ✅ v3.0 updated
+│   └── FollowerStateTreeComponent.h/cpp  # ✅ v3.1 updated
 ├── Team/
 │   ├── TeamLeaderComponent.h/cpp         # ✅ Continuous planning
 │   ├── FollowerAgentComponent.h/cpp      # ✅ Confidence-weighted execution
 │   ├── StrategicCommand.h                # ✅ Confidence fields added
 │   └── TeamCommunicationManager.h/cpp    # ✅ MCTS stats messaging
 ├── Observation/
-│   ├── ObservationElement.h/cpp          # ✅ Clone(), Serialize()
-│   └── TeamObservation.h/cpp             # ✅ ApplyDelta()
+│   ├── ObservationElement.h/cpp          # ✅ ToFeatureVector()
+│   └── TeamObservation.h/cpp             # ✅ Team aggregation
 ├── Combat/                                # ✅ No changes (v2.0)
 ├── Perception/                            # ✅ No changes (v2.0)
 ├── EQS/                                   # ✅ No changes (v2.0)
 ├── Core/                                  # ✅ No changes (v2.0)
 ├── Scripts/
-│   ├── train_tactical_policy.py          # ✅ Prioritized replay
-│   ├── train_value_network.py            # ✅ NEW v3.0
-│   ├── train_world_model.py              # ✅ NEW v3.0
-│   ├── train_coupled_system.py           # ✅ NEW v3.0
-│   ├── self_play_collector.py            # ✅ NEW v3.0
-│   └── requirements.txt                  # ✅ Updated dependencies
+│   ├── train_rllib.py                    # ✅ Real-time PPO training
+│   ├── sbdapm_env.py                     # ✅ RLlib environment
+│   ├── evaluate_agents.py                # ✅ Evaluation metrics
+│   └── requirements.txt                  # ✅ RLlib dependencies
 └── Tests/
-    ├── TestValueNetwork.cpp              # ✅ NEW v3.0
-    ├── TestWorldModel.cpp                # ✅ NEW v3.0
-    └── TestMCTSIntegration.cpp           # ✅ NEW v3.0
+    ├── TestPPOIntegration.cpp            # ✅ Real-time training tests
+    └── TestMCTSIntegration.cpp           # ✅ MCTS + PPO critic tests
 ```
 
 ---
 
-## Success Metrics (v3.0)
+## Success Metrics (v3.1 Real-Time)
 
 ### Quantitative
 | Metric | Target | Baseline (v2.0) |
 |--------|--------|-----------------|
 | Win Rate (4v4) | ≥70% vs v2.0 | - |
-| MCTS Efficiency | 50% fewer sims for same quality | 500-1000 sims |
+| MCTS Efficiency | Faster with PPO critic | 500-1000 sims |
 | Coordination Rate | ≥30% kills coordinated | ~5% |
-| Training Convergence | ≤500 self-play games | ~2000 random games |
+| Training Convergence | Continuous improvement | N/A (real-time) |
 
 ### Qualitative
 1. **Emergent Tactics:** Flanking, suppression, crossfire without explicit programming
 2. **Adaptability:** Handle 3v5, varied unit types gracefully
-3. **Robustness:** Fallback to rule-based if ValueNet/WorldModel unavailable
+3. **Continuous Learning:** Adapts in real-time to opponent strategies
 
 ---
 
-## Training Pipeline (v3.0)
+## Training Pipeline (v3.1 Real-Time)
 
-### Self-Play Loop
+### Real-Time PPO Loop
 ```
-1. Collect Data (self_play_collector.py)
-   ├─ Run 1000+ games (v3.0 vs v3.0)
-   ├─ Log transitions: (S_t, A_t, S_{t+1}, R_t, done)
-   └─ Export MCTS statistics (visit counts, values, priors)
+1. Gameplay Loop (continuous)
+   ├─ Agents interact via Schola components
+   ├─ RLlib environment collects experiences automatically
+   └─ PPO updates policy every N timesteps (default: 4000)
 
-2. Train Models (train_coupled_system.py)
-   ├─ Value Network (TD-learning on outcomes)
-   ├─ World Model (MSE on state transitions)
-   └─ RL Policy (PPO with MCTS curriculum)
+2. Model Inference
+   ├─ Load latest ONNX model: rl_policy_network.onnx
+   ├─ Actor head: 8-dim atomic actions
+   └─ Critic head: state value estimates for MCTS
 
-3. Evaluate
-   ├─ v3.0 (new) vs v2.0 (baseline)
-   ├─ Win rate, coordination metrics
-   └─ If improvement > 5%, replace model; else iterate
+3. Evaluation (periodic)
+   ├─ Monitor win rate, reward trends via TensorBoard
+   ├─ Export updated ONNX models
+   └─ Reload models in UE5 for continuous improvement
 ```
 
 ### Dependencies (requirements.txt)
 ```
 torch==2.0.1
 onnx==1.14.0
-ray[rllib]==2.6.0  # Future: distributed training
+ray[rllib]==2.6.0
 numpy==1.24.3
 tensorboard==2.13.0
+gymnasium
 ```
 
 ---
@@ -399,11 +349,10 @@ tensorboard==2.13.0
 ## References (Search These First When Uncertain)
 
 ### Papers
-- **AlphaZero:** "Mastering Chess and Shogi by Self-Play with a General Reinforcement Learning Algorithm" (Silver et al., 2018)
-- **MuZero:** "Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model" (Schrittwieser et al., 2020)
 - **PPO:** "Proximal Policy Optimization Algorithms" (Schulman et al., 2017)
 - **UCB1:** "Finite-time Analysis of the Multiarmed Bandit Problem" (Auer et al., 2002)
 - **OpenAI Five:** "Dota 2 with Large Scale Deep Reinforcement Learning" (Berner et al., 2019)
+- **Actor-Critic Methods:** "Policy Gradient Methods for Reinforcement Learning with Function Approximation" (Sutton et al., 2000)
 
 ### UE5 Documentation
 - **NNE ONNX Runtime:** Search "UE5.6 Neural Network Engine ONNX"
@@ -411,11 +360,10 @@ tensorboard==2.13.0
 - **EQS:** Search "UE5 Environment Query System cover generation"
 - **Async Tasks:** Search "UE5 FAsyncTask TAsyncTask performance"
 
-### Algorithms
-- **MCTS:** Search "UCB1 tree search", "PUCT AlphaGo upper confidence bound"
-- **Value Networks:** Search "neural network state evaluation reinforcement learning"
-- **World Models:** Search "learned dynamics model MuZero", "state transition prediction neural network"
-- **PPO:** Search "clipping ratio PPO", "advantage estimation GAE"
+### Libraries & Tools
+- **RLlib:** Search "Ray RLlib PPO tutorial", "RLlib custom environments", "RLlib real-time training"
+- **MCTS:** Search "UCB1 tree search", "Monte Carlo Tree Search tutorial"
+- **PPO Implementation:** Search "PPO actor-critic architecture", "advantage estimation GAE", "PPO clipping ratio"
 
 ---
 
@@ -423,21 +371,21 @@ tensorboard==2.13.0
 
 | Issue | Likely Cause | Fix Location |
 |-------|--------------|--------------|
-| MCTS timeout | Value network too slow | `TeamValueNetwork.cpp:34` - Check ONNX model size |
-| RL always same action | Priors too strong | `HybridPolicyNetwork.cpp:127` - Reduce prior weight |
-| World model drift | Prediction error accumulation | `WorldModel.cpp:56` - Limit rollout depth to 5 steps |
+| MCTS timeout | PPO critic too slow | `RLPolicyNetwork.cpp:601` - Check ONNX model size |
+| RL always same action | Exploration too low | RLlib config - Increase epsilon/entropy |
 | Followers ignore commands | Confidence too low | `FollowerAgentComponent.cpp:94` - Lower threshold |
 | Memory spike | MCTS tree not pruned | `MCTS.cpp:71` - Enable early pruning |
+| Training not converging | Learning rate issues | `train_rllib.py` - Adjust PPO hyperparameters |
 
 ---
 
-## Next Steps (Post v3.0)
+## Next Steps (Post v3.1)
 
 ### Future Enhancements (v4.0 Candidates)
-1. **Distributed Training:** Ray RLlib for multi-GPU self-play
+1. **Distributed Training:** Ray RLlib multi-GPU/multi-node scaling
 2. **Opponent Modeling:** Predict enemy strategy (Theory of Mind)
 3. **Hierarchical MCTS:** Multi-level planning (squad → team → faction)
-4. **Transfer Learning:** Pretrain on simpler scenarios, fine-tune on complex
+4. **Curriculum Learning:** Progressive difficulty scaling
 5. **Explainability:** Visualize MCTS trees, value heatmaps in-editor
 
 ### Performance Optimizations
@@ -448,4 +396,4 @@ tensorboard==2.13.0
 
 ---
 
-**Last Updated:** v3.0 Refactoring Complete (2025-11-27)
+**Last Updated:** v3.1 Real-Time Training Refactoring (2025-11-28)

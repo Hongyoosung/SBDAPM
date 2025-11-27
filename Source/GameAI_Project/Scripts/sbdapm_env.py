@@ -17,7 +17,7 @@ from gymnasium import spaces
 import numpy as np
 
 try:
-    from schola.envs import UnrealEnv
+    from schola.gym.env import GymEnv as UnrealEnv
     SCHOLA_AVAILABLE = True
 except ImportError:
     SCHOLA_AVAILABLE = False

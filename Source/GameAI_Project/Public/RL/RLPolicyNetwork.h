@@ -27,9 +27,8 @@ class INNERuntimeGPU;
  *
  * Usage:
  *   1. Load trained policy from ONNX: LoadPolicy("path/to/model.onnx")
- *   2. Query for action: SelectAction(Observation)
- *   3. Collect experiences: StoreExperience(State, Action, Reward, NextState)
- *   4. Export for training: ExportExperiencesToJSON("path/to/data.json")
+ *   2. Query for action: GetAction(Observation, Objective)
+ *   3. Training handled by real-time RLlib (no C++ experience collection needed)
  */
 UCLASS(BlueprintType, Blueprintable)
 class GAMEAI_PROJECT_API URLPolicyNetwork : public UObject
@@ -110,67 +109,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RL|v3")
 	TArray<float> GetObjectivePriors(const struct FTeamObservation& TeamObs);
 
-	// ========================================
-	// Experience Collection
-	// ========================================
-
-	/**
-	 * Store an experience tuple for offline training (v3.0 - Atomic Actions)
-	 * @param State - Current state
-	 * @param Action - Atomic action taken
-	 * @param Reward - Immediate reward
-	 * @param NextState - Resulting state
-	 * @param bTerminal - Is this a terminal state?
-	 * @param CurrentObjective - Current objective context (optional)
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	void StoreExperience(const FObservationElement& State, const FTacticalAction& Action, float Reward, const FObservationElement& NextState, bool bTerminal, class UObjective* CurrentObjective = nullptr);
-
-	/**
-	 * Store experience with MCTS uncertainty tagging (v3.0 Sprint 3)
-	 * High uncertainty scenarios get prioritized in training
-	 * @param State - Current state
-	 * @param Action - Atomic action taken
-	 * @param Reward - Immediate reward
-	 * @param NextState - Resulting state
-	 * @param bTerminal - Is this a terminal state?
-	 * @param CurrentObjective - Current objective context
-	 * @param MCTSValueVariance - MCTS value uncertainty
-	 * @param MCTSPolicyEntropy - MCTS policy uncertainty
-	 * @param MCTSVisitCount - MCTS search depth
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL|Curriculum")
-	void StoreExperienceWithUncertainty(
-		const FObservationElement& State,
-		const FTacticalAction& Action,
-		float Reward,
-		const FObservationElement& NextState,
-		bool bTerminal,
-		class UObjective* CurrentObjective,
-		float MCTSValueVariance,
-		float MCTSPolicyEntropy,
-		float MCTSVisitCount
-	);
-
-	/**
-	 * Export collected experiences to JSON file for Python training
-	 * @param FilePath - Output file path
-	 * @return True if export succeeded
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	bool ExportExperiencesToJSON(const FString& FilePath);
-
-	/**
-	 * Clear all collected experiences
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	void ClearExperiences();
-
-	/**
-	 * Get number of collected experiences
-	 */
-	UFUNCTION(BlueprintCallable, Category = "RL")
-	int32 GetExperienceCount() const { return CollectedExperiences.Num(); }
 
 	// ========================================
 	// Statistics
@@ -277,14 +215,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
 	bool bUseONNXModel;
 
-	// Enable experience collection for offline training
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	bool bCollectExperiences;
-
-	// Maximum experiences to store before export
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL|Config")
-	int32 MaxExperienceBufferSize;
-
 
 private:
 	// ========================================
@@ -294,16 +224,13 @@ private:
 	// Is the policy initialized?
 	bool bIsInitialized;
 
-	// Collected experiences for offline training
-	TArray<FRLExperience> CollectedExperiences;
-
-	// Training statistics
+	// Training statistics (for monitoring only)
 	FRLTrainingStats TrainingStats;
 
-	// Current episode reward accumulator
+	// Current episode reward accumulator (for monitoring)
 	float CurrentEpisodeReward;
 
-	// Current episode step count
+	// Current episode step count (for monitoring)
 	int32 CurrentEpisodeSteps;
 
 	// ========================================
@@ -320,8 +247,4 @@ private:
 	// Input/output tensor bindings
 	TArray<float> InputBuffer;
 	TArray<float> OutputBuffer;
-
-	// Model input/output shapes
-	TArray<int32> InputShape;
-	TArray<int32> OutputShape;
 };

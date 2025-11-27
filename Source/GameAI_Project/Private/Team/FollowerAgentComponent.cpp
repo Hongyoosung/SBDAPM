@@ -31,7 +31,6 @@ void UFollowerAgentComponent::BeginPlay()
 		TacticalPolicy = NewObject<URLPolicyNetwork>(this);
 		FRLPolicyConfig Config;
 		TacticalPolicy->Initialize(Config);
-		TacticalPolicy->bCollectExperiences = bCollectExperiences;
 
 		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Created RL policy"), *GetOwner()->GetName());
 	}
@@ -627,15 +626,8 @@ void UFollowerAgentComponent::ProvideReward(float Reward, bool bTerminal)
 	// Always accumulate reward (independent of RL policy or experience collection)
 	AccumulatedReward += Reward;
 
-	/*UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
-		*GetOwner()->GetName(), Reward, AccumulatedReward, bTerminal ? TEXT("Yes") : TEXT("No"));*/
-
-	// Store experience if RL policy is enabled and collecting experiences
-	if (bUseRLPolicy && TacticalPolicy && bCollectExperiences)
-	{
-		FObservationElement CurrentObs = GetLocalObservation();
-		TacticalPolicy->StoreExperience(PreviousObservation, LastTacticalAction, Reward, CurrentObs, bTerminal);
-	}
+	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Provided reward %.2f (Accumulated: %.2f, Terminal: %s)"),
+		*GetOwner()->GetName(), Reward, AccumulatedReward, bTerminal ? TEXT("Yes") : TEXT("No"));
 
 	// Reset episode if terminal
 	if (bTerminal)
@@ -657,15 +649,6 @@ void UFollowerAgentComponent::ResetEpisode()
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode reset"), *GetOwner()->GetName());
 }
 
-void UFollowerAgentComponent::ClearExperiences()
-{
-	if (TacticalPolicy)
-	{
-		TacticalPolicy->ClearExperiences();
-		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Cleared experience buffer"), *GetOwner()->GetName());
-	}
-}
-
 void UFollowerAgentComponent::OnEpisodeEnded(float EpisodeReward)
 {
 	// Add episode reward to accumulated reward
@@ -676,25 +659,6 @@ void UFollowerAgentComponent::OnEpisodeEnded(float EpisodeReward)
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode ended - EpisodeReward=%.2f, TotalAccumulated=%.2f"),
 		*GetOwner()->GetName(), EpisodeReward, AccumulatedReward);
-}
-
-bool UFollowerAgentComponent::ExportExperiences(const FString& FilePath)
-{
-	if (!TacticalPolicy)
-	{
-		UE_LOG(LogTemp, Error, TEXT("FollowerAgent '%s': No RL policy to export from"), *GetOwner()->GetName());
-		return false;
-	}
-
-	bool bSuccess = TacticalPolicy->ExportExperiencesToJSON(FilePath);
-
-	if (bSuccess)
-	{
-		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Exported %d experiences to %s"),
-			*GetOwner()->GetName(), TacticalPolicy->GetExperienceCount(), *FilePath);
-	}
-
-	return bSuccess;
 }
 
 //------------------------------------------------------------------------------
