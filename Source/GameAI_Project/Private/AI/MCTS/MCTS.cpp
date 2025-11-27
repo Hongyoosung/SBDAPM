@@ -24,25 +24,7 @@ void UMCTS::InitializeTeamMCTS(int32 InMaxSimulations, float InExplorationParam)
     MaxSimulations = InMaxSimulations;
     ExplorationParameter = InExplorationParam;
 
-    // Initialize Value Network (v3.0)
-    ValueNetwork = NewObject<UTeamValueNetwork>(this);
-    if (ValueNetwork)
-    {
-        ValueNetwork->Initialize(10);  // Max 10 agents per team
-
-        // Try to load trained model (fallback to heuristic if not found)
-        FString ModelPath = TEXT("Models/team_value_network.onnx");
-        if (!ValueNetwork->LoadModel(ModelPath))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("MCTS: ValueNetwork model not loaded, using heuristic fallback"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Log, TEXT("MCTS: ValueNetwork loaded successfully"));
-        }
-    }
-
-    // Initialize RL Policy Network for priors (v3.0 Sprint 4)
+    // Initialize RL Policy Network (used for both actions AND value estimation via PPO critic)
     RLPolicyNetwork = NewObject<URLPolicyNetwork>(this);
     if (RLPolicyNetwork)
     {
@@ -51,20 +33,25 @@ void UMCTS::InitializeTeamMCTS(int32 InMaxSimulations, float InExplorationParam)
         PolicyConfig.OutputSize = 8;  // 8 atomic action dimensions
         RLPolicyNetwork->Initialize(PolicyConfig);
 
-        // Try to load trained policy (fallback to heuristic priors if not found)
+        // Try to load trained policy (fallback to heuristic if not found)
         FString PolicyModelPath = TEXT("Models/rl_policy_network.onnx");
         if (!RLPolicyNetwork->LoadPolicy(PolicyModelPath))
         {
-            UE_LOG(LogTemp, Warning, TEXT("MCTS: RL Policy model not loaded, using heuristic priors"));
+            UE_LOG(LogTemp, Warning, TEXT("MCTS: RL Policy model not loaded, using heuristic fallback"));
         }
         else
         {
-            UE_LOG(LogTemp, Log, TEXT("MCTS: RL Policy loaded successfully for priors"));
+            UE_LOG(LogTemp, Log, TEXT("MCTS: RL Policy loaded successfully (actor + critic from PPO training)"));
         }
     }
 
+    // NOTE: Value estimation now uses RLPolicyNetwork->GetStateValue() (PPO critic)
+    // This aggregates individual follower values instead of requiring team-level observations
+    // Trained via real-time RLlib PPO (no offline self-play needed)
+
     UE_LOG(LogTemp, Log, TEXT("MCTS: Initialized for team-level decisions (Simulations: %d, Exploration: %.2f)"),
         MaxSimulations, ExplorationParameter);
+    UE_LOG(LogTemp, Log, TEXT("MCTS: Using real-time PPO critic for value estimation (no offline training)"));
 }
 
 

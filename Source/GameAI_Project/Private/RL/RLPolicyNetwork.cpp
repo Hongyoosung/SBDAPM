@@ -598,6 +598,54 @@ FTacticalAction URLPolicyNetwork::GetActionWithMask(const FObservationElement& O
 	}
 }
 
+float URLPolicyNetwork::GetStateValue(const FObservationElement& Observation, UObjective* CurrentObjective)
+{
+	// TODO: Load and use PPO critic network (team_value_network.onnx) for value estimation
+	// For now, use a simple heuristic based on observation features
+
+	if (!bIsInitialized)
+	{
+		return 0.0f;
+	}
+
+	// Build enhanced input: 71 observation + 7 objective embedding = 78 features
+	TArray<float> InputFeatures = Observation.ToFeatureVector();
+	TArray<float> ObjectiveEmbed = GetObjectiveEmbedding(CurrentObjective);
+	InputFeatures.Append(ObjectiveEmbed);
+
+	// If ONNX model is loaded, try to use critic network
+	// NOTE: Current model only has actor head, critic head will be added in next training
+	if (bUseONNXModel && ModelInstance.IsValid())
+	{
+		// Future: Export critic head separately and load here
+		// For now, use heuristic value estimation
+		UE_LOG(LogTemp, Verbose, TEXT("URLPolicyNetwork: Critic network not yet loaded, using heuristic value"));
+	}
+
+	// Heuristic value estimation (temporary until critic network is loaded)
+	float Value = 0.0f;
+
+	// Health component: +1.0 at full health, -1.0 at zero health
+	Value += (Observation.AgentHealth - 50.0f) / 50.0f;  // Normalized to [-1, 1]
+
+	// Enemy threat penalty
+	Value -= Observation.VisibleEnemyCount * 0.2f;
+
+	// Cover bonus
+	if (Observation.bHasCover)
+	{
+		Value += 0.3f;
+	}
+
+	// Ammo consideration
+	if (Observation.CurrentAmmo < 10.0f)
+	{
+		Value -= 0.2f;
+	}
+
+	return FMath::Clamp(Value, -1.0f, 1.0f);
+}
+
 TArray<float> URLPolicyNetwork::GetObjectivePriors(const FTeamObservation& TeamObs)
 {
 	// v3.0 Sprint 4: Heuristic-based priors to guide MCTS

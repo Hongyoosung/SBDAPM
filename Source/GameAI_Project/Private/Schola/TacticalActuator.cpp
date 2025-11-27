@@ -14,11 +14,12 @@ UTacticalActuator::UTacticalActuator()
 
 FBoxSpace UTacticalActuator::GetActionSpace()
 {
-	return FBoxSpace(
-		{ -1.0f, -1.0f, 0.0f, -1.0f, -1.0f, 0.0f, 0.0f, 0.0f }, // Low Bounds
-		{ 1.0f,  1.0f, 1.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f }, // High Bounds
-		{ 8 }                                                   // Shape
-	);
+	TArray<float> LowBounds = { -1.0f, -1.0f, 0.0f, -1.0f, -1.0f, 0.0f, 0.0f, 0.0f };
+	TArray<float> HighBounds = { 1.0f,  1.0f, 1.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f };
+	TArray<int> Shape = { 8 };
+
+	// 2. TArray를 인자로 넘겨주면, 버그가 없는 TArray 버전 생성자가 호출됩니다.
+	return FBoxSpace(LowBounds, HighBounds, Shape);
 }
 
 void UTacticalActuator::TakeAction(const FBoxPoint& Action)

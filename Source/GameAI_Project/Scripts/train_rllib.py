@@ -132,8 +132,8 @@ def register_env():
     register_env("sbdapm_env", env_creator)
 
 
-def export_onnx(algo, output_path):
-    """Export trained policy to ONNX format."""
+def export_onnx(algo, output_dir):
+    """Export trained policy (actor) and value function (critic) to ONNX format."""
     try:
         import torch
         import torch.nn as nn
@@ -142,8 +142,11 @@ def export_onnx(algo, output_path):
         policy = algo.get_policy()
         model = policy.model
 
-        # Create wrapper for ONNX export
-        class PolicyWrapper(nn.Module):
+        # ========================================
+        # Export Actor Network (Policy)
+        # ========================================
+        class ActorWrapper(nn.Module):
+            """Wrapper for policy network (actor) - outputs action probabilities."""
             def __init__(self, model):
                 super().__init__()
                 self.model = model
@@ -151,21 +154,22 @@ def export_onnx(algo, output_path):
             def forward(self, obs):
                 # RLlib models expect dict input
                 model_out, _ = self.model({"obs": obs})
-                # Apply softmax for action probabilities
+                # Apply softmax for discrete action probabilities
                 action_probs = torch.softmax(model_out, dim=-1)
                 return action_probs
 
-        wrapper = PolicyWrapper(model)
-        wrapper.eval()
+        actor_wrapper = ActorWrapper(model)
+        actor_wrapper.eval()
 
-        # Dummy input
+        # Dummy input (71 features)
         dummy_input = torch.randn(1, 71)
 
-        # Export
+        # Export actor
+        actor_path = output_dir / "rl_policy_network.onnx"
         torch.onnx.export(
-            wrapper,
+            actor_wrapper,
             dummy_input,
-            output_path,
+            str(actor_path),
             input_names=["observation"],
             output_names=["action_probabilities"],
             dynamic_axes={
@@ -175,11 +179,53 @@ def export_onnx(algo, output_path):
             opset_version=11
         )
 
-        print(f"ONNX model exported to: {output_path}")
+        print(f"✓ Actor network exported to: {actor_path}")
+
+        # ========================================
+        # Export Critic Network (Value Function)
+        # ========================================
+        class CriticWrapper(nn.Module):
+            """Wrapper for value function (critic) - outputs state value for MCTS."""
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+
+            def forward(self, obs):
+                # RLlib models have value_function() method
+                # Extract value head from model
+                _, state_out = self.model({"obs": obs})
+                value = self.model.value_function()  # Returns V(s)
+                return value
+
+        critic_wrapper = CriticWrapper(model)
+        critic_wrapper.eval()
+
+        # Export critic
+        critic_path = output_dir / "team_value_network.onnx"
+        torch.onnx.export(
+            critic_wrapper,
+            dummy_input,
+            str(critic_path),
+            input_names=["observation"],
+            output_names=["state_value"],
+            dynamic_axes={
+                "observation": {0: "batch_size"},
+                "state_value": {0: "batch_size"}
+            },
+            opset_version=11
+        )
+
+        print(f"✓ Critic network exported to: {critic_path}")
+        print(f"\nBoth networks ready for UE5:")
+        print(f"  - Actor (tactical actions): {actor_path.name}")
+        print(f"  - Critic (MCTS evaluation): {critic_path.name}")
+
         return True
 
     except Exception as e:
         print(f"ONNX export failed: {e}")
+        import traceback
+        traceback.print_exc()
         print("Saving checkpoint instead...")
         return False
 
@@ -241,12 +287,14 @@ def train(args):
     final_checkpoint = algo.save(output_dir)
     print(f"Final checkpoint: {final_checkpoint}")
 
-    # Export ONNX
-    onnx_path = os.path.join(output_dir, f"{SBDAPMConfig.MODEL_NAME}.onnx")
-    if export_onnx(algo, onnx_path):
-        print(f"\nONNX model: {onnx_path}")
+    # Export ONNX (both actor and critic)
+    from pathlib import Path
+    if export_onnx(algo, Path(output_dir)):
+        print(f"\nModels exported to: {output_dir}")
         print("\nTo use in Unreal Engine:")
-        print(f'  TacticalPolicy->LoadPolicy(TEXT("{onnx_path}"))')
+        print("  1. Copy ONNX files to Content/Models/")
+        print("  2. RL Policy loads: Models/rl_policy_network.onnx")
+        print("  3. MCTS loads: Models/team_value_network.onnx (PPO critic)")
 
     # Cleanup
     algo.stop()

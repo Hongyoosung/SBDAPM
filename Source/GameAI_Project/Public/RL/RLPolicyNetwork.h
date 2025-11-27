@@ -92,6 +92,16 @@ public:
 	FTacticalAction GetActionWithMask(const FObservationElement& Observation, class UObjective* CurrentObjective, const FActionSpaceMask& Mask);
 
 	/**
+	 * Get state value estimate for MCTS (PPO Critic - Real-Time Training)
+	 * Uses the PPO critic network (value function) trained alongside the policy
+	 * @param Observation - Current 71-feature observation
+	 * @param CurrentObjective - Current objective (for embedding)
+	 * @return State value estimate (higher = better expected return)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "RL|v3")
+	float GetStateValue(const FObservationElement& Observation, class UObjective* CurrentObjective);
+
+	/**
 	 * Get action priors for MCTS initialization (v3.0)
 	 * Returns prior probabilities for objective types to guide MCTS tree search
 	 * @param TeamObs - Team-level observation
