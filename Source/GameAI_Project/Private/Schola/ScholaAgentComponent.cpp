@@ -3,6 +3,7 @@
 #include "Schola/ScholaAgentComponent.h"
 #include "Schola/TacticalObserver.h"
 #include "Schola/TacticalRewardProvider.h"
+#include "Schola/TacticalActuator.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Inference/InferenceComponent.h"
 #include "GameFramework/Pawn.h"
@@ -15,19 +16,12 @@ UScholaAgentComponent::UScholaAgentComponent()
 	// Create default subobjects for Schola components
 	TacticalObserver = CreateDefaultSubobject<UTacticalObserver>(TEXT("TacticalObserver"));
 	RewardProvider = CreateDefaultSubobject<UTacticalRewardProvider>(TEXT("RewardProvider"));
+	TacticalActuator = CreateDefaultSubobject<UTacticalActuator>(TEXT("TacticalActuator"));
 }
 
 void UScholaAgentComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Find inference component
-	InferenceComponent = FindInferenceComponent();
-	if (!InferenceComponent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] %s: InferenceComponent not found! Add UInferenceComponent from Schola plugin to the pawn."),
-			*GetOwner()->GetName());
-	}
 
 	// Auto-configure follower agent if enabled
 	if (bAutoConfigureFollower)
@@ -45,7 +39,6 @@ void UScholaAgentComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
-	InferenceComponent = nullptr;
 	FollowerAgent = nullptr;
 }
 
@@ -71,6 +64,7 @@ void UScholaAgentComponent::InitializeScholaComponents()
 	// Configure components
 	ConfigureObservers();
 	ConfigureRewardProvider();
+	ConfigureActuators();
 
 	UE_LOG(LogTemp, Log, TEXT("[ScholaAgent] %s: Schola components configured successfully"),
 		*GetOwner()->GetName());
@@ -78,7 +72,7 @@ void UScholaAgentComponent::InitializeScholaComponents()
 
 void UScholaAgentComponent::ConfigureObservers()
 {
-	if (!TacticalObserver || !FollowerAgent || !InferenceComponent)
+	if (!TacticalObserver || !FollowerAgent)
 	{
 		return;
 	}
@@ -88,10 +82,10 @@ void UScholaAgentComponent::ConfigureObservers()
 	TacticalObserver->bAutoFindFollower = false;
 	TacticalObserver->InitializeObserver();
 
-	// Add to InferenceComponent's observers array if not already present
-	if (!InferenceComponent->Observers.Contains(TacticalObserver))
+	// Add to InferenceComponent's observers array if not already present (this class IS the InferenceComponent)
+	if (!this->Observers.Contains(TacticalObserver))
 	{
-		InferenceComponent->Observers.Add(TacticalObserver);
+		this->Observers.Add(TacticalObserver);
 	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalObserver configured (71 features)"),
@@ -112,17 +106,6 @@ void UScholaAgentComponent::ConfigureRewardProvider()
 
 	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: RewardProvider configured"),
 		*GetOwner()->GetName());
-}
-
-UInferenceComponent* UScholaAgentComponent::FindInferenceComponent() const
-{
-	AActor* Owner = GetOwner();
-	if (!Owner)
-	{
-		return nullptr;
-	}
-
-	return Owner->FindComponentByClass<UInferenceComponent>();
 }
 
 UFollowerAgentComponent* UScholaAgentComponent::FindFollowerAgent() const
@@ -154,6 +137,28 @@ bool UScholaAgentComponent::IsEpisodeTerminated() const
 	}
 
 	return RewardProvider->IsTerminated();
+}
+
+void UScholaAgentComponent::ConfigureActuators()
+{
+	if (!TacticalActuator || !FollowerAgent)
+	{
+		return;
+	}
+
+	// Link actuator to follower agent
+	TacticalActuator->FollowerAgent = FollowerAgent;
+	TacticalActuator->bAutoFindFollower = false;
+	TacticalActuator->InitializeActuator();
+
+	// Add to InferenceComponent's actuators array if not already present (this class IS the InferenceComponent)
+	if (!this->Actuators.Contains(TacticalActuator))
+	{
+		this->Actuators.Add(TacticalActuator);
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("[ScholaAgent] %s: TacticalActuator configured (8D actions)"),
+		*GetOwner()->GetName());
 }
 
 void UScholaAgentComponent::ResetEpisode()

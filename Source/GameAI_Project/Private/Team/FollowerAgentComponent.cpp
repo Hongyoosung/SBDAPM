@@ -374,6 +374,9 @@ void UFollowerAgentComponent::UpdateLocalObservation(const FObservationElement& 
 
 FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 {
+	// Start profiling
+	double StartTime = FPlatformTime::Seconds();
+
 	FObservationElement Observation;
 
 	AActor* Owner = GetOwner();
@@ -442,7 +445,168 @@ FObservationElement UFollowerAgentComponent::BuildLocalObservation()
 			(float)WeaponComp->GetCurrentAmmo() / FMath::Max(WeaponComp->GetMaxAmmo(), 1) * 100.0f : 0.0f;
 	}
 
+	// Get cover information from perception (cached to avoid expensive per-tick queries)
+	if (PerceptionComp)
+	{
+		TArray<AActor*> Enemies = PerceptionComp->GetDetectedEnemies();
+		if (Enemies.Num() > 0)
+		{
+			// Update cover cache if interval elapsed
+			float CurrentTime = GetWorld()->GetTimeSeconds();
+			if (CurrentTime - LastCoverQueryTime >= CoverQueryInterval)
+			{
+				FVector CoverLocation;
+				float CoverDistance;
+				bHasCachedCover = FindNearestCover(CoverLocation, CoverDistance, Enemies);
+				if (bHasCachedCover)
+				{
+					CachedCoverLocation = CoverLocation;
+					CachedCoverDistance = CoverDistance;
+				}
+				LastCoverQueryTime = CurrentTime;
+			}
+
+			// Use cached cover data
+			if (bHasCachedCover)
+			{
+				Observation.bHasCover = true;
+				Observation.NearestCoverDistance = CachedCoverDistance;
+
+				// Calculate direction to cover (normalized 2D)
+				FVector ToCover = CachedCoverLocation - Owner->GetActorLocation();
+				ToCover.Z = 0; // Flatten to 2D
+				ToCover.Normalize();
+				Observation.CoverDirection = FVector2D(ToCover.X, ToCover.Y);
+			}
+			else
+			{
+				Observation.bHasCover = false;
+				Observation.NearestCoverDistance = 9999.0f;
+				Observation.CoverDirection = FVector2D::ZeroVector;
+			}
+		}
+		else
+		{
+			// No enemies - no cover needed
+			Observation.bHasCover = false;
+			Observation.NearestCoverDistance = 9999.0f;
+			Observation.CoverDirection = FVector2D::ZeroVector;
+		}
+	}
+
+	// End profiling
+	double EndTime = FPlatformTime::Seconds();
+	TotalObservationTime += static_cast<float>((EndTime - StartTime) * 1000.0); // Convert to ms
+
 	return Observation;
+}
+
+bool UFollowerAgentComponent::FindNearestCover(FVector& OutCoverLocation, float& OutDistance, const TArray<AActor*>& Enemies)
+{
+	// Start profiling
+	double StartTime = FPlatformTime::Seconds();
+
+	AActor* Owner = GetOwner();
+	if (!Owner || Enemies.Num() == 0)
+	{
+		return false;
+	}
+
+	const FVector AgentLocation = Owner->GetActorLocation();
+	const FVector AgentEyeLevel = AgentLocation + FVector(0, 0, 150.0f);
+	UWorld* World = GetWorld();
+
+	// Calculate average enemy direction
+	FVector AvgEnemyDirection = FVector::ZeroVector;
+	for (AActor* Enemy : Enemies)
+	{
+		if (Enemy)
+		{
+			FVector ToEnemy = Enemy->GetActorLocation() - AgentLocation;
+			ToEnemy.Z = 0; // Flatten to 2D
+			ToEnemy.Normalize();
+			AvgEnemyDirection += ToEnemy;
+		}
+	}
+	AvgEnemyDirection.Normalize();
+
+	// Sample points in a circle around the agent (perpendicular to enemy direction preferred)
+	float BestScore = -1.0f;
+	FVector BestCoverLocation = FVector::ZeroVector;
+	const float AngleStep = 360.0f / CoverSearchSamples;
+
+	for (int32 i = 0; i < CoverSearchSamples; ++i)
+	{
+		float Angle = i * AngleStep;
+		FRotator SearchRotation = FRotator(0, Angle, 0);
+		FVector SearchDirection = SearchRotation.Vector();
+		FVector SearchEnd = AgentLocation + (SearchDirection * CoverSearchRadius);
+
+		// Raycast to find obstacles
+		FHitResult HitResult;
+		FCollisionQueryParams Params;
+		Params.AddIgnoredActor(Owner);
+		Params.bTraceComplex = false;
+
+		if (World->LineTraceSingleByChannel(HitResult, AgentLocation, SearchEnd, ECC_WorldStatic, Params))
+		{
+			// Found an obstacle - check if it provides cover from enemies
+			FVector PotentialCover = HitResult.Location;
+			FVector PotentialCoverEye = PotentialCover + FVector(0, 0, 150.0f);
+
+			// Check height (must be tall enough for cover)
+			if (HitResult.Normal.Z < -0.5f || FMath::Abs(HitResult.ImpactPoint.Z - AgentLocation.Z) < MinCoverHeight)
+			{
+				continue; // Ground hit or too low
+			}
+
+			// Check if this position blocks LOS to enemies
+			int32 BlockedEnemies = 0;
+			for (AActor* Enemy : Enemies)
+			{
+				if (!Enemy) continue;
+
+				FVector EnemyEyeLevel = Enemy->GetActorLocation() + FVector(0, 0, 150.0f);
+				FHitResult LOSResult;
+				FCollisionQueryParams LOSParams;
+				LOSParams.bTraceComplex = false;
+
+				if (World->LineTraceSingleByChannel(LOSResult, PotentialCoverEye, EnemyEyeLevel, ECC_Visibility, LOSParams))
+				{
+					BlockedEnemies++; // LOS blocked
+				}
+			}
+
+			// Score this cover position
+			float Distance = FVector::Dist(AgentLocation, PotentialCover);
+			float CoverRatio = static_cast<float>(BlockedEnemies) / Enemies.Num();
+			float DistanceScore = 1.0f - FMath::Clamp(Distance / CoverSearchRadius, 0.0f, 1.0f);
+
+			// Prefer cover that blocks more enemies and is closer
+			float Score = (CoverRatio * 0.7f) + (DistanceScore * 0.3f);
+
+			if (Score > BestScore)
+			{
+				BestScore = Score;
+				BestCoverLocation = PotentialCover;
+			}
+		}
+	}
+
+	// End profiling
+	double EndTime = FPlatformTime::Seconds();
+	TotalCoverQueryTime += static_cast<float>((EndTime - StartTime) * 1000.0); // Convert to ms
+	CoverQueriesThisEpisode++;
+
+	// Return best cover if found
+	if (BestScore > 0.0f)
+	{
+		OutCoverLocation = BestCoverLocation;
+		OutDistance = FVector::Dist(AgentLocation, BestCoverLocation);
+		return true;
+	}
+
+	return false;
 }
 
 //------------------------------------------------------------------------------
@@ -484,6 +648,11 @@ void UFollowerAgentComponent::ResetEpisode()
 {
 	AccumulatedReward = 0.0f;
 	PreviousObservation = FObservationElement();
+
+	// Reset profiling stats (Sprint 6)
+	TotalObservationTime = 0.0f;
+	TotalCoverQueryTime = 0.0f;
+	CoverQueriesThisEpisode = 0;
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Episode reset"), *GetOwner()->GetName());
 }
@@ -596,6 +765,23 @@ void UFollowerAgentComponent::DrawDebugInfo()
 			DrawDebugLine(World, FollowerPos, CurrentObjective->TargetLocation, FColor::Yellow, false, 0.1f, 0, 2.0f);
 			DrawDebugSphere(World, CurrentObjective->TargetLocation, 50.0f, 8, FColor::Yellow, false, 0.1f);
 		}
+	}
+
+	// Draw cover information (Sprint 6)
+	if (bHasCachedCover)
+	{
+		// Draw line to cover
+		DrawDebugLine(World, FollowerPos, CachedCoverLocation, FColor::Green, false, 0.1f, 0, 3.0f);
+		DrawDebugSphere(World, CachedCoverLocation, 75.0f, 8, FColor::Green, false, 0.1f, 2.0f);
+
+		// Draw cover info text
+		FString CoverInfo = FString::Printf(TEXT("Cover: %.0fcm"), CachedCoverDistance);
+		DrawDebugString(World, CachedCoverLocation + FVector(0, 0, 100), CoverInfo, nullptr, FColor::Green, 0.1f, true);
+	}
+	else
+	{
+		// Draw "No Cover" indicator
+		DrawDebugString(World, FollowerPos + FVector(0, 0, 80), TEXT("No Cover"), nullptr, FColor::Red, 0.1f, true);
 	}
 
 	// Draw line to team leader
@@ -872,4 +1058,15 @@ bool UFollowerAgentComponent::ExportStateTransitions(const FString& FilePath)
 			*GetOwner()->GetName(), *FullPath);
 		return false;
 	}
+}
+
+//------------------------------------------------------------------------------
+// PERFORMANCE PROFILING (Sprint 6)
+//------------------------------------------------------------------------------
+
+void UFollowerAgentComponent::GetPerformanceStats(float& OutObservationTime, float& OutCoverQueryTime, int32& OutCoverQueriesThisEpisode) const
+{
+	OutObservationTime = TotalObservationTime;
+	OutCoverQueryTime = TotalCoverQueryTime;
+	OutCoverQueriesThisEpisode = CoverQueriesThisEpisode;
 }

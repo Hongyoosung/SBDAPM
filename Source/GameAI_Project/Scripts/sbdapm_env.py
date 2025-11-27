@@ -4,13 +4,13 @@ SBDAPM Environment Wrapper for Schola/RLlib Training (v3.0)
 Wraps the Unreal Engine environment via Schola gRPC for RLlib compatibility.
 
 Observation: 78 features (71 FObservationElement + 7 current objective embedding)
-Action: 8-dimensional (FTacticalAction)
-  - MoveDirection (2D continuous): [-1, 1] x [-1, 1]
-  - MoveSpeed (1D continuous): [0, 1]
-  - LookDirection (2D continuous): [-1, 1] x [-1, 1]
-  - Fire (discrete): {0, 1}
-  - Crouch (discrete): {0, 1}
-  - UseAbility (discrete): {0, 1}
+Action: 8-dimensional Box (continuous, flattened)
+  - [0-1]: MoveDirection (continuous): [-1, 1] x [-1, 1]
+  - [2]:   MoveSpeed (continuous): [0, 1]
+  - [3-4]: LookDirection (continuous): [-1, 1] x [-1, 1]
+  - [5]:   Fire (continuous [0,1], interpreted as binary >= 0.5)
+  - [6]:   Crouch (continuous [0,1], interpreted as binary >= 0.5)
+  - [7]:   UseAbility (continuous [0,1], interpreted as binary >= 0.5)
 """
 
 from gymnasium import spaces
@@ -30,9 +30,11 @@ class SBDAPMEnv:
 
     Connects to Unreal Engine via Schola gRPC and exposes:
     - Observation: 78 float features (71 FObservationElement + 7 objective embedding)
-    - Action: 8-dimensional atomic actions (FTacticalAction)
-      - Continuous: move_x, move_y, speed, look_x, look_y (5D)
-      - Discrete: fire, crouch, use_ability (3D binary)
+    - Action: 8-dimensional Box (continuous, flattened)
+      - [0-1]: move_direction [-1, 1]
+      - [2]:   move_speed [0, 1]
+      - [3-4]: look_direction [-1, 1]
+      - [5-7]: fire, crouch, use_ability [0, 1] (interpreted as binary)
     - Reward: Hierarchical (individual + coordination + strategic)
     """
 
@@ -54,15 +56,17 @@ class SBDAPMEnv:
             shape=(78,),  # 71 observation + 7 objective embedding
             dtype=np.float32
         )
-        # Atomic action space: 5D continuous + 3D discrete
-        self.action_space = spaces.Dict({
-            "move_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-            "move_speed": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
-            "look_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-            "fire": spaces.Discrete(2),
-            "crouch": spaces.Discrete(2),
-            "use_ability": spaces.Discrete(2)
-        })
+        # Flattened 8D continuous action space
+        # [0-1]: move_x, move_y in [-1, 1]
+        # [2]:   speed in [0, 1]
+        # [3-4]: look_x, look_y in [-1, 1]
+        # [5-7]: fire, crouch, ability in [0, 1] (binary interpreted)
+        self.action_space = spaces.Box(
+            low=np.array([-1.0, -1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+            high=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+            shape=(8,),
+            dtype=np.float32
+        )
 
         # Episode tracking
         self.episode_steps = 0
@@ -88,13 +92,13 @@ class SBDAPMEnv:
         Execute action and return result.
 
         Args:
-            action: Dict with keys:
-                - move_direction: (2,) array in [-1, 1]
-                - move_speed: (1,) array in [0, 1]
-                - look_direction: (2,) array in [-1, 1]
-                - fire: int in {0, 1}
-                - crouch: int in {0, 1}
-                - use_ability: int in {0, 1}
+            action: (8,) numpy array in Box space:
+                [0-1]: move_direction (x, y)
+                [2]:   move_speed
+                [3-4]: look_direction (x, y)
+                [5]:   fire (0-1, binary interpreted)
+                [6]:   crouch (0-1, binary interpreted)
+                [7]:   use_ability (0-1, binary interpreted)
 
         Returns:
             observation, reward, terminated, truncated, info
@@ -112,12 +116,12 @@ class SBDAPMEnv:
         info = {
             "episode_steps": self.episode_steps,
             "action": {
-                "move": action["move_direction"].tolist() if isinstance(action["move_direction"], np.ndarray) else action["move_direction"],
-                "speed": float(action["move_speed"][0]) if isinstance(action["move_speed"], np.ndarray) else action["move_speed"],
-                "look": action["look_direction"].tolist() if isinstance(action["look_direction"], np.ndarray) else action["look_direction"],
-                "fire": bool(action["fire"]),
-                "crouch": bool(action["crouch"]),
-                "ability": bool(action["use_ability"])
+                "move": [float(action[0]), float(action[1])],
+                "speed": float(action[2]),
+                "look": [float(action[3]), float(action[4])],
+                "fire": action[5] >= 0.5,
+                "crouch": action[6] >= 0.5,
+                "ability": action[7] >= 0.5
             },
             "total_reward": self.total_reward
         }
@@ -145,21 +149,19 @@ if SCHOLA_AVAILABLE:
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
-            # Override spaces to match our agent (v3.0 atomic actions)
+            # Override spaces to match our agent (v3.0 flattened 8D Box)
             self.observation_space = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
                 shape=(78,),  # 71 observation + 7 objective embedding
                 dtype=np.float32
             )
-            self.action_space = spaces.Dict({
-                "move_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-                "move_speed": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
-                "look_direction": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-                "fire": spaces.Discrete(2),
-                "crouch": spaces.Discrete(2),
-                "use_ability": spaces.Discrete(2)
-            })
+            self.action_space = spaces.Box(
+                low=np.array([-1.0, -1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+                shape=(8,),
+                dtype=np.float32
+            )
 
             self.episode_steps = 0
             self.max_episode_steps = kwargs.get("max_episode_steps", 1000)

@@ -146,6 +146,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|Observation")
 	FObservationElement BuildLocalObservation();
 
+	/** Find nearest cover position relative to enemies */
+	UFUNCTION(BlueprintCallable, Category = "Follower|Tactical")
+	bool FindNearestCover(FVector& OutCoverLocation, float& OutDistance, const TArray<AActor*>& Enemies);
+
 	//--------------------------------------------------------------------------
 	// REINFORCEMENT LEARNING
 	//--------------------------------------------------------------------------
@@ -233,6 +237,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Follower|Debug")
 	void DrawDebugInfo();
 
+	/** Get performance statistics (Sprint 6) */
+	UFUNCTION(BlueprintPure, Category = "Follower|Profiling")
+	void GetPerformanceStats(float& OutObservationTime, float& OutCoverQueryTime, int32& OutCoverQueriesThisEpisode) const;
+
 	/** Get state name as string */
 	UFUNCTION(BlueprintPure, Category = "Follower|State")
 	static FString GetStateName(EFollowerState State);
@@ -296,6 +304,26 @@ public:
 	/** Enable debug visualization */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Debug")
 	bool bEnableDebugDrawing = false;
+
+	//--------------------------------------------------------------------------
+	// COVER DETECTION CONFIG
+	//--------------------------------------------------------------------------
+
+	/** Cover search radius (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Cover")
+	float CoverSearchRadius = 1000.0f;
+
+	/** Cover search angular samples (rays around agent) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Cover")
+	int32 CoverSearchSamples = 8;
+
+	/** Minimum obstacle size to qualify as cover (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Cover")
+	float MinCoverHeight = 100.0f;
+
+	/** Cover query update interval (seconds) - cache results to avoid per-tick raycasts */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Follower|Cover")
+	float CoverQueryInterval = 0.5f;
 
 	//--------------------------------------------------------------------------
 	// STATE
@@ -373,4 +401,33 @@ private:
 
 	/** Minimum time between state logs (seconds) */
 	float StateLogInterval = 1.0f;
+
+	//--------------------------------------------------------------------------
+	// COVER CACHE (Sprint 6)
+	//--------------------------------------------------------------------------
+
+	/** Cached cover location */
+	FVector CachedCoverLocation = FVector::ZeroVector;
+
+	/** Cached cover distance */
+	float CachedCoverDistance = 9999.0f;
+
+	/** Is cached cover valid? */
+	bool bHasCachedCover = false;
+
+	/** Last cover query time */
+	float LastCoverQueryTime = 0.0f;
+
+	//--------------------------------------------------------------------------
+	// PERFORMANCE PROFILING (Sprint 6)
+	//--------------------------------------------------------------------------
+
+	/** Time spent building observations this episode (ms) */
+	float TotalObservationTime = 0.0f;
+
+	/** Time spent on cover queries this episode (ms) */
+	float TotalCoverQueryTime = 0.0f;
+
+	/** Number of cover queries this episode */
+	int32 CoverQueriesThisEpisode = 0;
 };

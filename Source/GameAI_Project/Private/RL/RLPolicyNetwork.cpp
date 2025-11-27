@@ -862,7 +862,7 @@ FTacticalAction URLPolicyNetwork::GetActionRuleBased(const FObservationElement& 
 	Action.bUseAbility = (Health < 50.0f && VisibleEnemies > 2);  // Use ability when outnumbered
 	Action.AbilityID = 0;
 
-	UE_LOG(LogTemp, VeryVerbose, TEXT("Rule-based action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d Crouch=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("🔧 [RULE-BASED] Action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d Crouch=%d"),
 		Action.MoveDirection.X, Action.MoveDirection.Y, Action.MoveSpeed,
 		Action.LookDirection.X, Action.LookDirection.Y, Action.bFire, Action.bCrouch);
 

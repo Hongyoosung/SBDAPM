@@ -4,6 +4,7 @@
 #include "Team/TeamLeaderComponent.h"
 #include "Team/FollowerAgentComponent.h"
 #include "RL/RewardCalculator.h"
+#include "AI/MCTS/MCTS.h"
 #include "Combat/HealthComponent.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"

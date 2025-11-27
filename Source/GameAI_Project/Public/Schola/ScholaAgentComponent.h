@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Inference/InferenceComponent.h"
+#include "Inference/IInferenceAgent.h"
 #include "ScholaAgentComponent.generated.h"
 
 class UFollowerAgentComponent;
@@ -16,22 +17,21 @@ class UTacticalRewardProvider;
  * This component attaches to follower pawns and:
  * - Exposes 71-feature tactical observations (TacticalObserver)
  * - Provides combat rewards (TacticalRewardProvider)
- * - Bridges between FollowerAgentComponent and Schola's InferenceComponent
+ * - Inherits from Schola's InferenceComponent (concrete implementation)
  *
  * Architecture:
  * Training: UE5.6 + Schola ←→ gRPC ←→ OpenAI Gym ←→ RLlib
  * Inference: UE5.6 + NNE + ONNX Runtime (no Python)
  *
  * Usage:
- * 1. Add InferenceComponent (from Schola plugin) to follower pawn
- * 2. Add ScholaAgentComponent to the same pawn
- * 3. Ensure FollowerAgentComponent is on the same pawn
- * 4. Component auto-configures observers/rewards
- * 5. Start UE with Schola server enabled
- * 6. Run Python training script (train_rllib.py)
+ * 1. Add ScholaAgentComponent to follower pawn (replaces abstract InferenceComponent)
+ * 2. Ensure FollowerAgentComponent is on the same pawn
+ * 3. Component auto-configures observers/rewards/actuators
+ * 4. Start UE with Schola server enabled
+ * 5. Run Python training script (train_rllib.py)
  */
 UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
-class GAMEAI_PROJECT_API UScholaAgentComponent : public UActorComponent
+class GAMEAI_PROJECT_API UScholaAgentComponent : public UInferenceComponent
 {
 	GENERATED_BODY()
 
@@ -70,13 +70,13 @@ public:
 	UPROPERTY(EditAnywhere, Instanced, Category = "Schola|Components")
 	UTacticalRewardProvider* RewardProvider = nullptr;
 
+	/** Tactical actuator (8-dimensional actions) */
+	UPROPERTY(EditAnywhere, Instanced, Category = "Schola|Components")
+	class UTacticalActuator* TacticalActuator = nullptr;
+
 	/** Reference to follower agent component (auto-found) */
 	UPROPERTY(BlueprintReadOnly, Category = "Schola|State")
 	UFollowerAgentComponent* FollowerAgent = nullptr;
-
-	/** Reference to Schola's InferenceComponent (auto-found) */
-	UPROPERTY(BlueprintReadOnly, Category = "Schola|State")
-	class UInferenceComponent* InferenceComponent = nullptr;
 
 	//--------------------------------------------------------------------------
 	// UTILITY
@@ -99,8 +99,6 @@ public:
 	void ResetEpisode();
 
 private:
-	/** Find inference component on owner */
-	class UInferenceComponent* FindInferenceComponent() const;
 	/** Find follower agent component on owner */
 	UFollowerAgentComponent* FindFollowerAgent() const;
 
@@ -109,4 +107,7 @@ private:
 
 	/** Configure reward provider */
 	void ConfigureRewardProvider();
+
+	/** Configure actuators (TacticalActuator) */
+	void ConfigureActuators();
 };

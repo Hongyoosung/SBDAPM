@@ -92,24 +92,61 @@ void FSTTask_ExecuteObjective::ExecuteAtomicAction(FStateTreeExecutionContext& C
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	// Query RL policy for atomic action
 	FTacticalAction RawAction;
-	if (SharedContext.TacticalPolicy && SharedContext.CurrentObjective)
+
+	// Priority 1: Use action from Schola (real-time training)
+	if (SharedContext.bScholaActionReceived)
+	{
+		// Action already set by TacticalActuator
+		RawAction = SharedContext.CurrentAtomicAction;
+		SharedContext.bScholaActionReceived = false; // Reset flag
+
+		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Display, TEXT("🔗 [SCHOLA ACTION] '%s': Move=(%.2f,%.2f) Speed=%.2f, Look=(%.2f,%.2f), Fire=%d"),
+			*GetNameSafe(Pawn),
+			RawAction.MoveDirection.X, RawAction.MoveDirection.Y, RawAction.MoveSpeed,
+			RawAction.LookDirection.X, RawAction.LookDirection.Y,
+			RawAction.bFire ? 1 : 0);
+	}
+	// Priority 2: Query local RL policy (inference mode)
+	else if (SharedContext.TacticalPolicy && SharedContext.CurrentObjective)
 	{
 		// Get action with objective context and mask
 		RawAction = SharedContext.TacticalPolicy->GetActionWithMask(
 			SharedContext.CurrentObservation,
 			SharedContext.CurrentObjective,
 			SharedContext.ActionMask);
+
+		// LOG: Action selected by policy
+		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Warning, TEXT("[RL ACTION] '%s': Move=(%.2f,%.2f) Speed=%.2f, Aim=(%.2f,%.2f), Fire=%d"),
+			*GetNameSafe(Pawn),
+			RawAction.MoveDirection.X, RawAction.MoveDirection.Y, RawAction.MoveSpeed,
+			RawAction.LookDirection.X, RawAction.LookDirection.Y,
+			RawAction.bFire ? 1 : 0);
 	}
+	// Priority 3: Fallback to default (zero) action
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("STTask_ExecuteObjective: No policy or objective, using defaults"));
+		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Warning, TEXT("❌ [NO ACTION] '%s': Policy=%s, Objective=%s - Using default (ZERO) action"),
+			*GetNameSafe(Pawn),
+			SharedContext.TacticalPolicy ? TEXT("Valid") : TEXT("NULL"),
+			SharedContext.CurrentObjective ? TEXT("Valid") : TEXT("NULL"));
 		RawAction = FTacticalAction(); // Default action
 	}
 
 	// Apply spatial constraints
 	FTacticalAction MaskedAction = ApplyMask(RawAction, SharedContext.ActionMask);
+
+	// LOG: If mask changed action significantly
+	bool bMaskModified = (MaskedAction.MoveDirection - RawAction.MoveDirection).SizeSquared() > 0.01f ||
+	                     MaskedAction.bFire != RawAction.bFire;
+	if (bMaskModified)
+	{
+		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Display, TEXT("[ACTION MASK] '%s': Constraints modified action"), *GetNameSafe(Pawn));
+	}
 
 	// Store in context for experience collection
 	SharedContext.CurrentAtomicAction = MaskedAction;
@@ -163,6 +200,12 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 			SharedContext.AIController->MoveToLocation(TargetLocation, 50.0f);
 			SharedContext.MovementDestination = TargetLocation;
 			SharedContext.bIsMoving = true;
+
+			// LOG: Movement execution
+			UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC] '%s': MoveToLocation(%.1f, %.1f, %.1f), Speed=%.1f"),
+				*Pawn->GetName(),
+				TargetLocation.X, TargetLocation.Y, TargetLocation.Z,
+				SharedContext.AIController->GetPawn()->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);
 		}
 	}
 	else

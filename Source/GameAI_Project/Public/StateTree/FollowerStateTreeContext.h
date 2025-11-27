@@ -164,6 +164,10 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL")
 	bool bUseRLPolicy = true;
 
+	/** Action received from Schola (real-time training mode) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RL")
+	bool bScholaActionReceived = false;
+
 	//--------------------------------------------------------------------------
 	// STATE FLAGS (Updated by state transitions)
 	//--------------------------------------------------------------------------

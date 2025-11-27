@@ -69,6 +69,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Reward")
 	float CalculateEfficiencyPenalty(float DeltaTime);
 
+	/** Calculate cover usage rewards (Sprint 6) */
+	UFUNCTION(BlueprintCallable, Category = "Reward")
+	float CalculateCoverReward();
+
 	//--------------------------------------------------------------------------
 	// EVENT TRACKING
 	//--------------------------------------------------------------------------
@@ -144,6 +148,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward|Config")
 	float FormationDistanceThreshold = 1500.0f;
 
+	/** Reward for using cover when under fire (Sprint 6) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward|Cover")
+	float CoverUnderFireReward = 5.0f;
+
+	/** Penalty for being exposed when enemies are visible (Sprint 6) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward|Cover")
+	float ExposedPenalty = -2.0f;
+
+	/** Reward for crouching in cover (Sprint 6) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward|Cover")
+	float CrouchInCoverReward = 2.0f;
+
+	/** Distance to cover to consider "in cover" (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Reward|Cover")
+	float CoverDistanceThreshold = 200.0f;
+
 private:
 	//--------------------------------------------------------------------------
 	// COMPONENT REFERENCES
@@ -179,4 +199,17 @@ private:
 
 	/** Recent combined fire records */
 	TArray<FCombinedFireRecord> RecentCombinedFires;
+
+	//--------------------------------------------------------------------------
+	// COVER TRACKING (Sprint 6)
+	//--------------------------------------------------------------------------
+
+	/** Was agent in cover last tick? */
+	bool bWasInCover = false;
+
+	/** Was agent taking damage last tick? */
+	bool bWasUnderFire = false;
+
+	/** Time spent in cover this episode */
+	float TimeInCover = 0.0f;
 };

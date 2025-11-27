@@ -29,7 +29,7 @@ class UInferenceAgent : public UInterface
 	GENERATED_BODY()
 };
 
-class IInferenceAgent
+class SCHOLA_API IInferenceAgent
 {
 	GENERATED_BODY()
 

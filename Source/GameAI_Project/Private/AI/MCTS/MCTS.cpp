@@ -723,6 +723,7 @@ TMap<AActor*, UObjective*> UMCTS::RunTeamMCTSTreeSearchWithObjectives(
 
     // Assign computed priors to root node (Sprint 4)
     TeamRootNode->ActionPriors = ObjectivePriors;
+    TeamRootNode->UntriedActions = ObjectiveAssignments;
 
     // Run MCTS simulations (same as before)
     for (int32 i = 0; i < MaxSimulations; ++i)

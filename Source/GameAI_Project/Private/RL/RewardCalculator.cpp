@@ -73,6 +73,10 @@ float URewardCalculator::CalculateTotalReward(float DeltaTime)
 	float EfficiencyPenalty = CalculateEfficiencyPenalty(DeltaTime);
 	TotalReward += EfficiencyPenalty;
 
+	// 5. Cover usage rewards (Sprint 6)
+	float CoverReward = CalculateCoverReward();
+	TotalReward += CoverReward;
+
 	// Reset accumulators
 	AccumulatedIndividualReward = 0.0f;
 	AccumulatedCoordinationReward = 0.0f;
@@ -173,6 +177,50 @@ float URewardCalculator::CalculateEfficiencyPenalty(float DeltaTime)
 	}
 
 	return Penalty;
+}
+
+float URewardCalculator::CalculateCoverReward()
+{
+	float Reward = 0.0f;
+
+	if (!FollowerComponent || !HealthComponent)
+	{
+		return Reward;
+	}
+
+	// Get current observation (includes cover info)
+	FObservationElement Obs = FollowerComponent->GetLocalObservation();
+
+	// Check if agent is in cover (within threshold distance)
+	bool bInCover = Obs.bHasCover && (Obs.NearestCoverDistance < CoverDistanceThreshold);
+
+	// Track under fire status (taking damage recently)
+	bool bUnderFire = DamageTakenSinceLastUpdate > 0.0f;
+
+	// Reward for using cover when under fire
+	if (bInCover && bUnderFire)
+	{
+		Reward += CoverUnderFireReward;
+	}
+
+	// Penalty for being exposed when enemies are visible
+	if (!bInCover && Obs.VisibleEnemyCount > 0 && Obs.DistanceToNearestEnemy < 2000.0f)
+	{
+		Reward += ExposedPenalty; // Negative value
+	}
+
+	// Bonus for crouching in cover (defensive behavior)
+	// Note: We check the action from the last tactical action
+	if (bInCover && FollowerComponent->LastTacticalAction.bCrouch)
+	{
+		Reward += CrouchInCoverReward;
+	}
+
+	// Update tracking state
+	bWasInCover = bInCover;
+	bWasUnderFire = bUnderFire;
+
+	return Reward;
 }
 
 //--------------------------------------------------------------------------
