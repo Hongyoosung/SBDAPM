@@ -304,6 +304,9 @@ private:
 	/** Initialize MCTS engine */
 	void InitializeMCTS();
 
+	/** Discover objectives from tagged actors in the level (v3.0) */
+	void DiscoverWorldObjectives();
+
 
 public:
 	//--------------------------------------------------------------------------

@@ -39,6 +39,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Objective")
     UObjective* CreateSupportObjective(AActor* AllyTarget, int32 Priority = 6);
 
+    UFUNCTION(BlueprintCallable, Category = "Objective")
+    UObjective* CreateRescueObjective(AActor* WoundedAlly, int32 Priority = 7);
+
     // Agent assignment
     UFUNCTION(BlueprintCallable, Category = "Objective")
     void AssignAgentsToObjective(UObjective* Objective, const TArray<AActor*>& Agents);

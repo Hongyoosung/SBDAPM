@@ -11,6 +11,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "RL/RewardCalculator.h"
+#include "Kismet/GameplayStatics.h"
+#include "Combat/HealthComponent.h"
 
 
 
@@ -47,6 +49,9 @@ void UTeamLeaderComponent::BeginPlay()
 			UE_LOG(LogTemp, Log, TEXT("TeamLeaderComponent: CurriculumManager initialized for '%s'"), *TeamName);
 		}
 	}
+
+	// Auto-discover objectives from level (v3.0 - Capture/Rescue support)
+	DiscoverWorldObjectives();
 
 	UE_LOG(LogTemp, Log, TEXT("TeamLeaderComponent: Initialized team '%s'"), *TeamName);
 }
@@ -187,6 +192,104 @@ void UTeamLeaderComponent::InitializeMCTS()
 	{
 		UE_LOG(LogTemp, Error, TEXT("TeamLeaderComponent: Failed to create MCTS"));
 	}
+}
+
+void UTeamLeaderComponent::DiscoverWorldObjectives()
+{
+	if (!ObjectiveManager)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': Cannot discover objectives - ObjectiveManager not initialized"), *TeamName);
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	int32 ObjectivesDiscovered = 0;
+
+	//==========================================================================
+	// CAPTURE ZONES
+	//==========================================================================
+	TArray<AActor*> CaptureZones;
+	UGameplayStatics::GetAllActorsWithTag(World, FName("CaptureZone"), CaptureZones);
+
+	for (AActor* Zone : CaptureZones)
+	{
+		if (Zone && IsValid(Zone))
+		{
+			UObjective* CaptureObj = ObjectiveManager->CreateCaptureObjective(
+				Zone->GetActorLocation(),
+				8  // High priority
+			);
+
+			if (CaptureObj)
+			{
+				ObjectivesDiscovered++;
+				UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Discovered CaptureZone at %s"),
+					*TeamName, *Zone->GetActorLocation().ToString());
+			}
+		}
+	}
+
+	//==========================================================================
+	// RESCUE ZONES (wounded allies marked with "RescueTarget" tag)
+	//==========================================================================
+	TArray<AActor*> RescueTargets;
+	UGameplayStatics::GetAllActorsWithTag(World, FName("RescueTarget"), RescueTargets);
+
+	for (AActor* Target : RescueTargets)
+	{
+		if (Target && IsValid(Target))
+		{
+			// Check if target is actually wounded (health < 50%)
+			UHealthComponent* HealthComp = Target->FindComponentByClass<UHealthComponent>();
+			if (HealthComp && HealthComp->GetCurrentHealth() < HealthComp->GetMaxHealth() * 0.5f)
+			{
+				UObjective* RescueObj = ObjectiveManager->CreateRescueObjective(
+					Target,
+					7  // Medium-high priority
+				);
+
+				if (RescueObj)
+				{
+					ObjectivesDiscovered++;
+					UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Discovered RescueTarget '%s' at %s (Health: %.1f)"),
+						*TeamName, *Target->GetName(), *Target->GetActorLocation().ToString(),
+						HealthComp->GetCurrentHealth());
+				}
+			}
+		}
+	}
+
+	//==========================================================================
+	// DEFEND ZONES
+	//==========================================================================
+	TArray<AActor*> DefendZones;
+	UGameplayStatics::GetAllActorsWithTag(World, FName("DefendZone"), DefendZones);
+
+	for (AActor* Zone : DefendZones)
+	{
+		if (Zone && IsValid(Zone))
+		{
+			UObjective* DefendObj = ObjectiveManager->CreateDefendObjective(
+				Zone->GetActorLocation(),
+				7  // Medium-high priority
+			);
+
+			if (DefendObj)
+			{
+				ObjectivesDiscovered++;
+				UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Discovered DefendZone at %s"),
+					*TeamName, *Zone->GetActorLocation().ToString());
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("✅ TeamLeader '%s': Auto-discovered %d world objectives (MCTS will now consider these)"),
+		*TeamName, ObjectivesDiscovered);
 }
 
 //------------------------------------------------------------------------------

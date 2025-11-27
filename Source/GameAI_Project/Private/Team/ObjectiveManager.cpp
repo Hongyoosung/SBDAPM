@@ -93,6 +93,11 @@ UObjective* UObjectiveManager::CreateSupportObjective(AActor* AllyTarget, int32 
     return CreateObjective(EObjectiveType::SupportAlly, AllyTarget, FVector::ZeroVector, Priority);
 }
 
+UObjective* UObjectiveManager::CreateRescueObjective(AActor* WoundedAlly, int32 Priority)
+{
+    return CreateObjective(EObjectiveType::RescueAlly, WoundedAlly, FVector::ZeroVector, Priority);
+}
+
 void UObjectiveManager::AssignAgentsToObjective(UObjective* Objective, const TArray<AActor*>& Agents)
 {
     if (!Objective)
