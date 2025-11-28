@@ -2,6 +2,16 @@
 
 #include "Environment/StaticEnvironment.h"
 
+AStaticScholaEnvironment::AStaticScholaEnvironment(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+
+}
+
+AStaticScholaEnvironment::~AStaticScholaEnvironment()
+{
+}
+
 void AStaticScholaEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>& OutAgentTrainerPairs)
 {
 	TArray<APawn*> TrainerControlledPawns;

@@ -4,13 +4,15 @@
 #include "Schola/ScholaAgentComponent.h"
 #include "Schola/FollowerAgentTrainer.h"
 #include "Core/SimulationManagerGameMode.h"
+#include "Core/ScholaGameInstance.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Communicator/CommunicationManager.h"
 #include "Subsystem/ScholaManagerSubsystem.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 
-AScholaCombatEnvironment::AScholaCombatEnvironment()
+AScholaCombatEnvironment::AScholaCombatEnvironment(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = false;
 }
@@ -82,15 +84,29 @@ void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>&
 
 	for (UScholaAgentComponent* Agent : RegisteredAgents)
 	{
-		if (!Agent || !Agent->FollowerAgent)
+		if (!Agent)
 		{
 			continue;
 		}
 
-		// Spawn FollowerAgentTrainer actor
+		// Initialize agent if not already done (fixes timing issue)
+		if (!Agent->FollowerAgent)
+		{
+			Agent->InitializeScholaComponents();
+		}
+
+		// Validate after initialization
+		if (!Agent->FollowerAgent)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Agent %s has no FollowerAgent after initialization"),
+				*Agent->GetOwner()->GetName());
+			continue;
+		}
+
+		// Spawn FollowerAgentTrainer actor (controller owns pawn, not vice versa)
 		FActorSpawnParameters SpawnParams;
+		SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
 		SpawnParams.Name = FName(*FString::Printf(TEXT("Trainer_%s"), *Agent->GetOwner()->GetName()));
-		SpawnParams.Owner = Agent->GetOwner();
 
 		AFollowerAgentTrainer* Trainer = GetWorld()->SpawnActor<AFollowerAgentTrainer>(
 			AFollowerAgentTrainer::StaticClass(),
@@ -250,27 +266,17 @@ bool AScholaCombatEnvironment::StartTrainingServer()
 		return true;
 	}
 
-	// Get CommunicationManager subsystem
-	UGameInstance* GameInstance = GetWorld()->GetGameInstance();
-	if (!GameInstance)
+	// Get ScholaGameInstance
+	UScholaGameInstance* ScholaGI = Cast<UScholaGameInstance>(GetWorld()->GetGameInstance());
+	if (!ScholaGI)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] No GameInstance found"));
+		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] ScholaGameInstance not found!"));
+		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] Make sure GameInstanceClass is set to ScholaGameInstance in Project Settings"));
 		return false;
 	}
 
-	UCommunicationManager* ComManager = GameInstance->GetSubsystem<UCommunicationManager>();
-	if (!ComManager)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] CommunicationManager subsystem not found!"));
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] Make sure Schola plugin is enabled in .uproject"));
-		return false;
-	}
-
-	// Initialize CommunicationManager (sets up gRPC server)
-	ComManager->Initialize();
-
-	// Start gRPC backends (launches server on configured port)
-	bool bSuccess = ComManager->StartBackends();
+	// Start communication server via GameInstance
+	bool bSuccess = ScholaGI->StartCommunicationServer(ServerPort);
 	if (!bSuccess)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] Failed to start gRPC server"));
@@ -291,15 +297,11 @@ void AScholaCombatEnvironment::StopTrainingServer()
 		return;
 	}
 
-	UGameInstance* GameInstance = GetWorld()->GetGameInstance();
-	if (GameInstance)
+	UScholaGameInstance* ScholaGI = Cast<UScholaGameInstance>(GetWorld()->GetGameInstance());
+	if (ScholaGI)
 	{
-		UCommunicationManager* ComManager = GameInstance->GetSubsystem<UCommunicationManager>();
-		if (ComManager)
-		{
-			ComManager->ShutdownServer();
-			UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] gRPC server stopped"));
-		}
+		ScholaGI->StopCommunicationServer();
+		UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] gRPC server stopped"));
 	}
 
 	bServerRunning = false;

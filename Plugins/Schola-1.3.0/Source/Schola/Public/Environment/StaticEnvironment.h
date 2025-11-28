@@ -5,12 +5,15 @@
 #include "StaticEnvironment.generated.h"
 
 UCLASS(Blueprintable,Abstract)
-class AStaticScholaEnvironment : public AAbstractScholaEnvironment
+class SCHOLA_API AStaticScholaEnvironment : public AAbstractScholaEnvironment
 {
 	GENERATED_BODY()
 
-public:
+protected:
+	AStaticScholaEnvironment(const FObjectInitializer& ObjectInitializer);
+	virtual ~AStaticScholaEnvironment();
 
+public:
 	virtual void InternalRegisterAgents(TArray<FTrainerAgentPair>& OutAgentTrainerPairs);
 	
 	//TODO add PURE_VIRTUAL macro

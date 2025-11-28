@@ -102,6 +102,8 @@ void UCommunicationManager::Initialize()
 	}
 	this->ServerURL = Settings->CommunicatorSettings.Address + FString(":") + FString::FromInt(Port);
 	Builder = new grpc::ServerBuilder();
+	
+	UE_LOG(LogTemp, Warning, TEXT("Starting Schola gRPC Server on %s"), *ServerURL);
 	Builder->AddListeningPort(TCHAR_TO_UTF8(*ServerURL), grpc::InsecureServerCredentials());
 }
 

@@ -38,7 +38,7 @@ public:
 	// INITIALIZATION
 	//--------------------------------------------------------------------------
 
-	/** Initialize trainer with ScholaAgentComponent */
+	/** Initialize trainer with ScholaAgentComponent (possesses pawn automatically) */
 	void Initialize(UScholaAgentComponent* InAgent);
 
 	//--------------------------------------------------------------------------

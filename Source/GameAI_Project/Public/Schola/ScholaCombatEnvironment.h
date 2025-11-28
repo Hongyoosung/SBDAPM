@@ -28,12 +28,12 @@ class UScholaAgentComponent;
  * 4. Start UE5 + run Python training script (train_rllib.py)
  */
 UCLASS()
-class GAMEAI_PROJECT_API AScholaCombatEnvironment : public AStaticEnvironment
+class GAMEAI_PROJECT_API AScholaCombatEnvironment : public AStaticScholaEnvironment
 {
 	GENERATED_BODY()
 
 public:
-	AScholaCombatEnvironment();
+	AScholaCombatEnvironment(const FObjectInitializer& ObjectInitializer);
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

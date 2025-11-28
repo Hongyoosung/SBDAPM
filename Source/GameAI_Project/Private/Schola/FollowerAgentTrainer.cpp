@@ -23,6 +23,18 @@ void AFollowerAgentTrainer::Initialize(UScholaAgentComponent* InAgent)
 	FollowerAgent = InAgent->FollowerAgent;
 	RewardProvider = InAgent->RewardProvider;
 
+	// Possess the pawn NOW (required for base class Initialize to work)
+	APawn* ControlledPawn = InAgent->GetControlledPawn();
+	if (ControlledPawn)
+	{
+		Possess(ControlledPawn);
+		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] Possessed pawn %s"), *ControlledPawn->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] GetControlledPawn returned null!"));
+	}
+
 	// Copy observers and actuators from ScholaAgentComponent to this trainer
 	// This is required by Schola's architecture
 	Observers = ScholaAgent->Observers;
@@ -32,8 +44,8 @@ void AFollowerAgentTrainer::Initialize(UScholaAgentComponent* InAgent)
 	InteractionManager = ScholaAgent->InteractionManager;
 
 	// Set trainer configuration
-	TrainerConfiguration.DecisionFrequency = 1; // Every step (real-time RL)
-	TrainerConfiguration.TrainerName = FString::Printf(TEXT("Follower_%s"), *InAgent->GetOwner()->GetName());
+	TrainerConfiguration.DecisionRequestFrequency = 1; // Every step (real-time RL)
+	TrainerConfiguration.Name = FString::Printf(TEXT("Follower_%s"), *InAgent->GetOwner()->GetName());
 
 	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] Initialized for %s"), *InAgent->GetOwner()->GetName());
 }
@@ -62,23 +74,23 @@ EAgentTrainingStatus AFollowerAgentTrainer::ComputeStatus()
 	if (IsAgentDead())
 	{
 		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Agent died (Episode reward: %.2f, Steps: %d)"),
-			*TrainerConfiguration.TrainerName, EpisodeReward, EpisodeSteps);
-		return EAgentTrainingStatus::Complete;
+			*TrainerConfiguration.Name, EpisodeReward, EpisodeSteps);
+		return EAgentTrainingStatus::Completed;
 	}
 
 	// Check if reward provider says episode terminated
 	if (RewardProvider && RewardProvider->IsTerminated())
 	{
 		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Episode terminated by RewardProvider"),
-			*TrainerConfiguration.TrainerName);
-		return EAgentTrainingStatus::Complete;
+			*TrainerConfiguration.Name);
+		return EAgentTrainingStatus::Completed;
 	}
 
 	// Check for timeout
 	if (IsEpisodeTimeout())
 	{
 		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Episode timeout"),
-			*TrainerConfiguration.TrainerName);
+			*TrainerConfiguration.Name);
 		return EAgentTrainingStatus::Truncated;
 	}
 
@@ -89,7 +101,7 @@ EAgentTrainingStatus AFollowerAgentTrainer::ComputeStatus()
 void AFollowerAgentTrainer::GetInfo(TMap<FString, FString>& Info)
 {
 	// Provide debug info for logging/monitoring
-	Info.Add(TEXT("agent_name"), TrainerConfiguration.TrainerName);
+	Info.Add(TEXT("agent_name"), TrainerConfiguration.Name);
 	Info.Add(TEXT("episode_reward"), FString::SanitizeFloat(EpisodeReward));
 	Info.Add(TEXT("episode_steps"), FString::FromInt(EpisodeSteps));
 
@@ -116,14 +128,14 @@ void AFollowerAgentTrainer::ResetTrainer()
 		ScholaAgent->ResetEpisode();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Reset for new episode"), *TrainerConfiguration.TrainerName);
+	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Reset for new episode"), *TrainerConfiguration.Name);
 }
 
 void AFollowerAgentTrainer::OnCompletion()
 {
 	// Called when episode ends
 	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Episode completed (Total reward: %.2f, Steps: %d)"),
-		*TrainerConfiguration.TrainerName, EpisodeReward, EpisodeSteps);
+		*TrainerConfiguration.Name, EpisodeReward, EpisodeSteps);
 }
 
 //------------------------------------------------------------------------------
