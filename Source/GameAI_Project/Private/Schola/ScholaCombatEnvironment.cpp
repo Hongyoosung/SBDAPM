@@ -44,8 +44,33 @@ void AScholaCombatEnvironment::BeginPlay()
 	// Note: ScholaManagerSubsystem automatically handles server startup and agent registration.
 	// We do not need to manually start the server here.
 
-	UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] Initialized with %d agents (Training: %s, Port: %d)"),
+	// Debug: Check if environment is properly initialized
+	if (GetWorld())
+	{
+		UGameInstance* GameInstance = GetWorld()->GetGameInstance();
+		if (GameInstance)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] GameInstance: %s"), *GameInstance->GetClass()->GetName());
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Initialized with %d agents (Training: %s, Port: %d)"),
 		RegisteredAgents.Num(), bEnableTraining ? TEXT("ON") : TEXT("OFF"), ServerPort);
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Base class: %s"), *GetClass()->GetSuperClass()->GetName());
+
+	// List all registered agents
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Registered agents:"));
+	for (int32 i = 0; i < RegisteredAgents.Num(); i++)
+	{
+		UScholaAgentComponent* Agent = RegisteredAgents[i];
+		if (Agent && Agent->GetOwner())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("  [%d] %s (ActorName: %s)"),
+				i, *Agent->GetName(), *Agent->GetOwner()->GetName());
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Waiting for Python GymConnector to connect on port %d..."), ServerPort);
 }
 
 void AScholaCombatEnvironment::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -75,6 +100,14 @@ void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>&
 {
 	// Called by AAbstractScholaEnvironment::Initialize()
 	// Create AAbstractTrainer actors for each registered agent
+
+	// Guard against duplicate calls
+	static bool bAlreadyRegistered = false;
+	if (bAlreadyRegistered)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] InternalRegisterAgents already called, skipping duplicate registration"));
+		return;
+	}
 
 	OutAgentTrainerPairs.Empty();
 
@@ -124,7 +157,19 @@ void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>&
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] Registered %d trainers"), OutAgentTrainerPairs.Num());
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Registered %d trainers with Schola:"), OutAgentTrainerPairs.Num());
+	for (int32 i = 0; i < OutAgentTrainerPairs.Num(); i++)
+	{
+		const FTrainerAgentPair& Pair = OutAgentTrainerPairs[i];
+		if (Pair.AgentCDO && Pair.Trainer)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("  [%d] Agent=%s, Trainer=%s"),
+				i, *Pair.AgentCDO->GetName(), *Pair.Trainer->GetName());
+		}
+	}
+
+	// Mark as registered to prevent duplicates
+	bAlreadyRegistered = true;
 }
 
 void AScholaCombatEnvironment::SetEnvironmentOptions(const TMap<FString, FString>& Options)

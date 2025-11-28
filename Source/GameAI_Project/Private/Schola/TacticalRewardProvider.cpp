@@ -29,8 +29,15 @@ void UTacticalRewardProvider::Initialize()
 
 float UTacticalRewardProvider::GetReward()
 {
+	static int32 CallCount = 0;
+	CallCount++;
+
 	if (!FollowerAgent)
 	{
+		if (CallCount % 100 == 1)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[TacticalRewardProvider] GetReward called but FollowerAgent is NULL! (Call #%d)"), CallCount);
+		}
 		return 0.0f;
 	}
 
@@ -43,6 +50,12 @@ float UTacticalRewardProvider::GetReward()
 
 	// Check for termination
 	bTerminated = !FollowerAgent->bIsAlive;
+
+	if (CallCount % 100 == 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalRewardProvider] GetReward #%d: Delta=%.3f, Total=%.3f, Alive=%d"),
+			CallCount, DeltaReward, CurrentReward, FollowerAgent->bIsAlive ? 1 : 0);
+	}
 
 	return DeltaReward;
 }

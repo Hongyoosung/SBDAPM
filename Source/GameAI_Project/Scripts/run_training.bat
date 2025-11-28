@@ -17,7 +17,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 REM Activate game_ai environment and run training
-echo Activating conda environment: game_ai
+echo Activating conda environment: gameai
 echo.
 
 REM Default parameters
@@ -34,7 +34,7 @@ echo   - Port: %PORT%
 echo.
 
 REM Run training with conda
-call conda run -n game_ai python train_rllib.py --iterations %ITERATIONS% --port %PORT%
+call conda run -n gameai python train_rllib.py --iterations %ITERATIONS% --port %PORT%
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

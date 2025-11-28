@@ -18,8 +18,17 @@ FBoxSpace UTacticalActuator::GetActionSpace()
 	TArray<float> HighBounds = { 1.0f,  1.0f, 1.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f };
 	TArray<int> Shape = { 8 };
 
-	// 2. TArray를 인자로 넘겨주면, 버그가 없는 TArray 버전 생성자가 호출됩니다.
-	return FBoxSpace(LowBounds, HighBounds, Shape);
+	FBoxSpace ActionSpace = FBoxSpace(LowBounds, HighBounds, Shape);
+
+	// Debug: Verify shape is correctly set
+	UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] GetActionSpace(): Dimensions=%d, Shape.Num()=%d"),
+		ActionSpace.Dimensions.Num(), ActionSpace.Shape.Num());
+	if (ActionSpace.Shape.Num() > 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] Shape[0]=%d"), ActionSpace.Shape[0]);
+	}
+
+	return ActionSpace;
 }
 
 void UTacticalActuator::TakeAction(const FBoxPoint& Action)

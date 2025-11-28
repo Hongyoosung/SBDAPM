@@ -118,6 +118,7 @@ def create_ppo_config():
     config.model = {
         "fcnet_hiddens": SBDAPMConfig.HIDDEN_LAYERS,
         "fcnet_activation": "relu",
+        "max_seq_len": 20,  # Required by RLlib (not used for feedforward nets)
     }
 
     return config
@@ -225,7 +226,8 @@ def train(args):
     print("=" * 60)
 
     # Initialize Ray
-    ray.init(ignore_reinit_error=True)
+    # include_dashboard=False is often required on Windows to prevent timeouts
+    ray.init(ignore_reinit_error=True, include_dashboard=False)
 
     # Register environment
     register_env()

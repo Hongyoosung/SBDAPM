@@ -23,31 +23,63 @@ void AFollowerAgentTrainer::Initialize(UScholaAgentComponent* InAgent)
 	FollowerAgent = InAgent->FollowerAgent;
 	RewardProvider = InAgent->RewardProvider;
 
-	// Possess the pawn NOW (required for base class Initialize to work)
-	APawn* ControlledPawn = InAgent->GetControlledPawn();
-	if (ControlledPawn)
+	// Verify components
+	if (!FollowerAgent)
 	{
-		Possess(ControlledPawn);
-		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] Possessed pawn %s"), *ControlledPawn->GetName());
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] InAgent->FollowerAgent is NULL! Agent won't work!"));
+		return;
 	}
-	else
+	if (!RewardProvider)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] GetControlledPawn returned null!"));
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] InAgent->RewardProvider is NULL! Rewards won't work!"));
+		return;
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] Components verified: FollowerAgent=%s, RewardProvider=%s, bIsAlive=%d"),
+		*FollowerAgent->GetName(), *RewardProvider->GetName(), FollowerAgent->bIsAlive ? 1 : 0);
+
+	// Get the controlled pawn first
+	APawn* ControlledPawn = InAgent->GetControlledPawn();
+	if (!ControlledPawn)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] GetControlledPawn returned null!"));
+		return;
+	}
+
+	// Possess the pawn BEFORE calling parent Initialize (required!)
+	Possess(ControlledPawn);
+
 	// Copy observers and actuators from ScholaAgentComponent to this trainer
-	// This is required by Schola's architecture
+	// This is required by Schola's architecture - MUST be done before parent Initialize
 	Observers = ScholaAgent->Observers;
 	Actuators = ScholaAgent->Actuators;
 
 	// Use ScholaAgent's InteractionManager
 	InteractionManager = ScholaAgent->InteractionManager;
 
+	// Verify InteractionManager
+	if (!InteractionManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] InteractionManager is NULL! Observations/Actions won't work!"));
+		return;
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] InteractionManager verified: %s"), *InteractionManager->GetName());
+
 	// Set trainer configuration
 	TrainerConfiguration.DecisionRequestFrequency = 1; // Every step (real-time RL)
 	TrainerConfiguration.Name = FString::Printf(TEXT("Follower_%s"), *InAgent->GetOwner()->GetName());
 
-	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] Initialized for %s"), *InAgent->GetOwner()->GetName());
+	// Call parent class Initialize to register observation/action spaces with Schola
+	// EnvId and AgentId will be set by the environment later, use dummy values for now
+	bool bSuccess = AAbstractTrainer::Initialize(0, 0, ControlledPawn);
+	if (!bSuccess)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] Parent Initialize failed for %s"), *InAgent->GetOwner()->GetName());
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] Initialized for %s (Observers: %d, Actuators: %d)"),
+		*InAgent->GetOwner()->GetName(), Observers.Num(), Actuators.Num());
 }
 
 //------------------------------------------------------------------------------
@@ -56,38 +88,69 @@ void AFollowerAgentTrainer::Initialize(UScholaAgentComponent* InAgent)
 
 float AFollowerAgentTrainer::ComputeReward()
 {
+	static int32 ComputeRewardCallCount = 0;
+	ComputeRewardCallCount++;
+
+	if (ComputeRewardCallCount % 100 == 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] ComputeReward #%d called for %s"),
+			ComputeRewardCallCount, *TrainerConfiguration.Name);
+	}
+
 	if (!RewardProvider)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] ComputeReward: RewardProvider is NULL!"));
 		return 0.0f;
 	}
 
 	// Get reward from TacticalRewardProvider
 	float StepReward = RewardProvider->GetReward();
 	EpisodeReward += StepReward;
+	EpisodeSteps++; // Increment step counter
 
 	return StepReward;
 }
 
 EAgentTrainingStatus AFollowerAgentTrainer::ComputeStatus()
 {
+	static int32 ComputeStatusCallCount = 0;
+	ComputeStatusCallCount++;
+
 	// Check if agent is dead
-	if (IsAgentDead())
+	bool bDead = IsAgentDead();
+	bool bRewardTerminated = (RewardProvider && RewardProvider->IsTerminated());
+	bool bTimeout = IsEpisodeTimeout();
+
+	if (ComputeStatusCallCount % 100 == 1 || bDead || bRewardTerminated)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Agent died (Episode reward: %.2f, Steps: %d)"),
+		UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] ComputeStatus #%d: Dead=%d, RewardTerminated=%d, Timeout=%d, Steps=%d"),
+			ComputeStatusCallCount, bDead ? 1 : 0, bRewardTerminated ? 1 : 0, bTimeout ? 1 : 0, EpisodeSteps);
+
+		if (!FollowerAgent)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[FollowerTrainer] FollowerAgent is NULL!"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] FollowerAgent->bIsAlive=%d"), FollowerAgent->bIsAlive ? 1 : 0);
+		}
+	}
+
+	if (bDead)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] %s - Agent died (Episode reward: %.2f, Steps: %d)"),
 			*TrainerConfiguration.Name, EpisodeReward, EpisodeSteps);
 		return EAgentTrainingStatus::Completed;
 	}
 
-	// Check if reward provider says episode terminated
-	if (RewardProvider && RewardProvider->IsTerminated())
+	if (bRewardTerminated)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Episode terminated by RewardProvider"),
+		UE_LOG(LogTemp, Warning, TEXT("[FollowerTrainer] %s - Episode terminated by RewardProvider"),
 			*TrainerConfiguration.Name);
 		return EAgentTrainingStatus::Completed;
 	}
 
-	// Check for timeout
-	if (IsEpisodeTimeout())
+	if (bTimeout)
 	{
 		UE_LOG(LogTemp, Log, TEXT("[FollowerTrainer] %s - Episode timeout"),
 			*TrainerConfiguration.Name);

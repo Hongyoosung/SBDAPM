@@ -18,6 +18,7 @@ import numpy as np
 
 try:
     from schola.gym.env import GymEnv as UnrealEnv
+    from schola.gym.env import GymVectorEnv as UnrealVectorEnv
     SCHOLA_AVAILABLE = True
 except ImportError:
     SCHOLA_AVAILABLE = False
@@ -138,24 +139,111 @@ class SBDAPMEnv:
 
 
 if SCHOLA_AVAILABLE:
+    from schola.core.unreal_connections.editor_connection import UnrealEditorConnection
     import gymnasium as gym
-    
-    class SBDAPMScholaEnv(gym.Env):
+
+    class SafeUnrealVectorEnv(UnrealVectorEnv):
+        """
+        Wrapper around UnrealVectorEnv to handle None observations from Schola.
+        Fixes TypeError when some agents return None during reset/step.
+        """
+        def batch_obs(self, obs):
+            # Check if any observation is None
+            if any(o is None for o in obs):
+                # Find a valid observation to use as template
+                valid_obs = next((o for o in obs if o is not None), None)
+                if valid_obs is not None:
+                    # Replace None with valid_obs
+                    obs = [o if o is not None else valid_obs for o in obs]
+                else:
+                    print("[SafeUnrealVectorEnv] Warning: All observations are None! Using zeros.")
+                    # Create dummy observation based on single_observation_space
+                    dummy = self.single_observation_space.sample()
+                    # Zero it out to be safe
+                    if isinstance(dummy, np.ndarray):
+                        dummy.fill(0)
+                    obs = [dummy for _ in obs]
+            
+            try:
+                return super().batch_obs(obs)
+            except Exception as e:
+                print(f"[SafeUnrealVectorEnv] Error in batch_obs: {e}")
+                # Fallback: return stacked zeros
+                # This assumes Box space for simplicity, but handles Dict if we can
+                try:
+                    import gymnasium.experimental.vector.utils as utils
+                    return utils.batch_space(self.single_observation_space, len(obs))
+                except:
+                    print("[SafeUnrealVectorEnv] Critical: Failed to create fallback batch.")
+                    raise e
+
+    class SBDAPMScholaEnv(gym.Wrapper):
         """
         Full Schola-integrated environment (v3.0).
 
-        Pure gymnasium.Env implementation with direct gRPC connection.
-        Avoids Schola's GymEnv wrapper to prevent RLlib assertion errors.
+        Wraps Schola's GymVectorEnv and adapts it for RLlib single-env training.
+        Handles None observations/info and flattens vector env to single env.
         """
 
         def __init__(self, **kwargs):
-            super().__init__()
-            
-            # Extract host/port for connection
+            # Extract configuration
             host = kwargs.get("host", "localhost")
             port = kwargs.get("port", 50051)
+            self.max_episode_steps = kwargs.get("max_episode_steps", 1000)
 
-            # Define spaces to match our agent (v3.0 flattened 8D Box)
+            # Create Schola connection and wrapped env
+            connection = UnrealEditorConnection(url=host, port=port)
+            # Use SafeUnrealVectorEnv to handle None observations
+            schola_env = SafeUnrealVectorEnv(unreal_connection=connection, verbosity=1)
+
+            print(f"[DEBUG] Schola Env Num Envs: {schola_env.num_envs}")
+            print(f"[DEBUG] Schola Env Observation Space Type: {type(schola_env.observation_space)}")
+            print(f"[DEBUG] Schola Env Action Space Type: {type(schola_env.action_space)}")
+
+            # Inspect action space structure
+            if isinstance(schola_env.action_space, spaces.Dict):
+                print(f"[DEBUG] Action space is Dict with keys: {list(schola_env.action_space.keys())}")
+                first_agent = list(schola_env.action_space.keys())[0]
+                print(f"[DEBUG] Action space for '{first_agent}': {schola_env.action_space[first_agent]}")
+                # Check if nested
+                if isinstance(schola_env.action_space[first_agent], spaces.Dict):
+                    print(f"[DEBUG] Nested Dict detected. Sub-keys: {list(schola_env.action_space[first_agent].keys())}")
+            else:
+                print(f"[DEBUG] Action space: {schola_env.action_space}")
+
+            # Initialize wrapper
+            super().__init__(schola_env)
+
+            self.num_agents = schola_env.num_envs
+
+            # Detect if spaces are Dict (agent ID keys)
+            self.is_obs_dict = isinstance(schola_env.observation_space, spaces.Dict)
+            self.is_action_dict = isinstance(schola_env.action_space, spaces.Dict)
+
+            # Extract agent IDs from Dict spaces
+            self.agent_ids = None
+            self.action_space_structure = None  # Store structure for action formatting
+            if self.is_obs_dict:
+                self.agent_ids = list(schola_env.observation_space.keys())
+                print(f"[SBDAPMScholaEnv] Detected Dict Observation Space. Agent IDs: {self.agent_ids}")
+            if self.is_action_dict:
+                action_agent_ids = list(schola_env.action_space.keys())
+                if not self.agent_ids:
+                    self.agent_ids = action_agent_ids
+                print(f"[SBDAPMScholaEnv] Detected Dict Action Space. Agent IDs: {action_agent_ids}")
+
+            # Store action space structure for each agent
+            if self.is_action_dict and self.agent_ids:
+                first_agent = self.agent_ids[0]
+                self.action_space_structure = schola_env.action_space[first_agent]
+                print(f"[SBDAPMScholaEnv] Action structure per agent: {self.action_space_structure}")
+
+            # Use first agent ID if Dict spaces
+            self.primary_agent_id = self.agent_ids[0] if self.agent_ids else None
+            if self.primary_agent_id:
+                print(f"[SBDAPMScholaEnv] Using primary agent: {self.primary_agent_id}")
+
+            # Override spaces to single-agent (we'll handle the first agent only)
             self.observation_space = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
@@ -170,90 +258,263 @@ if SCHOLA_AVAILABLE:
             )
 
             self.episode_steps = 0
-            self.max_episode_steps = kwargs.get("max_episode_steps", 1000)
-            
-            # Direct gRPC connection (bypass Schola's GymEnv wrapper)
-            from schola.core.unreal_connections.editor_connection import UnrealEditorConnection
-            self._connection = UnrealEditorConnection(url=host, port=port)
-            self._connected = False
-            
+
             print(f"[SBDAPMScholaEnv] Initialized with host={host}, port={port}")
-            print(f"[SBDAPMScholaEnv] Type: {type(self).__name__} (pure gymnasium.Env)")
+            print(f"[SBDAPMScholaEnv] Detected {self.num_agents} agents, using first agent only")
+            print(f"[SBDAPMScholaEnv] Type: {type(self).__name__} (Schola GymVectorEnv wrapper)")
+
+        def _format_action_for_schola(self, action):
+            """
+            Convert flat 8-dim action to Schola's expected format.
+
+            Handles:
+            1. Box((8, 8)) - UE misconfiguration, reshape (8,) to (8, 8) by tiling
+            2. Dict - map flat action to dict keys
+            3. Box((8,)) - return as-is
+            """
+            # Handle Box space
+            if isinstance(self.action_space_structure, spaces.Box):
+                expected_shape = self.action_space_structure.shape
+                if expected_shape == (8, 8):
+                    # Misconfigured UE action space - expecting 8x8 matrix
+                    # Reshape our (8,) action to (8, 8) by repeating rows
+                    print(f"[SBDAPMScholaEnv] WARNING: UE expects action shape (8, 8), reshaping (8,) to (8, 8)")
+                    return np.tile(action, (8, 1)).astype(np.float32)
+                elif expected_shape == (8,):
+                    # Correct shape
+                    return action.astype(np.float32)
+                else:
+                    print(f"[SBDAPMScholaEnv] WARNING: Unexpected action shape {expected_shape}, using as-is")
+                    return action.astype(np.float32)
+
+            # Handle nested Dict
+            if isinstance(self.action_space_structure, spaces.Dict):
+                # If nested Dict, we need to map flat action to dict structure
+                # Common structure: {'move': Box(2), 'look': Box(2), 'actions': Box(3)}
+                # Our action: [move_x, move_y, speed, look_x, look_y, fire, crouch, ability]
+                action_dict = {}
+                subspace_keys = list(self.action_space_structure.keys())
+
+                # Try to infer mapping from subspace keys
+                idx = 0
+                for key in subspace_keys:
+                    subspace = self.action_space_structure[key]
+                    if isinstance(subspace, spaces.Box):
+                        dim = subspace.shape[0] if len(subspace.shape) > 0 else 1
+                        if dim == 1:
+                            action_dict[key] = np.array([action[idx]], dtype=np.float32)
+                            idx += 1
+                        else:
+                            action_dict[key] = action[idx:idx+dim].astype(np.float32)
+                            idx += dim
+                    else:
+                        # Fallback: use sample
+                        action_dict[key] = subspace.sample()
+
+                return action_dict
+
+            # Fallback - return as-is
+            return action
 
         def reset(self, seed=None, options=None):
-            """Reset environment and return initial observation."""
+            """Reset environment and return observation for first agent."""
             self.episode_steps = 0
-            
-            # Connect to UE if not already connected
-            if not self._connected:
-                try:
-                    self._connection.connect()
-                    self._connected = True
-                    print("[SBDAPMScholaEnv] Connected to Unreal Engine")
-                except Exception as e:
-                    print(f"[SBDAPMScholaEnv] Connection failed: {e}")
-                    # Return dummy observation if connection fails
-                    return np.zeros(78, dtype=np.float32), {"episode_steps": 0}
-            
-            # Request reset from UE via gRPC
+
             try:
-                # Send reset command
-                response = self._connection.reset()
-                obs = np.array(response.observation, dtype=np.float32) if hasattr(response, 'observation') else np.zeros(78, dtype=np.float32)
-                info = {"episode_steps": 0}
-                return obs, info
+                print(f"[SBDAPMScholaEnv] Calling Schola reset...")
+                # Get vectorized observations
+                obs_vec, info_vec = self.env.reset(seed=seed, options=options)
+
+                print(f"[SBDAPMScholaEnv] Reset returned obs type: {type(obs_vec)}")
+                print(f"[SBDAPMScholaEnv] Reset returned info type: {type(info_vec)}")
+
+                # Check if obs_vec is a space class (error case)
+                if isinstance(obs_vec, (spaces.Dict, spaces.Box, spaces.Space)):
+                    print(f"[SBDAPMScholaEnv] ERROR: Reset returned a space class instead of observations!")
+                    print(f"[SBDAPMScholaEnv] This likely means the UE environment is not properly initialized.")
+                    obs = np.zeros(78, dtype=np.float32)
+                # Extract first agent's observation
+                elif obs_vec is None:
+                    print(f"[SBDAPMScholaEnv] Warning: No observations returned, using zeros")
+                    obs = np.zeros(78, dtype=np.float32)
+                elif isinstance(obs_vec, dict):
+                    # Dict with actual data: extract using primary agent ID
+                    print(f"[SBDAPMScholaEnv] obs_vec is dict with keys: {list(obs_vec.keys())[:5]}")
+                    if self.primary_agent_id and self.primary_agent_id in obs_vec:
+                        obs = obs_vec[self.primary_agent_id]
+                        print(f"[SBDAPMScholaEnv] Extracted obs for agent {self.primary_agent_id}, shape: {obs.shape if hasattr(obs, 'shape') else 'N/A'}")
+                    else:
+                        print(f"[SBDAPMScholaEnv] Warning: Agent ID {self.primary_agent_id} not found in obs_vec keys: {list(obs_vec.keys())}")
+                        obs = np.zeros(78, dtype=np.float32)
+                elif hasattr(obs_vec, '__len__') and len(obs_vec) == 0:
+                    obs = np.zeros(78, dtype=np.float32)
+                elif isinstance(obs_vec, (list, tuple, np.ndarray)) and len(obs_vec) > 0:
+                    # Array-like: use numeric index
+                    obs = obs_vec[0]
+                else:
+                    print(f"[SBDAPMScholaEnv] Warning: Unexpected obs_vec type: {type(obs_vec)}")
+                    obs = np.zeros(78, dtype=np.float32)
+
+                # Extract first agent's info
+                info = {}
+                if info_vec is not None:
+                    if isinstance(info_vec, dict):
+                        # Try to extract for primary agent ID first
+                        if self.primary_agent_id and self.primary_agent_id in info_vec:
+                            info = info_vec[self.primary_agent_id]
+                        else:
+                            # Fallback: extract first entry
+                            info = {k: v[0] if isinstance(v, (list, np.ndarray)) and len(v) > 0 else v
+                                    for k, v in info_vec.items()}
+                    elif isinstance(info_vec, (list, tuple)) and len(info_vec) > 0:
+                        info = info_vec[0] if info_vec[0] is not None else {}
+
             except Exception as e:
-                print(f"[SBDAPMScholaEnv] Reset failed: {e}")
-                return np.zeros(78, dtype=np.float32), {"episode_steps": 0}
+                print(f"[SBDAPMScholaEnv] Error during reset: {e}")
+                import traceback
+                traceback.print_exc()
+                obs = np.zeros(78, dtype=np.float32)
+                info = {}
+
+            # Validate observation shape
+            if hasattr(obs, 'shape') and obs.shape != (78,):
+                print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
+                if obs.size == 78:
+                    obs = obs.reshape(78)
+                else:
+                    obs = np.zeros(78, dtype=np.float32)
+            elif not hasattr(obs, 'shape'):
+                 obs = np.zeros(78, dtype=np.float32)
+
+            return obs, info
 
         def step(self, action):
-            """Execute action via direct gRPC call."""
-            self.episode_steps += 1
-            
-            if not self._connected:
-                # Return dummy step if not connected
-                return (
-                    np.zeros(78, dtype=np.float32),
-                    0.0,
-                    False,
-                    self.episode_steps >= self.max_episode_steps,
-                    {"episode_steps": self.episode_steps}
-                )
-            
+            """Execute action for first agent and return result."""
             try:
-                # Send action to UE via gRPC
-                response = self._connection.step(action)
-                
-                obs = np.array(response.observation, dtype=np.float32) if hasattr(response, 'observation') else np.zeros(78, dtype=np.float32)
-                reward = float(response.reward) if hasattr(response, 'reward') else 0.0
-                terminated = bool(response.done) if hasattr(response, 'done') else False
-                truncated = self.episode_steps >= self.max_episode_steps
-                
-                info = {"episode_steps": self.episode_steps}
-                
-                return obs, reward, terminated, truncated, info
-                
+                # Ensure action is numpy array
+                if not isinstance(action, np.ndarray):
+                    action = np.array(action, dtype=np.float32)
+
+                # Format action according to Schola's expected structure
+                formatted_action = self._format_action_for_schola(action)
+                print(f"[SBDAPMScholaEnv] Formatted action type: {type(formatted_action)}")
+                if isinstance(formatted_action, dict):
+                    print(f"[SBDAPMScholaEnv] Formatted action keys: {list(formatted_action.keys())}")
+                    for k, v in formatted_action.items():
+                        print(f"  {k}: {type(v)} {v.shape if hasattr(v, 'shape') else ''}")
+
+                # Handle Dict action space OR if agent_ids detected
+                # (Schola may use Dict internally even if exposed space is Box)
+                if (self.is_action_dict or self.agent_ids) and self.agent_ids:
+                    # Create action dict with all agent IDs using formatted action
+                    if isinstance(formatted_action, dict):
+                        # Nested dict - deep copy for each agent
+                        action_vec = {agent_id: {k: v.copy() if isinstance(v, np.ndarray) else v
+                                                 for k, v in formatted_action.items()}
+                                     for agent_id in self.agent_ids}
+                    else:
+                        # Simple array
+                        action_vec = {agent_id: formatted_action.copy() for agent_id in self.agent_ids}
+                    print(f"[SBDAPMScholaEnv] Action_vec type: dict with {len(action_vec)} agents")
+                else:
+                    # Expand action to list of arrays (one per environment)
+                    # Convert to list to ensure Schola handles it correctly
+                    if isinstance(formatted_action, dict):
+                        action_vec = [{k: v.copy() if isinstance(v, np.ndarray) else v
+                                      for k, v in formatted_action.items()}
+                                     for _ in range(self.num_agents)]
+                    else:
+                        action_vec = [formatted_action.copy() for _ in range(self.num_agents)]
+                    print(f"[SBDAPMScholaEnv] Action_vec type: list with {len(action_vec)} actions")
+
+                # Call vectorized step
+                obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.env.step(action_vec)
+
+                # Extract first agent's data
+                if obs_vec is None:
+                    obs = np.zeros(78, dtype=np.float32)
+                elif isinstance(obs_vec, dict):
+                    # Dict space: extract using primary agent ID
+                    if self.primary_agent_id and self.primary_agent_id in obs_vec:
+                        obs = obs_vec[self.primary_agent_id]
+                    else:
+                        print(f"[SBDAPMScholaEnv] Warning: Agent ID {self.primary_agent_id} not found in obs_vec keys: {list(obs_vec.keys())}")
+                        obs = np.zeros(78, dtype=np.float32)
+                elif isinstance(obs_vec, (list, tuple, np.ndarray)) and len(obs_vec) > 0:
+                    obs = obs_vec[0]
+                else:
+                    obs = np.zeros(78, dtype=np.float32)
+
+                # Extract reward/terminated/truncated
+                if isinstance(reward_vec, dict) and self.primary_agent_id:
+                    reward = float(reward_vec.get(self.primary_agent_id, 0.0))
+                elif reward_vec is not None and hasattr(reward_vec, '__len__') and len(reward_vec) > 0:
+                    reward = float(reward_vec[0])
+                else:
+                    reward = 0.0
+
+                if isinstance(terminated_vec, dict) and self.primary_agent_id:
+                    terminated = bool(terminated_vec.get(self.primary_agent_id, False))
+                elif terminated_vec is not None and hasattr(terminated_vec, '__len__') and len(terminated_vec) > 0:
+                    terminated = bool(terminated_vec[0])
+                else:
+                    terminated = False
+
+                if isinstance(truncated_vec, dict) and self.primary_agent_id:
+                    truncated = bool(truncated_vec.get(self.primary_agent_id, False))
+                elif truncated_vec is not None and hasattr(truncated_vec, '__len__') and len(truncated_vec) > 0:
+                    truncated = bool(truncated_vec[0])
+                else:
+                    truncated = False
+
+                # Extract first agent's info
+                info = {}
+                if info_vec is not None:
+                    if isinstance(info_vec, dict):
+                        # Try to extract for primary agent ID first
+                        if self.primary_agent_id and self.primary_agent_id in info_vec:
+                            info = info_vec[self.primary_agent_id]
+                        else:
+                            # Fallback: extract first entry
+                            info = {k: v[0] if isinstance(v, (list, np.ndarray)) and len(v) > 0 else v
+                                    for k, v in info_vec.items()}
+                    elif isinstance(info_vec, (list, tuple)) and len(info_vec) > 0:
+                        info = info_vec[0] if info_vec[0] is not None else {}
+
             except Exception as e:
-                print(f"[SBDAPMScholaEnv] Step failed: {e}")
-                return (
-                    np.zeros(78, dtype=np.float32),
-                    0.0,
-                    True,  # Terminate on error
-                    False,
-                    {"episode_steps": self.episode_steps, "error": str(e)}
-                )
-        
+                print(f"[SBDAPMScholaEnv] Error during step: {e}")
+                import traceback
+                traceback.print_exc()
+                obs = np.zeros(78, dtype=np.float32)
+                reward = 0.0
+                terminated = True
+                truncated = False
+                info = {}
+
+            self.episode_steps += 1
+
+            # Enforce max episode length
+            if self.episode_steps >= self.max_episode_steps:
+                truncated = True
+
+            # Validate observation shape
+            if hasattr(obs, 'shape') and obs.shape != (78,):
+                print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
+                if obs.size == 78:
+                    obs = obs.reshape(78)
+                else:
+                    obs = np.zeros(78, dtype=np.float32)
+            elif not hasattr(obs, 'shape'):
+                 obs = np.zeros(78, dtype=np.float32)
+
+            return obs, reward, terminated, truncated, info
+
         def render(self):
             """Rendering is handled by UE."""
-            pass
-        
+            return self.env.render() if hasattr(self.env, 'render') else None
+
         def close(self):
-            """Close gRPC connection."""
-            if self._connected:
-                try:
-                    self._connection.close()
-                    self._connected = False
-                    print("[SBDAPMScholaEnv] Connection closed")
-                except Exception as e:
-                    print(f"[SBDAPMScholaEnv] Close failed: {e}")
+            """Close Schola connection."""
+            if hasattr(self.env, 'close'):
+                self.env.close()
 

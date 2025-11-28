@@ -9,11 +9,12 @@
 class UFollowerAgentComponent;
 
 /**
- * Schola observer that exposes the 71-feature tactical observation from FollowerAgentComponent.
+ * Schola observer that exposes 78-feature tactical observation for RL training.
  * Used for live training via gRPC connection to Python/RLlib.
  *
- * Uses FObservationElement::ToFeatureVector() for feature extraction.
- * See ObservationElement.h for full feature breakdown (71 total):
+ * Total: 78 features = 71 tactical + 7 objective embedding
+ *
+ * Tactical Features (71 total):
  * - Agent State: Position, Velocity, Rotation, Health, Stamina, Shield (12 features)
  * - Combat State: WeaponCooldown, Ammunition, WeaponType (3 features)
  * - Environment: RaycastDistances, RaycastHitTypes (32 features)
@@ -21,6 +22,9 @@ class UFollowerAgentComponent;
  * - Tactical: Cover info, Terrain (5 features)
  * - Temporal: TimeSinceLastAction, LastActionType (2 features)
  * - Combat Proximity: DistanceToNearestEnemy (1 feature)
+ *
+ * State Embedding (7 features, one-hot):
+ * - [71]: Idle, [72]: Assault, [73]: Defend, [74]: Support, [75]: Move, [76]: Retreat, [77]: Dead
  */
 UCLASS(BlueprintType, meta = (DisplayName = "Tactical Observer"))
 class GAMEAI_PROJECT_API UTacticalObserver : public UBoxObserver
