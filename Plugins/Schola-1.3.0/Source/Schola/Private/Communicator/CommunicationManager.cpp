@@ -94,16 +94,18 @@ void UCommunicationManager::Initialize()
 {
 	// Load settings from our corresponding developer settings object
 	const UScholaManagerSubsystemSettings* Settings = GetDefault<UScholaManagerSubsystemSettings>();
-	int							  Port;
-	if (!FParse::Value(FCommandLine::Get(), TEXT("ScholaPort"), Port))
+
+
+	int Port = 0; // Initialize to 0 for debugging
+	if (!FParse::Value(FCommandLine::Get(), TEXT("ScholaPort="), Port))
 	{
 		// Parse failed so we fall back to the default
 		Port = Settings->CommunicatorSettings.Port;
 	}
+
 	this->ServerURL = Settings->CommunicatorSettings.Address + FString(":") + FString::FromInt(Port);
 	Builder = new grpc::ServerBuilder();
-	
-	UE_LOG(LogTemp, Warning, TEXT("Starting Schola gRPC Server on %s"), *ServerURL);
+
 	Builder->AddListeningPort(TCHAR_TO_UTF8(*ServerURL), grpc::InsecureServerCredentials());
 }
 

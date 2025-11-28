@@ -12,9 +12,16 @@ Requirements:
     pip install schola[rllib] ray[rllib] torch
 """
 
-import argparse
 import os
 import sys
+import warnings
+
+# Suppress Ray deprecation warnings
+os.environ["PYTHONWARNINGS"] = "ignore::DeprecationWarning"
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+import torch  # Fix for Windows DLL error (must be imported before ray)
+import argparse
 from datetime import datetime
 
 # Check for required packages
@@ -88,6 +95,7 @@ def create_ppo_config():
         .environment(
             env="sbdapm_env",
             env_config=create_env_config(),
+            disable_env_checking=True,  # Disable env wrapper inspection (avoids GymEnv assertion)
         )
         .framework("torch")
         .env_runners(

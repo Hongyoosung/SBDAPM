@@ -17,7 +17,7 @@ public:
 	FString Address = FString("127.0.0.1");
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Communicator Settings")
-	int Port = 8000;
+	int Port = 50051;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(ClampMin=1), Category = "Communicator Settings")
 	int Timeout = 30;

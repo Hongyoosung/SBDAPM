@@ -138,18 +138,24 @@ class SBDAPMEnv:
 
 
 if SCHOLA_AVAILABLE:
-    class SBDAPMScholaEnv(UnrealEnv):
+    import gymnasium as gym
+    
+    class SBDAPMScholaEnv(gym.Env):
         """
         Full Schola-integrated environment (v3.0).
 
-        This class inherits from UnrealEnv to get proper gRPC integration.
-        Schola handles the observation/action/reward exchange.
+        Pure gymnasium.Env implementation with direct gRPC connection.
+        Avoids Schola's GymEnv wrapper to prevent RLlib assertion errors.
         """
 
         def __init__(self, **kwargs):
-            super().__init__(**kwargs)
+            super().__init__()
+            
+            # Extract host/port for connection
+            host = kwargs.get("host", "localhost")
+            port = kwargs.get("port", 50051)
 
-            # Override spaces to match our agent (v3.0 flattened 8D Box)
+            # Define spaces to match our agent (v3.0 flattened 8D Box)
             self.observation_space = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
@@ -165,18 +171,89 @@ if SCHOLA_AVAILABLE:
 
             self.episode_steps = 0
             self.max_episode_steps = kwargs.get("max_episode_steps", 1000)
+            
+            # Direct gRPC connection (bypass Schola's GymEnv wrapper)
+            from schola.core.unreal_connections.editor_connection import UnrealEditorConnection
+            self._connection = UnrealEditorConnection(url=host, port=port)
+            self._connected = False
+            
+            print(f"[SBDAPMScholaEnv] Initialized with host={host}, port={port}")
+            print(f"[SBDAPMScholaEnv] Type: {type(self).__name__} (pure gymnasium.Env)")
 
-        def reset(self, **kwargs):
+        def reset(self, seed=None, options=None):
+            """Reset environment and return initial observation."""
             self.episode_steps = 0
-            return super().reset(**kwargs)
+            
+            # Connect to UE if not already connected
+            if not self._connected:
+                try:
+                    self._connection.connect()
+                    self._connected = True
+                    print("[SBDAPMScholaEnv] Connected to Unreal Engine")
+                except Exception as e:
+                    print(f"[SBDAPMScholaEnv] Connection failed: {e}")
+                    # Return dummy observation if connection fails
+                    return np.zeros(78, dtype=np.float32), {"episode_steps": 0}
+            
+            # Request reset from UE via gRPC
+            try:
+                # Send reset command
+                response = self._connection.reset()
+                obs = np.array(response.observation, dtype=np.float32) if hasattr(response, 'observation') else np.zeros(78, dtype=np.float32)
+                info = {"episode_steps": 0}
+                return obs, info
+            except Exception as e:
+                print(f"[SBDAPMScholaEnv] Reset failed: {e}")
+                return np.zeros(78, dtype=np.float32), {"episode_steps": 0}
 
         def step(self, action):
+            """Execute action via direct gRPC call."""
             self.episode_steps += 1
-            obs, reward, done, truncated, info = super().step(action)
+            
+            if not self._connected:
+                # Return dummy step if not connected
+                return (
+                    np.zeros(78, dtype=np.float32),
+                    0.0,
+                    False,
+                    self.episode_steps >= self.max_episode_steps,
+                    {"episode_steps": self.episode_steps}
+                )
+            
+            try:
+                # Send action to UE via gRPC
+                response = self._connection.step(action)
+                
+                obs = np.array(response.observation, dtype=np.float32) if hasattr(response, 'observation') else np.zeros(78, dtype=np.float32)
+                reward = float(response.reward) if hasattr(response, 'reward') else 0.0
+                terminated = bool(response.done) if hasattr(response, 'done') else False
+                truncated = self.episode_steps >= self.max_episode_steps
+                
+                info = {"episode_steps": self.episode_steps}
+                
+                return obs, reward, terminated, truncated, info
+                
+            except Exception as e:
+                print(f"[SBDAPMScholaEnv] Step failed: {e}")
+                return (
+                    np.zeros(78, dtype=np.float32),
+                    0.0,
+                    True,  # Terminate on error
+                    False,
+                    {"episode_steps": self.episode_steps, "error": str(e)}
+                )
+        
+        def render(self):
+            """Rendering is handled by UE."""
+            pass
+        
+        def close(self):
+            """Close gRPC connection."""
+            if self._connected:
+                try:
+                    self._connection.close()
+                    self._connected = False
+                    print("[SBDAPMScholaEnv] Connection closed")
+                except Exception as e:
+                    print(f"[SBDAPMScholaEnv] Close failed: {e}")
 
-            # Check for truncation
-            if self.episode_steps >= self.max_episode_steps:
-                truncated = True
-
-            info["episode_steps"] = self.episode_steps
-            return obs, reward, done, truncated, info

@@ -41,11 +41,8 @@ void AScholaCombatEnvironment::BeginPlay()
 	// Initialize environment (calls parent AAbstractScholaEnvironment::Initialize)
 	Initialize();
 
-	// Start training server if enabled
-	if (bEnableTraining)
-	{
-		StartTrainingServer();
-	}
+	// Note: ScholaManagerSubsystem automatically handles server startup and agent registration.
+	// We do not need to manually start the server here.
 
 	UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] Initialized with %d agents (Training: %s, Port: %d)"),
 		RegisteredAgents.Num(), bEnableTraining ? TEXT("ON") : TEXT("OFF"), ServerPort);
@@ -53,7 +50,6 @@ void AScholaCombatEnvironment::BeginPlay()
 
 void AScholaCombatEnvironment::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	StopTrainingServer();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -260,51 +256,13 @@ bool AScholaCombatEnvironment::ValidateAgent(UScholaAgentComponent* Agent) const
 
 bool AScholaCombatEnvironment::StartTrainingServer()
 {
-	if (bServerRunning)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Training server already running"));
-		return true;
-	}
-
-	// Get ScholaGameInstance
-	UScholaGameInstance* ScholaGI = Cast<UScholaGameInstance>(GetWorld()->GetGameInstance());
-	if (!ScholaGI)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] ScholaGameInstance not found!"));
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] Make sure GameInstanceClass is set to ScholaGameInstance in Project Settings"));
-		return false;
-	}
-
-	// Start communication server via GameInstance
-	bool bSuccess = ScholaGI->StartCommunicationServer(ServerPort);
-	if (!bSuccess)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] Failed to start gRPC server"));
-		return false;
-	}
-
-	bServerRunning = true;
-	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ gRPC server started on port %d"), ServerPort);
-	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ Ready for Python RLlib connection"));
-
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] StartTrainingServer is deprecated. ScholaManagerSubsystem handles server startup automatically."));
 	return true;
 }
 
 void AScholaCombatEnvironment::StopTrainingServer()
 {
-	if (!bServerRunning)
-	{
-		return;
-	}
-
-	UScholaGameInstance* ScholaGI = Cast<UScholaGameInstance>(GetWorld()->GetGameInstance());
-	if (ScholaGI)
-	{
-		ScholaGI->StopCommunicationServer();
-		UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] gRPC server stopped"));
-	}
-
-	bServerRunning = false;
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] StopTrainingServer is deprecated. ScholaManagerSubsystem handles server shutdown automatically."));
 }
 
 //------------------------------------------------------------------------------
