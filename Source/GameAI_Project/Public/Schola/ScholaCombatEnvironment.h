@@ -84,6 +84,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Schola|State")
 	bool bServerRunning = false;
 
+	/** Has InternalRegisterAgents been called this session? */
+	bool bAgentsRegistered = false;
+
 	//--------------------------------------------------------------------------
 	// UTILITY
 	//--------------------------------------------------------------------------

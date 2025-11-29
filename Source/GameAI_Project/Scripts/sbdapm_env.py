@@ -268,18 +268,19 @@ if SCHOLA_AVAILABLE:
             Convert flat 8-dim action to Schola's expected format.
 
             Handles:
-            1. Box((8, 8)) - UE misconfiguration, reshape (8,) to (8, 8) by tiling
+            1. Box((N, 8)) - Schola vector env, reshape (8,) to (N, 8) by tiling
             2. Dict - map flat action to dict keys
             3. Box((8,)) - return as-is
             """
             # Handle Box space
             if isinstance(self.action_space_structure, spaces.Box):
                 expected_shape = self.action_space_structure.shape
-                if expected_shape == (8, 8):
-                    # Misconfigured UE action space - expecting 8x8 matrix
-                    # Reshape our (8,) action to (8, 8) by repeating rows
-                    print(f"[SBDAPMScholaEnv] WARNING: UE expects action shape (8, 8), reshaping (8,) to (8, 8)")
-                    return np.tile(action, (8, 1)).astype(np.float32)
+                if len(expected_shape) == 2 and expected_shape[1] == 8:
+                    # Vector env expecting (N, 8) matrix
+                    # Reshape our (8,) action to (N, 8) by repeating rows
+                    num_envs = expected_shape[0]
+                    print(f"[SBDAPMScholaEnv] Reshaping action (8,) to ({num_envs}, 8)")
+                    return np.tile(action, (num_envs, 1)).astype(np.float32)
                 elif expected_shape == (8,):
                     # Correct shape
                     return action.astype(np.float32)
@@ -327,6 +328,14 @@ if SCHOLA_AVAILABLE:
 
                 print(f"[SBDAPMScholaEnv] Reset returned obs type: {type(obs_vec)}")
                 print(f"[SBDAPMScholaEnv] Reset returned info type: {type(info_vec)}")
+
+                # Sync agent_ids based on actual observations after reset
+                if isinstance(obs_vec, dict):
+                    actual_agent_ids = list(obs_vec.keys())
+                    if actual_agent_ids != self.agent_ids:
+                        print(f"[SBDAPMScholaEnv] Syncing agent IDs: {len(self.agent_ids)} -> {len(actual_agent_ids)}")
+                        self.agent_ids = actual_agent_ids
+                        self.primary_agent_id = self.agent_ids[0] if self.agent_ids else None
 
                 # Check if obs_vec is a space class (error case)
                 if isinstance(obs_vec, (spaces.Dict, spaces.Box, spaces.Space)):

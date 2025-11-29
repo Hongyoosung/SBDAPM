@@ -21,6 +21,9 @@ void AScholaCombatEnvironment::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Reset registration flag for new PIE session
+	bAgentsRegistered = false;
+
 	// Get SimulationManager
 	SimulationManager = Cast<ASimulationManagerGameMode>(UGameplayStatics::GetGameMode(this));
 	if (!SimulationManager)
@@ -101,9 +104,8 @@ void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>&
 	// Called by AAbstractScholaEnvironment::Initialize()
 	// Create AAbstractTrainer actors for each registered agent
 
-	// Guard against duplicate calls
-	static bool bAlreadyRegistered = false;
-	if (bAlreadyRegistered)
+	// Guard against duplicate calls within same session
+	if (bAgentsRegistered)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] InternalRegisterAgents already called, skipping duplicate registration"));
 		return;
@@ -168,8 +170,8 @@ void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>&
 		}
 	}
 
-	// Mark as registered to prevent duplicates
-	bAlreadyRegistered = true;
+	// Mark as registered to prevent duplicates within this session
+	bAgentsRegistered = true;
 }
 
 void AScholaCombatEnvironment::SetEnvironmentOptions(const TMap<FString, FString>& Options)
