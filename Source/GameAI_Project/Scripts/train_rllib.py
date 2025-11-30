@@ -199,7 +199,7 @@ def export_onnx(algo, output_dir):
             opset_version=11
         )
 
-        print(f"✓ Dual-head PPO model exported to: {model_path}")
+        print(f"[SUCCESS] Dual-head PPO model exported to: {model_path}")
         print(f"\nModel structure:")
         print(f"  - Input: 78 dims (71 obs + 7 objective)")
         print(f"  - Output 1 (Actor): 8 dims (atomic actions)")

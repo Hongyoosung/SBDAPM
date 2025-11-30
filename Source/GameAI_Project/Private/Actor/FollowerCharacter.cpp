@@ -3,6 +3,7 @@
 #include "Actor/FollowerCharacter.h"
 #include "Team/FollowerAgentComponent.h"
 #include "StateTree/FollowerStateTreeComponent.h"
+#include "Schola/ScholaAgentComponent.h"
 #include "Combat/HealthComponent.h"
 #include "Combat/WeaponComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -16,6 +17,9 @@ AFollowerCharacter::AFollowerCharacter()
 
 	// Create state tree component
 	StateTreeComponent = CreateDefaultSubobject<UFollowerStateTreeComponent>(TEXT("StateTreeComponent"));
+
+	// Create Schola agent component (RLlib training bridge)
+	ScholaAgentComponent = CreateDefaultSubobject<UScholaAgentComponent>(TEXT("ScholaAgentComponent"));
 
 	// Configure character movement for AI pathfinding
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
@@ -36,10 +40,11 @@ void AFollowerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UE_LOG(LogTemp, Warning, TEXT("AFollowerCharacter::BeginPlay: '%s' - StateTreeComponent=%s, FollowerAgentComponent=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("AFollowerCharacter::BeginPlay: '%s' - StateTreeComponent=%s, FollowerAgentComponent=%s, ScholaAgentComponent=%s"),
 		*GetName(),
 		StateTreeComponent ? TEXT("✅ Valid") : TEXT("❌ NULL"),
-		FollowerAgentComponent ? TEXT("✅ Valid") : TEXT("❌ NULL"));
+		FollowerAgentComponent ? TEXT("✅ Valid") : TEXT("❌ NULL"),
+		ScholaAgentComponent ? TEXT("✅ Valid") : TEXT("❌ NULL"));
 }
 
 void AFollowerCharacter::Tick(float DeltaTime)

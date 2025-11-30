@@ -100,7 +100,7 @@ UObjective* UObjectiveManager::CreateRescueObjective(AActor* WoundedAlly, int32 
 
 void UObjectiveManager::AssignAgentsToObjective(UObjective* Objective, const TArray<AActor*>& Agents)
 {
-    if (!Objective)
+    if (!IsValid(Objective))
     {
         return;
     }
@@ -117,7 +117,7 @@ void UObjectiveManager::AssignAgentsToObjective(UObjective* Objective, const TAr
     // Update mapping
     for (AActor* Agent : Agents)
     {
-        if (Agent)
+        if (IsValid(Agent))
         {
             AgentObjectiveMap.Add(Agent, Objective);
         }
@@ -126,7 +126,7 @@ void UObjectiveManager::AssignAgentsToObjective(UObjective* Objective, const TAr
 
 void UObjectiveManager::UnassignAgentFromObjective(AActor* Agent)
 {
-    if (!Agent)
+    if (!IsValid(Agent))
     {
         return;
     }
@@ -135,7 +135,7 @@ void UObjectiveManager::UnassignAgentFromObjective(AActor* Agent)
     if (TObjectPtr<UObjective>* ObjectivePtr = AgentObjectiveMap.Find(Agent))
     {
         UObjective* CurrentObjective = ObjectivePtr->Get();
-        if (CurrentObjective)
+        if (IsValid(CurrentObjective))
         {
             CurrentObjective->AssignedAgents.Remove(Agent);
         }
@@ -148,7 +148,7 @@ void UObjectiveManager::ClearAllAssignments()
 {
     for (UObjective* Objective : Objectives)
     {
-        if (Objective)
+        if (IsValid(Objective))
         {
             Objective->AssignedAgents.Empty();
         }
@@ -158,7 +158,7 @@ void UObjectiveManager::ClearAllAssignments()
 
 void UObjectiveManager::ActivateObjective(UObjective* Objective)
 {
-    if (Objective)
+    if (IsValid(Objective))
     {
         Objective->Activate();
     }
@@ -166,7 +166,7 @@ void UObjectiveManager::ActivateObjective(UObjective* Objective)
 
 void UObjectiveManager::DeactivateObjective(UObjective* Objective)
 {
-    if (Objective)
+    if (IsValid(Objective))
     {
         Objective->Deactivate();
     }
@@ -174,7 +174,7 @@ void UObjectiveManager::DeactivateObjective(UObjective* Objective)
 
 void UObjectiveManager::CancelObjective(UObjective* Objective)
 {
-    if (Objective)
+    if (IsValid(Objective))
     {
         Objective->Cancel();
 
@@ -189,7 +189,7 @@ void UObjectiveManager::CancelObjective(UObjective* Objective)
 
 void UObjectiveManager::RemoveObjective(UObjective* Objective)
 {
-    if (Objective)
+    if (IsValid(Objective))
     {
         // Unassign agents
         CancelObjective(Objective);
@@ -205,7 +205,7 @@ void UObjectiveManager::ClearCompletedObjectives()
 
     for (UObjective* Objective : Objectives)
     {
-        if (Objective && (Objective->IsCompleted() || Objective->IsFailed()))
+        if (IsValid(Objective) && (Objective->IsCompleted() || Objective->IsFailed()))
         {
             ToRemove.Add(Objective);
         }
@@ -223,7 +223,7 @@ TArray<UObjective*> UObjectiveManager::GetActiveObjectives() const
 
     for (UObjective* Objective : Objectives)
     {
-        if (Objective && Objective->IsActive())
+        if (IsValid(Objective) && Objective->IsActive())
         {
             ActiveObjectives.Add(Objective);
         }
@@ -248,7 +248,7 @@ UObjective* UObjectiveManager::GetAgentObjective(AActor* Agent) const
 
 TArray<AActor*> UObjectiveManager::GetObjectiveAgents(UObjective* Objective) const
 {
-    if (Objective)
+    if (IsValid(Objective))
     {
         return Objective->AssignedAgents;
     }
@@ -267,7 +267,7 @@ UObjective* UObjectiveManager::GetHighestPriorityObjective() const
 
     for (UObjective* Objective : GetActiveObjectives())
     {
-        if (Objective && Objective->Priority > HighestPriority)
+        if (IsValid(Objective) && Objective->Priority > HighestPriority)
         {
             Highest = Objective;
             HighestPriority = Objective->Priority;
@@ -283,7 +283,7 @@ float UObjectiveManager::CalculateTotalTeamReward() const
 
     for (UObjective* Objective : Objectives)
     {
-        if (Objective)
+        if (IsValid(Objective))
         {
             TotalReward += Objective->CalculateStrategicReward();
         }
@@ -307,7 +307,7 @@ void UObjectiveManager::TickObjectives(float DeltaTime)
 {
     for (UObjective* Objective : Objectives)
     {
-        if (Objective && Objective->IsActive())
+        if (IsValid(Objective) && Objective->IsActive())
         {
             Objective->Tick(DeltaTime);
         }
@@ -325,15 +325,28 @@ void UObjectiveManager::TickObjectives(float DeltaTime)
 
 void UObjectiveManager::CleanupObjectives()
 {
-    // Remove objectives that are completed/failed for more than 10 seconds
+    // Remove invalid, completed, or failed objectives
     TArray<UObjective*> ToRemove;
 
     for (UObjective* Objective : Objectives)
     {
-        if (Objective && !Objective->IsActive())
+        if (!IsValid(Objective) || !Objective->IsActive())
         {
-            // Could add time tracking for cleanup delay
-            // For now, just keep them for reward calculation
+            // Remove invalid or inactive objectives
+            ToRemove.Add(Objective);
+        }
+    }
+
+    for (UObjective* Objective : ToRemove)
+    {
+        if (IsValid(Objective))
+        {
+            RemoveObjective(Objective);
+        }
+        else
+        {
+            // Just remove from array if already invalid
+            Objectives.Remove(Objective);
         }
     }
 }

@@ -3,6 +3,7 @@
 #include "Team/TeamTypes.h"
 #include "Team/ObjectiveManager.h"
 #include "Team/Objective.h"
+#include "Team/FollowerAgentComponent.h"
 #include "RL/RLPolicyNetwork.h"
 
 UMCTS::UMCTS()
@@ -175,13 +176,14 @@ float UMCTS::SimulateNode(TSharedPtr<FTeamMCTSNode> Node, const FTeamObservation
             continue;
         }
 
-        // TODO: Extract individual follower observation from TeamObs
-        // For now, use a simplified approach with team-level features
-        FObservationElement FollowerObs;
-        FollowerObs.AgentHealth = TeamObs.AverageTeamHealth;
-        FollowerObs.VisibleEnemyCount = TeamObs.TotalVisibleEnemies;
-        FollowerObs.bHasCover = TeamObs.bHasCoverAdvantage;
-        FollowerObs.NearestCoverDistance = 500.0f;  // Placeholder
+        // Extract individual follower observation from follower component
+        UFollowerAgentComponent* FollowerComponent = Follower->FindComponentByClass<UFollowerAgentComponent>();
+        if (!FollowerComponent)
+        {
+            continue;
+        }
+
+        FObservationElement FollowerObs = FollowerComponent->GetLocalObservation();
 
         // Get PPO critic's value estimate for this follower-objective pair
         float FollowerValue = RLPolicyNetwork->GetStateValue(FollowerObs, Objective);

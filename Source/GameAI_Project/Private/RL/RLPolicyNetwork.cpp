@@ -328,11 +328,19 @@ FTacticalAction URLPolicyNetwork::GetActionWithMask(const FObservationElement& O
 		// Convert to action
 		FTacticalAction Action = NetworkOutputToAction(NetworkOutput);
 
+		UE_LOG(LogTemp, Display, TEXT("✅ [ONNX MODEL] Action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d"),
+			Action.MoveDirection.X, Action.MoveDirection.Y, Action.MoveSpeed,
+			Action.LookDirection.X, Action.LookDirection.Y, Action.bFire);
+
 		// Apply spatial constraints
 		return ApplyMask(Action, Mask);
 	}
 	else
 	{
+		// Diagnostic logging for fallback path
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ [POLICY FALLBACK] bUseONNXModel=%d, ModelInstance.IsValid()=%d"),
+			bUseONNXModel ? 1 : 0, ModelInstance.IsValid() ? 1 : 0);
+
 		// Rule-based fallback
 		FTacticalAction Action = GetActionRuleBased(Observation, CurrentObjective);
 		return ApplyMask(Action, Mask);

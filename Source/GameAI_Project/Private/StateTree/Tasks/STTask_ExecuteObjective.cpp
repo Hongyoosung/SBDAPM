@@ -25,14 +25,32 @@ EStateTreeRunStatus FSTTask_ExecuteObjective::EnterState(FStateTreeExecutionCont
 
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	if (!SharedContext.FollowerComponent || !SharedContext.AIController)
+	// CRITICAL: Only require FollowerComponent (AIController is optional for Schola compatibility)
+	if (!SharedContext.FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteObjective: Missing component/controller"));
+		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteObjective: Missing FollowerComponent"));
 		return EStateTreeRunStatus::Failed;
 	}
 
-	APawn* Pawn = SharedContext.AIController->GetPawn();
-	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
+	if (!Pawn)
+	{
+		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteObjective: Cannot get Pawn"));
+		return EStateTreeRunStatus::Failed;
+	}
+
+	FString PawnName = Pawn->GetName();
 	FString ObjectiveName = SharedContext.CurrentObjective
 		? UEnum::GetValueAsString(SharedContext.CurrentObjective->Type)
 		: TEXT("None");
@@ -111,19 +129,15 @@ void FSTTask_ExecuteObjective::ExecuteAtomicAction(FStateTreeExecutionContext& C
 	// Priority 2: Query local RL policy (inference mode)
 	else if (SharedContext.TacticalPolicy && SharedContext.CurrentObjective)
 	{
+		// Diagnostic: Log why Schola action wasn't used
+		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Display, TEXT("📊 [POLICY MODE] '%s': bScholaActionReceived=%d → Using local RL policy"),
+			*GetNameSafe(Pawn), SharedContext.bScholaActionReceived ? 1 : 0);
 		// Get action with objective context and mask
 		RawAction = SharedContext.TacticalPolicy->GetActionWithMask(
 			SharedContext.CurrentObservation,
 			SharedContext.CurrentObjective,
 			SharedContext.ActionMask);
-
-		// LOG: Action selected by policy
-		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-		UE_LOG(LogTemp, Warning, TEXT("[RL ACTION] '%s': Move=(%.2f,%.2f) Speed=%.2f, Aim=(%.2f,%.2f), Fire=%d"),
-			*GetNameSafe(Pawn),
-			RawAction.MoveDirection.X, RawAction.MoveDirection.Y, RawAction.MoveSpeed,
-			RawAction.LookDirection.X, RawAction.LookDirection.Y,
-			RawAction.bFire ? 1 : 0);
 	}
 	// Priority 3: Fallback to default (zero) action
 	else
@@ -164,6 +178,8 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
+	UE_LOG(LogTemp, Warning, TEXT("asasasasasasasss"));
+
 	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn)
 	{
@@ -173,6 +189,7 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 	// Apply movement direction and speed
 	FVector2D MoveDir = Action.MoveDirection;
 	float MoveSpeed = Action.MoveSpeed;
+
 
 	if (MoveDir.SizeSquared() > 0.01f) // Non-zero movement
 	{
@@ -194,18 +211,30 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 			MovementComp->MaxWalkSpeed = BaseSpeed * MoveSpeed * InstanceData.MovementSpeedMultiplier;
 		}
 
-		// Move using AI controller
+		// Move using AI controller (normal AI) or direct input (Schola)
 		if (SharedContext.AIController)
 		{
+			// Normal AI mode: Use pathfinding
 			SharedContext.AIController->MoveToLocation(TargetLocation, 50.0f);
 			SharedContext.MovementDestination = TargetLocation;
 			SharedContext.bIsMoving = true;
 
-			// LOG: Movement execution
-			UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC] '%s': MoveToLocation(%.1f, %.1f, %.1f), Speed=%.1f"),
+			UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC AI] '%s': MoveToLocation(%.1f, %.1f, %.1f), Speed=%.1f"),
 				*Pawn->GetName(),
 				TargetLocation.X, TargetLocation.Y, TargetLocation.Z,
-				SharedContext.AIController->GetPawn()->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);
+				Pawn->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);
+		}
+		else
+		{
+			// Schola mode: Use direct movement input (no pathfinding)
+			Pawn->AddMovementInput(WorldMoveDir, MoveSpeed);
+			SharedContext.MovementDestination = TargetLocation;
+			SharedContext.bIsMoving = true;
+
+			UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC DIRECT] '%s': AddMovementInput(%.2f, %.2f, %.2f), Speed=%.1f"),
+				*Pawn->GetName(),
+				WorldMoveDir.X, WorldMoveDir.Y, WorldMoveDir.Z,
+				Pawn->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);
 		}
 	}
 	else
@@ -214,8 +243,9 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 		if (SharedContext.AIController)
 		{
 			SharedContext.AIController->StopMovement();
-			SharedContext.bIsMoving = false;
 		}
+		// For Schola: Movement stops naturally when AddMovementInput isn't called
+		SharedContext.bIsMoving = false;
 	}
 }
 
@@ -251,7 +281,19 @@ void FSTTask_ExecuteObjective::ExecuteAiming(FStateTreeExecutionContext& Context
 	else if (SharedContext.PrimaryTarget)
 	{
 		// Default: look at primary target
-		SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
+		if (SharedContext.AIController)
+		{
+			// Normal AI mode: Use SetFocus
+			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
+		}
+		else
+		{
+			// Schola mode: Manually rotate to target
+			FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
+			FVector CurrentLocation = Pawn->GetActorLocation();
+			FRotator LookAtRotation = (TargetLocation - CurrentLocation).Rotation();
+			Pawn->SetActorRotation(FMath::RInterpTo(Pawn->GetActorRotation(), LookAtRotation, DeltaTime, 5.0f));
+		}
 	}
 }
 

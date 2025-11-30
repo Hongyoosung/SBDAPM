@@ -177,12 +177,12 @@ if SCHOLA_AVAILABLE:
                     print("[SafeUnrealVectorEnv] Critical: Failed to create fallback batch.")
                     raise e
 
-    class SBDAPMScholaEnv(gym.Wrapper):
+    class SBDAPMScholaEnv(gym.Env):
         """
         Full Schola-integrated environment (v3.0).
 
-        Wraps Schola's GymVectorEnv and adapts it for RLlib single-env training.
-        Handles None observations/info and flattens vector env to single env.
+        Direct single-agent environment that interfaces with Schola for RLlib training.
+        Handles multi-agent Schola environment but exposes single-agent interface.
         """
 
         def __init__(self, **kwargs):
@@ -191,59 +191,22 @@ if SCHOLA_AVAILABLE:
             port = kwargs.get("port", 50051)
             self.max_episode_steps = kwargs.get("max_episode_steps", 1000)
 
-            # Create Schola connection and wrapped env
+            # Create Schola connection
             connection = UnrealEditorConnection(url=host, port=port)
             # Use SafeUnrealVectorEnv to handle None observations
-            schola_env = SafeUnrealVectorEnv(unreal_connection=connection, verbosity=1)
+            self.schola_env = SafeUnrealVectorEnv(unreal_connection=connection, verbosity=1)
 
-            print(f"[DEBUG] Schola Env Num Envs: {schola_env.num_envs}")
-            print(f"[DEBUG] Schola Env Observation Space Type: {type(schola_env.observation_space)}")
-            print(f"[DEBUG] Schola Env Action Space Type: {type(schola_env.action_space)}")
+            print(f"[DEBUG] Schola Env Num Envs: {self.schola_env.num_envs}")
+            print(f"[DEBUG] Schola Env Observation Space Type: {type(self.schola_env.observation_space)}")
+            print(f"[DEBUG] Schola Env Action Space Type: {type(self.schola_env.action_space)}")
 
             # Inspect action space structure
-            if isinstance(schola_env.action_space, spaces.Dict):
-                print(f"[DEBUG] Action space is Dict with keys: {list(schola_env.action_space.keys())}")
-                first_agent = list(schola_env.action_space.keys())[0]
-                print(f"[DEBUG] Action space for '{first_agent}': {schola_env.action_space[first_agent]}")
-                # Check if nested
-                if isinstance(schola_env.action_space[first_agent], spaces.Dict):
-                    print(f"[DEBUG] Nested Dict detected. Sub-keys: {list(schola_env.action_space[first_agent].keys())}")
-            else:
-                print(f"[DEBUG] Action space: {schola_env.action_space}")
+            if isinstance(self.schola_env.action_space, spaces.Dict):
+                print(f"[DEBUG] Action space is Dict with keys: {list(self.schola_env.action_space.keys())}")
+                first_agent = list(self.schola_env.action_space.keys())[0]
+                print(f"[DEBUG] Action space for '{first_agent}': {self.schola_env.action_space[first_agent]}")
 
-            # Initialize wrapper
-            super().__init__(schola_env)
-
-            self.num_agents = schola_env.num_envs
-
-            # Detect if spaces are Dict (agent ID keys)
-            self.is_obs_dict = isinstance(schola_env.observation_space, spaces.Dict)
-            self.is_action_dict = isinstance(schola_env.action_space, spaces.Dict)
-
-            # Extract agent IDs from Dict spaces
-            self.agent_ids = None
-            self.action_space_structure = None  # Store structure for action formatting
-            if self.is_obs_dict:
-                self.agent_ids = list(schola_env.observation_space.keys())
-                print(f"[SBDAPMScholaEnv] Detected Dict Observation Space. Agent IDs: {self.agent_ids}")
-            if self.is_action_dict:
-                action_agent_ids = list(schola_env.action_space.keys())
-                if not self.agent_ids:
-                    self.agent_ids = action_agent_ids
-                print(f"[SBDAPMScholaEnv] Detected Dict Action Space. Agent IDs: {action_agent_ids}")
-
-            # Store action space structure for each agent
-            if self.is_action_dict and self.agent_ids:
-                first_agent = self.agent_ids[0]
-                self.action_space_structure = schola_env.action_space[first_agent]
-                print(f"[SBDAPMScholaEnv] Action structure per agent: {self.action_space_structure}")
-
-            # Use first agent ID if Dict spaces
-            self.primary_agent_id = self.agent_ids[0] if self.agent_ids else None
-            if self.primary_agent_id:
-                print(f"[SBDAPMScholaEnv] Using primary agent: {self.primary_agent_id}")
-
-            # Override spaces to single-agent (we'll handle the first agent only)
+            # Define our single-agent spaces
             self.observation_space = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
@@ -257,11 +220,14 @@ if SCHOLA_AVAILABLE:
                 dtype=np.float32
             )
 
+            # Agent tracking
+            self.agent_ids = None
+            self.primary_agent_id = None
+            self.action_space_structure = None
             self.episode_steps = 0
 
             print(f"[SBDAPMScholaEnv] Initialized with host={host}, port={port}")
-            print(f"[SBDAPMScholaEnv] Detected {self.num_agents} agents, using first agent only")
-            print(f"[SBDAPMScholaEnv] Type: {type(self).__name__} (Schola GymVectorEnv wrapper)")
+            print(f"[SBDAPMScholaEnv] Type: {type(self).__name__} (Single-agent Schola wrapper)")
 
         def _format_action_for_schola(self, action):
             """
@@ -272,6 +238,10 @@ if SCHOLA_AVAILABLE:
             2. Dict - map flat action to dict keys
             3. Box((8,)) - return as-is
             """
+            # Ensure action is numpy array
+            if not isinstance(action, np.ndarray):
+                action = np.array(action, dtype=np.float32)
+
             # Handle Box space
             if isinstance(self.action_space_structure, spaces.Box):
                 expected_shape = self.action_space_structure.shape
@@ -279,8 +249,7 @@ if SCHOLA_AVAILABLE:
                     # Vector env expecting (N, 8) matrix
                     # Reshape our (8,) action to (N, 8) by repeating rows
                     num_envs = expected_shape[0]
-                    print(f"[SBDAPMScholaEnv] Reshaping action (8,) to ({num_envs}, 8)")
-                    return np.tile(action, (num_envs, 1)).astype(np.float32)
+                    return np.tile(action.reshape(1, -1), (num_envs, 1)).astype(np.float32)
                 elif expected_shape == (8,):
                     # Correct shape
                     return action.astype(np.float32)
@@ -324,7 +293,7 @@ if SCHOLA_AVAILABLE:
             try:
                 print(f"[SBDAPMScholaEnv] Calling Schola reset...")
                 # Get vectorized observations
-                obs_vec, info_vec = self.env.reset(seed=seed, options=options)
+                obs_vec, info_vec = self.schola_env.reset(seed=seed, options=options)
 
                 print(f"[SBDAPMScholaEnv] Reset returned obs type: {type(obs_vec)}")
                 print(f"[SBDAPMScholaEnv] Reset returned info type: {type(info_vec)}")
@@ -333,9 +302,12 @@ if SCHOLA_AVAILABLE:
                 if isinstance(obs_vec, dict):
                     actual_agent_ids = list(obs_vec.keys())
                     if actual_agent_ids != self.agent_ids:
-                        print(f"[SBDAPMScholaEnv] Syncing agent IDs: {len(self.agent_ids)} -> {len(actual_agent_ids)}")
+                        print(f"[SBDAPMScholaEnv] Syncing agent IDs: {self.agent_ids} -> {actual_agent_ids}")
                         self.agent_ids = actual_agent_ids
                         self.primary_agent_id = self.agent_ids[0] if self.agent_ids else None
+                        # Also sync action space structure
+                        if isinstance(self.schola_env.action_space, spaces.Dict) and self.primary_agent_id:
+                            self.action_space_structure = self.schola_env.action_space[self.primary_agent_id]
 
                 # Check if obs_vec is a space class (error case)
                 if isinstance(obs_vec, (spaces.Dict, spaces.Box, spaces.Space)):
@@ -388,9 +360,14 @@ if SCHOLA_AVAILABLE:
             # Validate observation shape
             if hasattr(obs, 'shape') and obs.shape != (78,):
                 print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
-                if obs.size == 78:
+                # Handle 2D observations (batch dimension) - take first observation
+                if len(obs.shape) == 2 and obs.shape[-1] == 78:
+                    print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
+                    obs = obs[0]
+                elif obs.size == 78:
                     obs = obs.reshape(78)
                 else:
+                    print(f"[SBDAPMScholaEnv] Cannot reshape, using zeros. obs.size={obs.size}")
                     obs = np.zeros(78, dtype=np.float32)
             elif not hasattr(obs, 'shape'):
                  obs = np.zeros(78, dtype=np.float32)
@@ -406,38 +383,18 @@ if SCHOLA_AVAILABLE:
 
                 # Format action according to Schola's expected structure
                 formatted_action = self._format_action_for_schola(action)
-                print(f"[SBDAPMScholaEnv] Formatted action type: {type(formatted_action)}")
-                if isinstance(formatted_action, dict):
-                    print(f"[SBDAPMScholaEnv] Formatted action keys: {list(formatted_action.keys())}")
-                    for k, v in formatted_action.items():
-                        print(f"  {k}: {type(v)} {v.shape if hasattr(v, 'shape') else ''}")
 
-                # Handle Dict action space OR if agent_ids detected
-                # (Schola may use Dict internally even if exposed space is Box)
-                if (self.is_action_dict or self.agent_ids) and self.agent_ids:
+                # Handle Dict action space - create action dict with all agent IDs
+                if isinstance(self.schola_env.action_space, spaces.Dict) and self.agent_ids:
                     # Create action dict with all agent IDs using formatted action
-                    if isinstance(formatted_action, dict):
-                        # Nested dict - deep copy for each agent
-                        action_vec = {agent_id: {k: v.copy() if isinstance(v, np.ndarray) else v
-                                                 for k, v in formatted_action.items()}
-                                     for agent_id in self.agent_ids}
-                    else:
-                        # Simple array
-                        action_vec = {agent_id: formatted_action.copy() for agent_id in self.agent_ids}
-                    print(f"[SBDAPMScholaEnv] Action_vec type: dict with {len(action_vec)} agents")
+                    action_vec = {agent_id: formatted_action.copy() if isinstance(formatted_action, np.ndarray)
+                                  else formatted_action for agent_id in self.agent_ids}
                 else:
-                    # Expand action to list of arrays (one per environment)
-                    # Convert to list to ensure Schola handles it correctly
-                    if isinstance(formatted_action, dict):
-                        action_vec = [{k: v.copy() if isinstance(v, np.ndarray) else v
-                                      for k, v in formatted_action.items()}
-                                     for _ in range(self.num_agents)]
-                    else:
-                        action_vec = [formatted_action.copy() for _ in range(self.num_agents)]
-                    print(f"[SBDAPMScholaEnv] Action_vec type: list with {len(action_vec)} actions")
+                    # Fallback: use formatted action directly
+                    action_vec = formatted_action
 
                 # Call vectorized step
-                obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.env.step(action_vec)
+                obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.schola_env.step(action_vec)
 
                 # Extract first agent's data
                 if obs_vec is None:
@@ -509,9 +466,14 @@ if SCHOLA_AVAILABLE:
             # Validate observation shape
             if hasattr(obs, 'shape') and obs.shape != (78,):
                 print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
-                if obs.size == 78:
+                # Handle 2D observations (batch dimension) - take first observation
+                if len(obs.shape) == 2 and obs.shape[-1] == 78:
+                    print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
+                    obs = obs[0]
+                elif obs.size == 78:
                     obs = obs.reshape(78)
                 else:
+                    print(f"[SBDAPMScholaEnv] Cannot reshape, using zeros. obs.size={obs.size}")
                     obs = np.zeros(78, dtype=np.float32)
             elif not hasattr(obs, 'shape'):
                  obs = np.zeros(78, dtype=np.float32)
@@ -520,10 +482,10 @@ if SCHOLA_AVAILABLE:
 
         def render(self):
             """Rendering is handled by UE."""
-            return self.env.render() if hasattr(self.env, 'render') else None
+            return self.schola_env.render() if hasattr(self.schola_env, 'render') else None
 
         def close(self):
             """Close Schola connection."""
-            if hasattr(self.env, 'close'):
-                self.env.close()
+            if hasattr(self.schola_env, 'close'):
+                self.schola_env.close()
 

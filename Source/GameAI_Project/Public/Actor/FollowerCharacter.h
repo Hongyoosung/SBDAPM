@@ -10,6 +10,7 @@
 class UFollowerAgentComponent;
 class UFollowerStateTreeComponent;
 class URLPolicyNetwork;
+class UScholaAgentComponent;
 
 
 /**
@@ -63,4 +64,8 @@ public:
 	/** State Tree component (tactical state management) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Components")
 	UFollowerStateTreeComponent* StateTreeComponent;
+
+	/** Schola agent component (RLlib training bridge) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Components")
+	UScholaAgentComponent* ScholaAgentComponent;
 };

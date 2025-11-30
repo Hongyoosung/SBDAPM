@@ -44,7 +44,7 @@ public:
 
 	/** Enable debug logging */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Actuator")
-	bool bDebugLogging = false;
+	bool bDebugLogging = true;
 
 protected:
 	/** Find follower agent component */

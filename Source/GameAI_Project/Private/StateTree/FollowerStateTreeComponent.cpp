@@ -59,11 +59,11 @@ void UFollowerStateTreeComponent::BeginPlay()
 	// [핵심] 초기화가 끝난 후 마지막에 시작 시도
 	if (CheckRequirementsAndStart())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("✅ StateTree started immediately in BeginPlay!"));
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: StateTree started immediately in BeginPlay!"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("⏳ StateTree waiting for AIController..."));
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: StateTree waiting for AIController..."));
 	}
 
 	// 상태 확인 로그
@@ -71,6 +71,11 @@ void UFollowerStateTreeComponent::BeginPlay()
 	if (Status == EStateTreeRunStatus::Running)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ StateTree successfully started and running!"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ❌ StateTree not running after BeginPlay. Status=%s"),
+			*UEnum::GetValueAsString(Status));
 	}
 }
 void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -114,10 +119,19 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		UpdateContextFromFollower();
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("UFollowerStateTreeComponent: TickComponent for '%s'"), *GetOwner()->GetName());
-
-	if (GetStateTreeRunStatus() != EStateTreeRunStatus::Running)
+	// Check if StateTree needs to be started (check for all non-running states)
+	EStateTreeRunStatus CurrentStatus = GetStateTreeRunStatus();
+	if (CurrentStatus != EStateTreeRunStatus::Running)
 	{
+		// Log status for debugging (only once per 60 ticks to avoid spam)
+		static int32 RetryTickCount = 0;
+		if (RetryTickCount++ % 60 == 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("🔄 Retry starting StateTree for '%s': Status=%s"),
+				*GetOwner()->GetName(),
+				*UEnum::GetValueAsString(CurrentStatus));
+		}
+
 		// 1. FollowerComponent 지연 찾기 (기존 로직 유지)
 		if (!FollowerComponent && bAutoFindFollowerComponent)
 		{
@@ -139,7 +153,7 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	{
 		EStateTreeRunStatus Status = GetStateTreeRunStatus();
 		FString ObjectiveStr = Context.CurrentObjective ? UEnum::GetValueAsString(Context.CurrentObjective->Type) : TEXT("None");
-		UE_LOG(LogTemp, Display, TEXT("[STATE TREE] '%s': Status=%s, Objective=%s, Active=%d"),
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: [STATE TREE] '%s': Status=%s, Objective=%s, Active=%d"),
 			*GetOwner()->GetName(),
 			*UEnum::GetValueAsString(Status),
 			*ObjectiveStr,
@@ -171,19 +185,19 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	);
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerContext")), ContextView))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerContext"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerContext"));
 	}
 
 	// (B) Follower Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerComponent"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerComponent"));
 	}
 
 	// (C) Follower State Tree Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerStateTreeComponent")), FStateTreeDataView(this)))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("❌ Failed to set FollowerStateTreeComponent"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerStateTreeComponent"));
 	}
 
 	// (D) Team Leader (Optional)
@@ -202,7 +216,7 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 
 	if (!bResult && bLogErrors)
 	{
-		UE_LOG(LogTemp, Error, TEXT("❌ Parent SetContextRequirements FAILED. Missing Pawn or AIController?"));
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Parent SetContextRequirements FAILED. Missing Pawn or AIController?"));
 	}
 
 	return bResult;
@@ -379,7 +393,16 @@ bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionC
             }
             else
             {
-                UE_LOG(LogTemp, Error, TEXT("  ❌ [%d] AIController REQUIRED but NULL"), Index);
+                // For Schola training: AIController might be NULL (Trainer controller instead)
+                // Only error if it's REQUIRED, otherwise just warn
+                if (Desc.Requirement == EStateTreeExternalDataRequirement::Required)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("  ❌ [%d] AIController REQUIRED but NULL (Schola Trainer may be in use)"), Index);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("  ⚠️ [%d] AIController optional and NULL (Schola Trainer may be in use)"), Index);
+                }
             }
         }
         else if (Desc.Struct && Desc.Struct->IsChildOf(APawn::StaticClass()))
@@ -598,43 +621,86 @@ void UFollowerStateTreeComponent::OnFollowerRespawned()
 
 bool UFollowerStateTreeComponent::CheckRequirementsAndStart()
 {
+	AActor* Owner = GetOwner();
+	FString OwnerName = Owner ? Owner->GetName() : TEXT("NULL_OWNER");
+
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent:🔍 CheckRequirementsAndStart() CALLED for '%s'"), *OwnerName);
+
 	// 이미 실행 중이면 패스
 	if (IsStateTreeRunning())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("✅ StateTree already running for '%s'"), 
-			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:✅ StateTree already running for '%s'"), *OwnerName);
 		return true;
 	}
 
 	// 1. 필수 컴포넌트 확인
 	if (!FollowerComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("⏳ Cannot start StateTree: FollowerComponent not found for '%s'"),
-			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:⏳ FollowerComponent = NULL for '%s'"), *OwnerName);
 		return false;
 	}
+	UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:✅ FollowerComponent found"));
 
-	// 2. AIController 확인 (가장 중요한 부분!)
-	// Context에 캐싱된 것이 없으면 다시 찾아봄
+	// 2. Controller 확인 (Schola Trainer 또는 AIController)
+	// Schola의 AAbstractTrainer는 AController를 상속하지만 AAIController는 아님
+	// StateTree 실행을 위해 어떤 컨트롤러든 허용
 	if (!Context.AIController)
 	{
-		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+		APawn* OwnerPawn = Cast<APawn>(Owner);
+		if (OwnerPawn)
 		{
-			Context.AIController = Cast<AAIController>(OwnerPawn->GetController());
+			AController* Controller = OwnerPawn->GetController();
+
+			// Try to cast to AIController first (for normal AI)
+			Context.AIController = Cast<AAIController>(Controller);
+
+			// If not an AIController but we have ANY controller (e.g., Schola Trainer),
+			// we can still proceed - just log the type
+			if (!Context.AIController && Controller)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:⚠️ Controller is NOT AAIController (it's %s: %s)"),
+					*Controller->GetClass()->GetName(),
+					*Controller->GetName());
+				UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:ℹ️ This is OK for Schola training - StateTree will start anyway"));
+
+				// For Schola compatibility: Store the base controller
+				// We'll skip AIController-specific features but StateTree can still run
+			}
+			else if (Context.AIController)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:✅ AIController found: %s"),
+					*Context.AIController->GetName());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:⏳ No controller at all yet"));
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:❌ Owner is NOT a Pawn (it's %s)"),
+				Owner ? *Owner->GetClass()->GetName() : TEXT("NULL"));
 		}
 	}
 
-	// 컨트롤러가 아직도 없으면 시작 불가
-	if (!Context.AIController)
+	// For Schola: Allow starting even without AIController if we have ANY controller
+	APawn* OwnerPawn = Cast<APawn>(Owner);
+	bool bHasAnyController = OwnerPawn && OwnerPawn->GetController() != nullptr;
+
+	if (!Context.AIController && !bHasAnyController)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("⏳ Cannot start StateTree: AIController not found for '%s'"),
-			GetOwner() ? *GetOwner()->GetName() : TEXT("Unknown"));
+		UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:⏳ No controller for '%s' - WAITING"), *OwnerName);
 		return false;
 	}
 
 	// 3. 모든 조건 만족 시 시작
-	UE_LOG(LogTemp, Warning, TEXT("🚀 All requirements met. Starting StateTree Logic..."));
+	UE_LOG(LogTemp, Warning, TEXT("  UFollowerStateTreeComponent:🚀 All requirements met! Calling StartLogic()..."));
 	StartLogic();
 
-	return IsStateTreeRunning();
+	bool InbIsRunning = IsStateTreeRunning();
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent:  %s StateTree is now %s"),
+		InbIsRunning ? TEXT("✅") : TEXT("❌"),
+		InbIsRunning ? TEXT("RUNNING") : TEXT("STILL NOT RUNNING"));
+
+	return InbIsRunning;
 }
