@@ -1,10 +1,10 @@
 """
-SBDAPM Environment Wrapper for Schola/RLlib Training (v3.0)
+SBDAPM Environment Wrapper for Schola/RLlib Training (v3.1 Multi-Agent)
 
-Wraps the Unreal Engine environment via Schola gRPC for RLlib compatibility.
+Multi-agent environment for 4 follower agents with shared PPO policy.
 
-Observation: 78 features (71 FObservationElement + 7 current objective embedding)
-Action: 8-dimensional Box (continuous, flattened)
+Observation: 78 features per agent (71 FObservationElement + 7 current objective embedding)
+Action: 8-dimensional Box per agent (continuous, flattened)
   - [0-1]: MoveDirection (continuous): [-1, 1] x [-1, 1]
   - [2]:   MoveSpeed (continuous): [0, 1]
   - [3-4]: LookDirection (continuous): [-1, 1] x [-1, 1]
@@ -15,6 +15,17 @@ Action: 8-dimensional Box (continuous, flattened)
 
 from gymnasium import spaces
 import numpy as np
+
+# RLlib multi-agent support
+try:
+    from ray.rllib.env.multi_agent_env import MultiAgentEnv
+    RLLIB_AVAILABLE = True
+except ImportError:
+    RLLIB_AVAILABLE = False
+    print("Warning: ray[rllib] not installed")
+    # Fallback for non-RLlib usage
+    class MultiAgentEnv:
+        pass
 
 try:
     from schola.gym.env import GymEnv as UnrealEnv
@@ -71,7 +82,7 @@ class SBDAPMEnv:
 
         # Episode tracking
         self.episode_steps = 0
-        self.max_episode_steps = 1000
+        self.max_episode_steps = 100000  # Very high limit - let UE control episode ending (2min or team elimination)
         self.total_reward = 0.0
 
         # Internal connection (will be set by Schola)
@@ -189,7 +200,7 @@ if SCHOLA_AVAILABLE:
             # Extract configuration
             host = kwargs.get("host", "localhost")
             port = kwargs.get("port", 50051)
-            self.max_episode_steps = kwargs.get("max_episode_steps", 1000)
+            self.max_episode_steps = kwargs.get("max_episode_steps", 100000)  # Very high - let UE control episode ending
 
             # Create Schola connection
             connection = UnrealEditorConnection(url=host, port=port)
@@ -362,7 +373,7 @@ if SCHOLA_AVAILABLE:
                 print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
                 # Handle 2D observations (batch dimension) - take first observation
                 if len(obs.shape) == 2 and obs.shape[-1] == 78:
-                    print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
+                    # print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
                     obs = obs[0]
                 elif obs.size == 78:
                     obs = obs.reshape(78)
@@ -465,10 +476,10 @@ if SCHOLA_AVAILABLE:
 
             # Validate observation shape
             if hasattr(obs, 'shape') and obs.shape != (78,):
-                print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
+                # print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
                 # Handle 2D observations (batch dimension) - take first observation
                 if len(obs.shape) == 2 and obs.shape[-1] == 78:
-                    print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
+                    # print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
                     obs = obs[0]
                 elif obs.size == 78:
                     obs = obs.reshape(78)
@@ -489,3 +500,358 @@ if SCHOLA_AVAILABLE:
             if hasattr(self.schola_env, 'close'):
                 self.schola_env.close()
 
+
+    class SBDAPMMultiAgentEnv(MultiAgentEnv):
+        """
+        Multi-Agent RLlib Environment for SBDAPM (v3.1)
+
+        Proper multi-agent environment where each of the 4 follower agents:
+        - Receives independent observations
+        - Executes independent actions (from shared policy)
+        - Collects independent rewards
+
+        This fixes the bug where all agents were receiving identical actions.
+        """
+
+        def __init__(self, **kwargs):
+            super().__init__()
+            
+            # Extract configuration
+            host = kwargs.get("host", "localhost")
+            port = kwargs.get("port", 50051)
+            self.max_episode_steps = kwargs.get("max_episode_steps", 100000)
+
+            # Create Schola connection
+            from schola.core.unreal_connections.editor_connection import UnrealEditorConnection
+            connection = UnrealEditorConnection(url=host, port=port)
+            self.schola_env = SafeUnrealVectorEnv(unreal_connection=connection, verbosity=1)
+
+            # Define per-agent spaces
+            self._obs_space = spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(78,),
+                dtype=np.float32
+            )
+            self._action_space = spaces.Box(
+                low=np.array([-1.0, -1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+                shape=(8,),
+                dtype=np.float32
+            )
+
+            # Agent tracking
+            self._agent_ids = set()
+            self._agent_id_list = []  # Ordered list for consistent action ordering
+            self.episode_steps = 0
+
+            print(f"[SBDAPMMultiAgentEnv] Initialized (host={host}, port={port})")
+            print(f"[DEBUG] Schola action_space type: {type(self.schola_env.action_space)}")
+            print(f"[DEBUG] Schola observation_space type: {type(self.schola_env.observation_space)}")
+            
+            # Check if Schola has id_manager
+            if hasattr(self.schola_env, 'id_manager'):
+                print(f"[DEBUG] Schola has id_manager with {len(self.schola_env.id_manager.id_list)} agents")
+                print(f"[DEBUG] Schola id_list: {self.schola_env.id_manager.id_list[:10]}")  # First 10
+
+
+
+        @property
+        def observation_space(self):
+            """Return observation space for a single agent."""
+            return self._obs_space
+
+        @property
+        def action_space(self):
+            """Return action space for a single agent."""
+            return self._action_space
+
+        def reset(self, *, seed=None, options=None):
+            """
+            Reset environment for all agents.
+
+            Returns:
+                obs_dict: {agent_id: observation} for all agents
+                info_dict: {agent_id: info} for all agents
+            """
+            self.episode_steps = 0
+
+            try:
+                # Get observations from Schola (dict with agent IDs as keys)
+                obs_vec, info_vec = self.schola_env.reset(seed=seed, options=options)
+
+                # Extract agent IDs from observations
+                if isinstance(obs_vec, dict):
+                    raw_agent_ids = set(obs_vec.keys())
+                    print(f"[SBDAPMMultiAgentEnv] Raw agents detected: {sorted(list(raw_agent_ids))}")
+                    
+                    # Filter out CDO (Class Default Object) and other invalid entries
+                    # CDO usually has the class name without numeric suffix, or "Default"
+                    filtered_agent_ids = {
+                        aid for aid in raw_agent_ids 
+                        if "ScholaAgentComponent" != aid  # Exact match for CDO
+                        and "Default" not in aid
+                        and "Archetype" not in aid
+                    }
+                    
+                    # Sort to ensure deterministic selection
+                    sorted_agent_ids = sorted(list(filtered_agent_ids))
+                    
+                    # Limit to the number of agents Schola expects (from id_manager)
+                    if hasattr(self.schola_env, 'id_manager'):
+                        expected_count = len(self.schola_env.id_manager.id_list)
+                        if len(sorted_agent_ids) > expected_count:
+                            print(f"[SBDAPMMultiAgentEnv] Warning: Found {len(sorted_agent_ids)} valid-looking agents, but Schola expects {expected_count}.")
+                            print(f"[SBDAPMMultiAgentEnv] Truncating list to match expected count.")
+                            # We take the first N agents. This assumes the extra ones are extraneous/ghosts.
+                            sorted_agent_ids = sorted_agent_ids[:expected_count]
+                    
+                    self._agent_ids = set(sorted_agent_ids)
+                    self._agent_id_list = sorted_agent_ids
+                    
+                    print(f"[SBDAPMMultiAgentEnv] Reset: {len(self._agent_ids)} active agents: {self._agent_id_list}")
+
+                    # Validate and reshape observations
+                    obs_dict = {}
+                    for agent_id in self._agent_ids:
+                        if agent_id not in obs_vec:
+                             print(f"[SBDAPMMultiAgentEnv] Error: Agent {agent_id} missing from obs_vec!")
+                             obs_dict[agent_id] = np.zeros(78, dtype=np.float32)
+                             continue
+
+                        obs = obs_vec[agent_id]
+                        # Handle batched observations (N, 78) -> take first
+                        if hasattr(obs, 'shape') and len(obs.shape) == 2 and obs.shape[-1] == 78:
+                            obs = obs[0]
+                        elif hasattr(obs, 'shape') and obs.shape != (78,):
+                            print(f"[SBDAPMMultiAgentEnv] Warning: Agent {agent_id} obs shape {obs.shape}, using zeros")
+                            obs = np.zeros(78, dtype=np.float32)
+                        obs_dict[agent_id] = obs.astype(np.float32)
+
+                    # Extract info
+                    info_dict = {}
+                    if isinstance(info_vec, dict):
+                        for agent_id in self._agent_ids:
+                            info_dict[agent_id] = info_vec.get(agent_id, {})
+                    else:
+                        info_dict = {agent_id: {} for agent_id in self._agent_ids}
+
+                    return obs_dict, info_dict
+
+                else:
+                    print(f"[SBDAPMMultiAgentEnv] ERROR: Expected dict observations, got {type(obs_vec)}")
+                    # Fallback: create dummy agents
+                    self._agent_ids = {f"agent_{i}" for i in range(4)}
+                    obs_dict = {agent_id: np.zeros(78, dtype=np.float32) for agent_id in self._agent_ids}
+                    info_dict = {agent_id: {} for agent_id in self._agent_ids}
+                    return obs_dict, info_dict
+
+            except Exception as e:
+                print(f"[SBDAPMMultiAgentEnv] Error during reset: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return empty dicts
+                return {}, {}
+
+        def step(self, action_dict):
+            """
+            Execute actions for all agents.
+
+            Args:
+                action_dict: {agent_id: action} where action is (8,) numpy array
+
+            Returns:
+                obs_dict: {agent_id: observation}
+                reward_dict: {agent_id: reward}
+                terminated_dict: {agent_id: terminated}
+                truncated_dict: {agent_id: truncated}
+                info_dict: {agent_id: info}
+            """
+            try:
+                # Validate action_dict has all agents
+                if not isinstance(action_dict, dict):
+                    print(f"[SBDAPMMultiAgentEnv] ERROR: Expected action dict, got {type(action_dict)}")
+                    action_dict = {agent_id: np.zeros(8, dtype=np.float32) for agent_id in self._agent_ids}
+
+                # Debug: Check what RLlib sent vs what we expect
+                received_agents = set(action_dict.keys())
+                expected_agents = self._agent_ids
+                missing_agents = expected_agents - received_agents
+                extra_agents = received_agents - expected_agents
+                
+                if missing_agents:
+                    print(f"[SBDAPMMultiAgentEnv] Warning: RLlib didn't send actions for {len(missing_agents)} agents: {list(missing_agents)[:3]}")
+                if extra_agents:
+                    print(f"[SBDAPMMultiAgentEnv] Warning: RLlib sent actions for {len(extra_agents)} unknown agents: {list(extra_agents)[:3]}")
+
+                # CRITICAL FIX: Schola's GymVectorEnv.unbatch_actions() expects actions
+                # in the SAME FORMAT as observations are returned - a batched dict/array
+                # that can be iterated using gym.experimental.vector.utils.iterate()
+                #
+                # The unbatch_actions method converts this to nested dict format using:
+                #   it = gym.experimental.vector.utils.iterate(self.action_space, actions)
+                #   return self.id_manager.nest_id_list([value for value in it])
+                #
+                # This means we need to pass actions in the batched format that matches
+                # self.schola_env.action_space (the batched version, not single_action_space)
+                
+                # Convert RLlib's action_dict {agent_id: action} to Schola's expected format
+                # Schola uses integer flat IDs (0, 1, 2, 3...) internally via id_manager
+                
+                # Build a mapping from agent_id (string) to flat_id (int)
+                if not hasattr(self, '_agent_id_to_flat_id'):
+                    # Create mapping on first step
+                    self._agent_id_to_flat_id = {}
+                    if hasattr(self.schola_env, 'id_manager'):
+                        # Map each agent_id to its flat ID in Schola's id_manager
+                        print(f"[DEBUG] Creating agent_id to flat_id mapping...")
+                        for flat_id, (env_id, agent_id_int) in enumerate(self.schola_env.id_manager.id_list):
+                            # Try to find matching agent_id in our _agent_ids
+                            # Schola uses integer agent IDs internally, but exposes string IDs in obs dict
+                            # We need to match by position/index
+                            if flat_id < len(self._agent_id_list):
+                                agent_id_str = self._agent_id_list[flat_id]
+                                self._agent_id_to_flat_id[agent_id_str] = flat_id
+                                print(f"[DEBUG]   {agent_id_str} -> flat_id {flat_id}")
+                
+                # Create action array/dict in Schola's expected batched format
+                # The format depends on self.schola_env.action_space structure
+                if isinstance(self.schola_env.action_space, spaces.Dict):
+                    # Batched Dict space: {key: array(num_envs, ...)} for each action component
+                    # Convert our per-agent actions to batched format
+                    formatted_actions = {}
+
+                    # Get action space keys from Schola
+                    schola_action_keys = list(self.schola_env.single_action_space.keys())
+
+                    # Determine batch size (num_envs)
+                    batch_size = self.schola_env.num_envs
+
+                    # Initialize batched arrays for ALL Schola keys (including CDO and extras)
+                    for key in schola_action_keys:
+                        key_space = self.schola_env.single_action_space[key]
+                        if isinstance(key_space, spaces.Box):
+                            shape = (batch_size,) + key_space.shape
+                            formatted_actions[key] = np.zeros(shape, dtype=np.float32)
+
+                    # Fill in actions ONLY for our active agents using flat_id mapping
+                    for agent_id in self._agent_ids:
+                        action = action_dict.get(agent_id, np.zeros(8, dtype=np.float32))
+                        if not isinstance(action, np.ndarray):
+                            action = np.array(action, dtype=np.float32)
+
+                        # Get flat_id for this agent
+                        flat_id = self._agent_id_to_flat_id.get(agent_id, 0)
+
+                        # Assign action to the correct position
+                        if agent_id in formatted_actions and flat_id < batch_size:
+                            formatted_actions[agent_id][flat_id] = action
+                        else:
+                            print(f"[WARNING] Agent {agent_id} not found in action space or flat_id {flat_id} >= batch_size {batch_size}")
+                else:
+                    # Batched Box space: array(N, action_dim)
+                    # Create ordered array using flat IDs
+                    num_agents = len(self._agent_ids)
+                    action_dim = 8
+                    formatted_actions = np.zeros((num_agents, action_dim), dtype=np.float32)
+                    
+                    for agent_id in self._agent_ids:
+                        action = action_dict.get(agent_id, np.zeros(8, dtype=np.float32))
+                        if not isinstance(action, np.ndarray):
+                            action = np.array(action, dtype=np.float32)
+                        
+                        # Get flat_id for this agent
+                        flat_id = self._agent_id_to_flat_id.get(agent_id, 0)
+                        formatted_actions[flat_id] = action.astype(np.float32)
+                
+                print(f"[DEBUG] Calling Schola step with formatted_actions type: {type(formatted_actions)}")
+                if isinstance(formatted_actions, dict):
+                    print(f"[DEBUG] formatted_actions keys: {list(formatted_actions.keys())}")
+                    for key, val in formatted_actions.items():
+                        # Print shape and check for non-zero actions
+                        if list(formatted_actions.keys()).index(key) < 6:  # Show first 6 agents
+                            non_zero_count = np.count_nonzero(val) if hasattr(val, 'shape') else 0
+                            print(f"[DEBUG] {key}: shape {val.shape if hasattr(val, 'shape') else 'N/A'}, non-zero: {non_zero_count}")
+                elif isinstance(formatted_actions, np.ndarray):
+                    print(f"[DEBUG] formatted_actions array shape: {formatted_actions.shape}")
+                
+                obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.schola_env.step(formatted_actions)
+
+
+
+                # Process observations
+                obs_dict = {}
+                if isinstance(obs_vec, dict):
+                    for agent_id in self._agent_ids:
+                        obs = obs_vec.get(agent_id, np.zeros(78, dtype=np.float32))
+                        # Handle batched observations
+                        if hasattr(obs, 'shape') and len(obs.shape) == 2 and obs.shape[-1] == 78:
+                            obs = obs[0]
+                        elif hasattr(obs, 'shape') and obs.shape != (78,):
+                            obs = np.zeros(78, dtype=np.float32)
+                        obs_dict[agent_id] = obs.astype(np.float32)
+                else:
+                    obs_dict = {agent_id: np.zeros(78, dtype=np.float32) for agent_id in self._agent_ids}
+
+                # Process rewards
+                reward_dict = {}
+                if isinstance(reward_vec, dict):
+                    reward_dict = {agent_id: float(reward_vec.get(agent_id, 0.0)) for agent_id in self._agent_ids}
+                else:
+                    reward_dict = {agent_id: 0.0 for agent_id in self._agent_ids}
+
+                # Process terminated
+                terminated_dict = {}
+                if isinstance(terminated_vec, dict):
+                    terminated_dict = {agent_id: bool(terminated_vec.get(agent_id, False)) for agent_id in self._agent_ids}
+                else:
+                    terminated_dict = {agent_id: False for agent_id in self._agent_ids}
+
+                # Process truncated
+                truncated_dict = {}
+                if isinstance(truncated_vec, dict):
+                    truncated_dict = {agent_id: bool(truncated_vec.get(agent_id, False)) for agent_id in self._agent_ids}
+                else:
+                    truncated_dict = {agent_id: False for agent_id in self._agent_ids}
+
+                # Process info
+                info_dict = {}
+                if isinstance(info_vec, dict):
+                    info_dict = {agent_id: info_vec.get(agent_id, {}) for agent_id in self._agent_ids}
+                else:
+                    info_dict = {agent_id: {} for agent_id in self._agent_ids}
+
+                self.episode_steps += 1
+
+                # Enforce max episode length
+                if self.episode_steps >= self.max_episode_steps:
+                    truncated_dict = {agent_id: True for agent_id in self._agent_ids}
+
+                # RLlib expects "__all__" key for global termination
+                terminated_dict["__all__"] = all(terminated_dict.values())
+                truncated_dict["__all__"] = all(truncated_dict.values())
+
+                return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
+
+            except Exception as e:
+                print(f"[SBDAPMMultiAgentEnv] Error during step: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return error state
+                obs_dict = {agent_id: np.zeros(78, dtype=np.float32) for agent_id in self._agent_ids}
+                reward_dict = {agent_id: 0.0 for agent_id in self._agent_ids}
+                terminated_dict = {agent_id: True for agent_id in self._agent_ids}
+                terminated_dict["__all__"] = True
+                truncated_dict = {agent_id: False for agent_id in self._agent_ids}
+                truncated_dict["__all__"] = False
+                info_dict = {agent_id: {} for agent_id in self._agent_ids}
+                return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
+
+        def render(self):
+            """Rendering is handled by UE."""
+            return self.schola_env.render() if hasattr(self.schola_env, 'render') else None
+
+        def close(self):
+            """Close Schola connection."""
+            if hasattr(self.schola_env, 'close'):
+                self.schola_env.close()

@@ -373,11 +373,11 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FFollowerStateTreeContext
 		float Distance = FVector::Dist(StartLocation, TargetLocation);
 		SharedContext.CurrentObservation.DistanceToNearestEnemy = Distance;
 
-		UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': Checking LOS to target '%s' at distance %.1f cm"),
+		/*UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': Checking LOS to target '%s' at distance %.1f cm"),
 			*ControlledPawn->GetName(), *SharedContext.PrimaryTarget->GetName(), Distance);
 		UE_LOG(LogTemp, Display, TEXT("  → Start: (%.1f, %.1f, %.1f), Target: (%.1f, %.1f, %.1f)"),
 			StartLocation.X, StartLocation.Y, StartLocation.Z,
-			TargetLocation.X, TargetLocation.Y, TargetLocation.Z);
+			TargetLocation.X, TargetLocation.Y, TargetLocation.Z);*/
 
 		// Check line of sight
 		FHitResult HitResult;
@@ -416,12 +416,12 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FFollowerStateTreeContext
 		// Has LOS if hit the target or no blocking hit
 		SharedContext.bHasLOS = !bHit || HitResult.GetActor() == SharedContext.PrimaryTarget;
 
-		UE_LOG(LogTemp, Warning, TEXT("[UPDATE COMBAT] '%s': bHasLOS = %d (bHit=%d, HitActor='%s', Target='%s')"),
+		/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE COMBAT] '%s': bHasLOS = %d (bHit=%d, HitActor='%s', Target='%s')"),
 			*ControlledPawn->GetName(),
 			SharedContext.bHasLOS ? 1 : 0,
 			bHit ? 1 : 0,
 			*GetNameSafe(HitResult.GetActor()),
-			*SharedContext.PrimaryTarget->GetName());
+			*SharedContext.PrimaryTarget->GetName());*/
 
 		// Debug: Log what blocked LOS
 		if (bHit && HitResult.GetActor() != SharedContext.PrimaryTarget)

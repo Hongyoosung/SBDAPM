@@ -88,19 +88,27 @@ def create_env_config():
     }
 
 
+
 def create_ppo_config():
-    """Create RLlib PPO configuration."""
+    """Create RLlib PPO configuration for multi-agent training."""
     config = (
         PPOConfig()
         .environment(
             env="sbdapm_env",
             env_config=create_env_config(),
-            disable_env_checking=True,  # Disable env wrapper inspection (avoids GymEnv assertion)
+            disable_env_checking=True,  # Disable env wrapper inspection
         )
         .framework("torch")
         .env_runners(
             num_env_runners=SBDAPMConfig.NUM_WORKERS,
             num_envs_per_env_runner=SBDAPMConfig.NUM_ENVS_PER_WORKER,
+        )
+        .multi_agent(
+            # All agents share one policy (parameter sharing)
+            policies={"shared_policy"},
+            policy_mapping_fn=lambda agent_id, episode, worker, **kwargs: "shared_policy",
+            # Count rewards per agent
+            count_steps_by="agent_steps",
         )
         .debugging(log_level="INFO")
     )
@@ -124,15 +132,18 @@ def create_ppo_config():
     return config
 
 
+
+
+
 def register_env():
     """Register custom environment with Ray."""
     from ray.tune.registry import register_env
 
     if SCHOLA_AVAILABLE:
-        # Use Schola's UnrealEnv with our configuration
+        # Use multi-agent Schola environment (v3.1)
         def env_creator(config):
-            from sbdapm_env import SBDAPMScholaEnv
-            return SBDAPMScholaEnv(**config)
+            from sbdapm_env import SBDAPMMultiAgentEnv
+            return SBDAPMMultiAgentEnv(**config)
     else:
         # Fallback to dummy env for testing
         def env_creator(config):
@@ -140,6 +151,7 @@ def register_env():
             return SBDAPMEnv(**config)
 
     register_env("sbdapm_env", env_creator)
+
 
 
 def export_onnx(algo, output_dir):
@@ -244,19 +256,31 @@ def train(args):
     print(f"\nOutput directory: {output_dir}")
     print(f"Training for {args.iterations} iterations\n")
 
+
     # Training loop
     best_reward = float("-inf")
+    total_ue_episodes = 0  # Track UE episodes for sync logging
 
     for i in range(args.iterations):
         result = algo.train()
 
-        # Extract metrics
+        # Extract metrics (multi-agent aware)
         episode_reward_mean = result.get("episode_reward_mean", 0)
         episode_len_mean = result.get("episode_len_mean", 0)
+        episodes_this_iter = result.get("episodes_this_iter", 0)
+        
+        # Track UE episodes
+        total_ue_episodes += episodes_this_iter
 
-        print(f"Iteration {i+1:4d}: "
+        # Multi-agent specific metrics
+        num_agent_steps = result.get("num_agent_steps_sampled", 0)
+        num_env_steps = result.get("num_env_steps_sampled", 0)
+
+        print(f"Iteration {i+1:4d} (UE Episodes: ~{total_ue_episodes}): "
               f"reward={episode_reward_mean:8.2f}, "
-              f"len={episode_len_mean:6.1f}")
+              f"len={episode_len_mean:6.1f}, "
+              f"agent_steps={num_agent_steps}, "
+              f"env_steps={num_env_steps}")
 
         # Save checkpoint
         if (i + 1) % args.checkpoint_freq == 0:
@@ -268,6 +292,7 @@ def train(args):
             best_reward = episode_reward_mean
             best_checkpoint = algo.save(os.path.join(output_dir, "best"))
             print(f"  New best! reward={best_reward:.2f}")
+
 
     # Final save
     print("\n" + "=" * 60)

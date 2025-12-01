@@ -87,12 +87,12 @@ void UTacticalActuator::TakeAction(const FBoxPoint& Action)
 
 	// Debug logging (ALWAYS log to diagnose integration)
 	AActor* Owner = GetTypedOuter<AActor>();
-	UE_LOG(LogTemp, Warning, TEXT("🎮 [SCHOLA ACTUATOR] '%s': Received action from Python → Move=(%.2f,%.2f) Speed=%.2f, Flag=TRUE"),
+	/*UE_LOG(LogTemp, Warning, TEXT("🎮 [SCHOLA ACTUATOR] '%s': Received action from Python → Move=(%.2f,%.2f) Speed=%.2f, Flag=TRUE"),
 		*GetNameSafe(Owner),
 		ParsedAction.MoveDirection.X, ParsedAction.MoveDirection.Y, ParsedAction.MoveSpeed);
 
 	UE_LOG(LogTemp, Warning, TEXT("    → SharedContext.bScholaActionReceived = %d (should be TRUE)"),
-		SharedContext.bScholaActionReceived ? 1 : 0);
+		SharedContext.bScholaActionReceived ? 1 : 0);*/
 }
 
 void UTacticalActuator::InitializeActuator()

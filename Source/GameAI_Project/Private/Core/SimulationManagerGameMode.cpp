@@ -40,6 +40,16 @@ void ASimulationManagerGameMode::Tick(float DeltaTime)
 			CheckEpisodeTermination();
 		}
 
+		// Check for max duration termination (2 minutes by default)
+		if (MaxEpisodeDuration > 0.0f)
+		{
+			float EpisodeElapsed = GetWorld()->GetTimeSeconds() - EpisodeStartTime;
+			if (EpisodeElapsed >= MaxEpisodeDuration)
+			{
+				CheckEpisodeTermination();
+			}
+		}
+
 		UpdateStatistics();
 
 		// Episode termination is now event-driven via OnAgentDied()
@@ -559,6 +569,19 @@ void ASimulationManagerGameMode::CheckEpisodeTermination()
 			CurrentEpisode, MaxStepsPerEpisode);
 		EndEpisode(-1, -1); // Draw
 		return;
+	}
+
+	// Check max duration (2 minutes by default)
+	if (MaxEpisodeDuration > 0.0f)
+	{
+		float EpisodeElapsed = GetWorld()->GetTimeSeconds() - EpisodeStartTime;
+		if (EpisodeElapsed >= MaxEpisodeDuration)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Episode %d - Max duration reached (%.1fs)"),
+				CurrentEpisode, EpisodeElapsed);
+			EndEpisode(-1, -1); // Draw (timeout)
+			return;
+		}
 	}
 
 	// Check for team elimination

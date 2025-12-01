@@ -444,6 +444,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
 	int32 MaxStepsPerEpisode = 0;
 
+	/** Max episode duration in seconds (0 = unlimited, default = 120s for 2 minutes) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
+	float MaxEpisodeDuration = 120.0f;
+
 	/** Win reward for episode victory */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Simulation|Episode")
 	float WinReward = 100.0f;
