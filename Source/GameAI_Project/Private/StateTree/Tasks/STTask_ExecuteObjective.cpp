@@ -286,6 +286,8 @@ void FSTTask_ExecuteObjective::ExecuteAiming(FStateTreeExecutionContext& Context
 	// Convert 2D look direction to rotation
 	FVector2D LookDir = Action.LookDirection;
 
+	// RL-ONLY AIMING: No fallback to auto-targeting
+	// Agent must learn to aim via LookDirection output
 	if (LookDir.SizeSquared() > 0.01f)
 	{
 		// LookDir.X = Yaw [-1,1], LookDir.Y = Pitch [-1,1]
@@ -301,23 +303,8 @@ void FSTTask_ExecuteObjective::ExecuteAiming(FStateTreeExecutionContext& Context
 
 		Pawn->SetActorRotation(NewRotation);
 	}
-	else if (SharedContext.PrimaryTarget)
-	{
-		// Default: look at primary target
-		if (SharedContext.AIController)
-		{
-			// Normal AI mode: Use SetFocus
-			SharedContext.AIController->SetFocus(SharedContext.PrimaryTarget);
-		}
-		else
-		{
-			// Schola mode: Manually rotate to target
-			FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
-			FVector CurrentLocation = Pawn->GetActorLocation();
-			FRotator LookAtRotation = (TargetLocation - CurrentLocation).Rotation();
-			Pawn->SetActorRotation(FMath::RInterpTo(Pawn->GetActorRotation(), LookAtRotation, DeltaTime, 5.0f));
-		}
-	}
+	// REMOVED: Auto-aiming at PrimaryTarget when LookDir is zero
+	// This was rule-based assistance that prevented true RL learning
 }
 
 void FSTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context, const FTacticalAction& Action) const
@@ -361,30 +348,26 @@ void FSTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context, 
 		return;
 	}
 
-	// Log current state
-	UE_LOG(LogTemp, Display, TEXT("[EXEC FIRE] '%s': Fire action requested"), *Pawn->GetName());
-	UE_LOG(LogTemp, Display, TEXT("  → PrimaryTarget: '%s'"), *GetNameSafe(SharedContext.PrimaryTarget));
-	UE_LOG(LogTemp, Display, TEXT("  → bHasLOS: %d"), SharedContext.bHasLOS ? 1 : 0);
-	UE_LOG(LogTemp, Display, TEXT("  → Distance: %.1f cm"), SharedContext.DistanceToPrimaryTarget);
+	// RL-ONLY FIRING: Fire in current facing direction
+	// No target validation, no LOS checks, no auto-aiming
+	// Agent must learn to aim before firing for effectiveness
+	FVector FireDirection = Pawn->GetActorForwardVector();
+	bool bFired = WeaponComp->FireInDirection(FireDirection);
 
-	// Fire at primary target if available and in LOS
-	if (SharedContext.PrimaryTarget && SharedContext.bHasLOS)
+	if (bFired)
 	{
-		WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
-
-		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ✅ '%s': FIRING at '%s' (Distance: %.1f cm)"),
-			*Pawn->GetName(), *SharedContext.PrimaryTarget->GetName(), SharedContext.DistanceToPrimaryTarget);
+		UE_LOG(LogTemp, Display, TEXT("[EXEC FIRE] ✅ '%s': FIRING in direction (%.2f, %.2f, %.2f)"),
+			*Pawn->GetName(), FireDirection.X, FireDirection.Y, FireDirection.Z);
 	}
-	else if (!SharedContext.PrimaryTarget)
+	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ❌ '%s': NO PRIMARY TARGET - Cannot fire"),
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ❌ '%s': Fire failed (weapon state)"),
 			*Pawn->GetName());
 	}
-	else if (!SharedContext.bHasLOS)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ❌ '%s': NO LOS to target '%s' - Cannot fire"),
-			*Pawn->GetName(), *SharedContext.PrimaryTarget->GetName());
-	}
+	
+	// REMOVED: PrimaryTarget and bHasLOS validation
+	// REMOVED: FireAtTarget() with predictive aiming
+	// Agent must learn targeting through trial and error
 }
 
 void FSTTask_ExecuteObjective::ExecuteCrouch(FStateTreeExecutionContext& Context, const FTacticalAction& Action) const

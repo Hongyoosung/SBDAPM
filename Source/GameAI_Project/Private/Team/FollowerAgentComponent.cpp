@@ -127,6 +127,13 @@ void UFollowerAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	
+	// Check if simulation is running
+	ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+	if (SimManager && !SimManager->IsSimulationRunning())
+	{
+		return;
+	}
 
 	// Update tactical action timer (v3.0)
 	TimeSinceLastTacticalAction += DeltaTime;

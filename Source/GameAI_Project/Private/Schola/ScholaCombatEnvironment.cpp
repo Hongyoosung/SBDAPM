@@ -97,6 +97,13 @@ void AScholaCombatEnvironment::ResetEnvironment()
 	// Called by Schola when episode resets
 	// The SimulationManager already handles agent reset, so we just log
 	UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] ResetEnvironment called"));
+
+	// Ensure simulation is running (starts it on first connection/reset)
+	if (SimulationManager && !SimulationManager->IsSimulationRunning())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] First reset received - Starting Simulation"));
+		SimulationManager->StartSimulation();
+	}
 }
 
 void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>& OutAgentTrainerPairs)

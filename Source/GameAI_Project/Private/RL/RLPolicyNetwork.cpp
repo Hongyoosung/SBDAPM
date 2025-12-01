@@ -585,83 +585,26 @@ FTacticalAction URLPolicyNetwork::ApplyMask(const FTacticalAction& Action, const
 
 FTacticalAction URLPolicyNetwork::GetActionRuleBased(const FObservationElement& Observation, UObjective* CurrentObjective)
 {
+	// PURE RANDOM EXPLORATION - No rule-based guidance
+	// Forces RL to learn all behaviors from scratch through trial and error
 	FTacticalAction Action;
 
-	// Extract key features
-	float Health = Observation.AgentHealth;
-	int32 VisibleEnemies = Observation.VisibleEnemyCount;
-	bool bHasCover = Observation.bHasCover;
-	float NearestCoverDistance = Observation.NearestCoverDistance;
+	// Random movement direction (uniform in [-1, 1])
+	Action.MoveDirection.X = FMath::FRandRange(-1.0f, 1.0f);
+	Action.MoveDirection.Y = FMath::FRandRange(-1.0f, 1.0f);
+	Action.MoveSpeed = FMath::FRandRange(0.0f, 1.0f);
 
-	// Calculate nearest enemy direction
-	FVector2D EnemyDirection = FVector2D::ZeroVector;
-	float NearestEnemyDistance = MAX_FLT;
-	if (Observation.NearbyEnemies.Num() > 0)
-	{
-		NearestEnemyDistance = Observation.NearbyEnemies[0].Distance;
-		// Approximate direction from bearing (simplified)
-		float Bearing = Observation.NearbyEnemies[0].RelativeAngle;
-		EnemyDirection.X = FMath::Sin(FMath::DegreesToRadians(Bearing));
-		EnemyDirection.Y = FMath::Cos(FMath::DegreesToRadians(Bearing));
-	}
+	// Random aiming direction (uniform in [-1, 1])
+	Action.LookDirection.X = FMath::FRandRange(-1.0f, 1.0f);
+	Action.LookDirection.Y = FMath::FRandRange(-1.0f, 1.0f);
 
-	// Rule-based movement
-	if (Health < 30.0f)
-	{
-		// Low health: retreat away from enemies
-		Action.MoveDirection = -EnemyDirection;  // Move away
-		Action.MoveSpeed = 1.0f;  // Sprint
-		Action.bCrouch = false;
-	}
-	else if (!bHasCover && VisibleEnemies > 0 && NearestCoverDistance < 500.0f)
-	{
-		// No cover, seek it (move perpendicular to enemy)
-		Action.MoveDirection = FVector2D(-EnemyDirection.Y, EnemyDirection.X);  // Perpendicular
-		Action.MoveSpeed = 0.8f;
-		Action.bCrouch = false;
-	}
-	else if (VisibleEnemies > 0)
-	{
-		// Enemies visible: cautious advance or hold
-		if (Health > 70.0f)
-		{
-			Action.MoveDirection = EnemyDirection * 0.3f;  // Slow advance
-			Action.MoveSpeed = 0.4f;
-		}
-		else
-		{
-			Action.MoveDirection = FVector2D::ZeroVector;  // Hold position
-			Action.MoveSpeed = 0.0f;
-		}
-		Action.bCrouch = true;  // Use cover
-	}
-	else
-	{
-		// No enemies: patrol forward
-		Action.MoveDirection = FVector2D(0.0f, 1.0f);  // Forward
-		Action.MoveSpeed = 0.5f;
-		Action.bCrouch = false;
-	}
-
-	// Rule-based aiming
-	if (VisibleEnemies > 0)
-	{
-		// Aim at nearest enemy
-		Action.LookDirection = EnemyDirection;
-		Action.bFire = (NearestEnemyDistance < 1000.0f);  // Fire if in range
-	}
-	else
-	{
-		// Look forward
-		Action.LookDirection = FVector2D(0.0f, 1.0f);
-		Action.bFire = false;
-	}
-
-	// Ability usage (simple heuristic)
-	Action.bUseAbility = (Health < 50.0f && VisibleEnemies > 2);  // Use ability when outnumbered
+	// Random discrete actions (50% probability each)
+	Action.bFire = FMath::RandBool();
+	Action.bCrouch = FMath::RandBool();
+	Action.bUseAbility = FMath::RandBool();
 	Action.AbilityID = 0;
 
-	UE_LOG(LogTemp, Warning, TEXT("🔧 [RULE-BASED] Action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d Crouch=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("🎲 [RANDOM EXPLORATION] Action: Move=(%.2f,%.2f) Speed=%.2f Look=(%.2f,%.2f) Fire=%d Crouch=%d"),
 		Action.MoveDirection.X, Action.MoveDirection.Y, Action.MoveSpeed,
 		Action.LookDirection.X, Action.LookDirection.Y, Action.bFire, Action.bCrouch);
 

@@ -85,6 +85,13 @@ void UTeamLeaderComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	// Check if simulation is running
+	ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+	if (SimManager && !SimManager->IsSimulationRunning())
+	{
+		return;
+	}
+
 	// Update team observation (for next decision)
 	if (Followers.Num() > 0)
 	{

@@ -10,6 +10,9 @@ ASimulationManagerGameMode::ASimulationManagerGameMode()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickInterval = 0.1f; // 10 Hz
+	
+	// Default to false - wait for external signal (e.g. from Python via Schola)
+	bAutoStartSimulation = false;
 }
 
 void ASimulationManagerGameMode::BeginPlay()

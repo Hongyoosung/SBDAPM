@@ -116,6 +116,10 @@ public:
 
 	/**
 	 * Fire weapon at specific target
+	 * 
+	 * WARNING: This method provides RULE-BASED AIMING ASSISTANCE (auto-aim + predictive targeting).
+	 * DO NOT USE for RL agents - use FireInDirection() instead to allow agents to learn aiming.
+	 * 
 	 * @param Target Target actor to aim at
 	 * @param bUsePrediction Use predictive aiming (lead target)
 	 * @return True if weapon fired successfully
