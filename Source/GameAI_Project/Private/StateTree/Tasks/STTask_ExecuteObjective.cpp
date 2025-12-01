@@ -178,11 +178,21 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	UE_LOG(LogTemp, Warning, TEXT("asasasasasasasss"));
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
 
-	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
 	if (!Pawn)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ExecuteMovement: No Pawn available"));
 		return;
 	}
 
@@ -239,6 +249,8 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 	}
 	else
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[MOVE EXEC STOP] No movement input"));
+
 		// Stop movement
 		if (SharedContext.AIController)
 		{
@@ -254,7 +266,18 @@ void FSTTask_ExecuteObjective::ExecuteAiming(FStateTreeExecutionContext& Context
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		return;
@@ -307,24 +330,61 @@ void FSTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context, 
 		return;
 	}
 
-	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] '%s': Schola mode firing not implemented"), *GetNameSafe(Pawn));
+	}
+
 	if (!Pawn)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[EXEC FIRE] No Pawn available"));
 		return;
 	}
 
 	UWeaponComponent* WeaponComp = Pawn->FindComponentByClass<UWeaponComponent>();
-	if (!WeaponComp || !WeaponComp->CanFire())
+	if (!WeaponComp)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[EXEC FIRE] '%s': No WeaponComponent found"), *Pawn->GetName());
 		return;
 	}
+
+	if (!WeaponComp->CanFire())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] '%s': Weapon cannot fire (cooldown/ammo)"), *Pawn->GetName());
+		return;
+	}
+
+	// Log current state
+	UE_LOG(LogTemp, Display, TEXT("[EXEC FIRE] '%s': Fire action requested"), *Pawn->GetName());
+	UE_LOG(LogTemp, Display, TEXT("  → PrimaryTarget: '%s'"), *GetNameSafe(SharedContext.PrimaryTarget));
+	UE_LOG(LogTemp, Display, TEXT("  → bHasLOS: %d"), SharedContext.bHasLOS ? 1 : 0);
+	UE_LOG(LogTemp, Display, TEXT("  → Distance: %.1f cm"), SharedContext.DistanceToPrimaryTarget);
 
 	// Fire at primary target if available and in LOS
 	if (SharedContext.PrimaryTarget && SharedContext.bHasLOS)
 	{
 		WeaponComp->FireAtTarget(SharedContext.PrimaryTarget, true);
 
-		UE_LOG(LogTemp, Log, TEXT("[EXEC OBJ] '%s': Firing at '%s'"),
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ✅ '%s': FIRING at '%s' (Distance: %.1f cm)"),
+			*Pawn->GetName(), *SharedContext.PrimaryTarget->GetName(), SharedContext.DistanceToPrimaryTarget);
+	}
+	else if (!SharedContext.PrimaryTarget)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ❌ '%s': NO PRIMARY TARGET - Cannot fire"),
+			*Pawn->GetName());
+	}
+	else if (!SharedContext.bHasLOS)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] ❌ '%s': NO LOS to target '%s' - Cannot fire"),
 			*Pawn->GetName(), *SharedContext.PrimaryTarget->GetName());
 	}
 }
@@ -334,7 +394,18 @@ void FSTTask_ExecuteObjective::ExecuteCrouch(FStateTreeExecutionContext& Context
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	APawn* Pawn = SharedContext.AIController ? SharedContext.AIController->GetPawn() : nullptr;
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		return;

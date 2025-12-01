@@ -349,6 +349,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Planning")
 	bool bAllowEventInterrupts = true;
 
+	/** Team ID for SimulationManager registration */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	int32 TeamID = 0;
+
 	/** Team name/ID */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
 	FString TeamName = TEXT("Alpha Team");
@@ -360,6 +364,10 @@ public:
 	/** Enable debug visualization */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Debug")
 	bool bEnableDebugDrawing = false;
+
+	/** Auto-register with SimulationManager on BeginPlay */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")
+	bool bAutoRegisterWithSimManager = true;
 
 	/** Objective actor for the team */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Leader|Config")

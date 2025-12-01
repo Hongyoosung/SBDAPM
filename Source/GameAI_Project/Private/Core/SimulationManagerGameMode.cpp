@@ -240,6 +240,7 @@ void ASimulationManagerGameMode::SetMutualEnemies(int32 TeamID1, int32 TeamID2)
 {
 	if (!RegisteredTeams.Contains(TeamID1) || !RegisteredTeams.Contains(TeamID2))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("SimulationManager: Cannot set mutual enemies - one or both teams not found"));
 		return;
 	}
 

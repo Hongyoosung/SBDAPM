@@ -2,6 +2,7 @@
 
 #include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Perception/AgentPerceptionComponent.h"
 #include "Combat/WeaponComponent.h"
@@ -20,33 +21,61 @@ void FSTEvaluator_UpdateObservation::TreeStart(FStateTreeExecutionContext& Conte
 	// Initialize time accumulator
 	InstanceData.TimeAccumulator = 0.0f;
 
-	/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS EVALUATOR] TreeStart called - UpdateInterval=%.3f"),
-		InstanceData.UpdateInterval);*/
+	UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS EVALUATOR] TreeStart called - UpdateInterval=%.3f"),
+		InstanceData.UpdateInterval);
 }
 
 void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Validate context components (auto-bound from schema)
-	if (!InstanceData.Context.FollowerComponent || !InstanceData.Context.AIController)
+	// Validate context components (FollowerComponent is REQUIRED, AIController is OPTIONAL for Schola)
+	if (!InstanceData.Context.FollowerComponent)
 	{
 		static bool bLoggedOnce = false;
 		if (!bLoggedOnce)
 		{
-			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Missing FollowerComponent or AIController!"));
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Missing FollowerComponent!"));
 			bLoggedOnce = true;
 		}
 		return;
 	}
 
-	APawn* ControlledPawn = InstanceData.Context.AIController->GetPawn();
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* ControlledPawn = nullptr;
+	if (InstanceData.Context.AIController)
+	{
+		// Normal AI mode: Get pawn from AIController
+		ControlledPawn = InstanceData.Context.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn directly from component owner
+		UFollowerStateTreeComponent* StateTreeComp = Cast<UFollowerStateTreeComponent>(
+			InstanceData.Context.FollowerComponent->GetOwner()->FindComponentByClass<UFollowerStateTreeComponent>()
+		);
+		if (StateTreeComp)
+		{
+			ControlledPawn = Cast<APawn>(StateTreeComp->GetOwner());
+		}
+
+		static bool bLoggedScholaOnce = false;
+		if (!bLoggedScholaOnce)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] Running in SCHOLA MODE (no AIController) for '%s'"),
+				*GetNameSafe(ControlledPawn));
+			bLoggedScholaOnce = true;
+		}
+	}
+
 	if (!ControlledPawn)
 	{
 		static bool bLoggedPawnOnce = false;
 		if (!bLoggedPawnOnce)
 		{
-			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] AIController has no pawn!"));
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Cannot get Pawn (AIController=%s, Owner=%s)!"),
+				InstanceData.Context.AIController ? TEXT("Valid") : TEXT("NULL"),
+				*GetNameSafe(InstanceData.Context.FollowerComponent->GetOwner()));
 			bLoggedPawnOnce = true;
 		}
 		return;
@@ -60,8 +89,8 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 	static int32 TickCount = 0;
 	if (++TickCount % 60 == 0)
 	{
-		/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': TimeAccum=%.3f, UpdateInterval=%.3f, bFullUpdate=%d"),
-			*ControlledPawn->GetName(), InstanceData.TimeAccumulator, InstanceData.UpdateInterval, bFullUpdate ? 1 : 0);*/
+		UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': TimeAccum=%.3f, UpdateInterval=%.3f, bFullUpdate=%d"),
+			*ControlledPawn->GetName(), InstanceData.TimeAccumulator, InstanceData.UpdateInterval, bFullUpdate ? 1 : 0);
 	}
 
 	if (bFullUpdate)
@@ -72,7 +101,8 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 	// Full update (observations, perception, cover) - run at intervals
 	if (bFullUpdate)
 	{
-		//UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': FULL UPDATE triggered"), *ControlledPawn->GetName());
+		UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': ⏰ FULL UPDATE triggered (every %.2fs)"), 
+			*ControlledPawn->GetName(), InstanceData.UpdateInterval);
 
 		// Get observation from follower component
 		InstanceData.Context.PreviousObservation = InstanceData.Context.CurrentObservation;
@@ -83,6 +113,19 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 
 		// Update cover state
 		DetectCover(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+	}
+	else
+	{
+		// Log when NOT doing full update to see timing
+		static int32 SkipCount = 0;
+		if (++SkipCount % 300 == 0) // Log every 5 seconds at 60fps
+		{
+			UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': Skipping full update (TimeAccum=%.3fs < %.3fs), PrimaryTarget='%s'"),
+				*ControlledPawn->GetName(), 
+				InstanceData.TimeAccumulator, 
+				InstanceData.UpdateInterval,
+				*GetNameSafe(InstanceData.Context.PrimaryTarget));
+		}
 	}
 
 	// CRITICAL: Update combat state EVERY tick (LOS, distance) - needed for firing
@@ -131,6 +174,8 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 {
 	if (!ControlledPawn || !World)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[SCAN ENEMIES] '%s': ControlledPawn or World is NULL"),
+			*GetNameSafe(ControlledPawn));
 		return;
 	}
 
@@ -138,15 +183,58 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	UAgentPerceptionComponent* PerceptionComp = ControlledPawn->FindComponentByClass<UAgentPerceptionComponent>();
 	if (!PerceptionComp)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': No AgentPerceptionComponent found"),
+			*ControlledPawn->GetName());
 		// No perception component, clear enemies
 		InstanceData.Context.VisibleEnemies.Empty();
 		InstanceData.Context.PrimaryTarget = nullptr;
 		return;
 	}
 
-	// Get detected enemies from perception system
+	// Get detected enemies from perception system (team-based filtering)
 	TArray<AActor*> DetectedEnemies = PerceptionComp->GetDetectedEnemies();
 
+	UE_LOG(LogTemp, Display, TEXT("[SCAN ENEMIES] '%s': Perception detected %d enemies (team-based)"),
+		*ControlledPawn->GetName(), DetectedEnemies.Num());
+
+	// FALLBACK: If team system returns no enemies, use raw perception data
+	// This handles Schola training mode where SimulationManager team registration may not be set up
+	if (DetectedEnemies.Num() == 0)
+	{
+		TArray<AActor*> RawPerceivedActors;
+		PerceptionComp->GetCurrentlyPerceivedActors(nullptr, RawPerceivedActors);
+
+		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': Team system returned 0 enemies, using RAW perception (%d actors)"),
+			*ControlledPawn->GetName(), RawPerceivedActors.Num());
+
+		// Filter out self and sort by distance
+		FVector OwnerLocation = ControlledPawn->GetActorLocation();
+		for (AActor* Actor : RawPerceivedActors)
+		{
+			if (Actor && Actor != ControlledPawn)
+			{
+				// Skip dead actors
+				UHealthComponent* HealthComp = Actor->FindComponentByClass<UHealthComponent>();
+				if (HealthComp && HealthComp->IsDead())
+				{
+					continue;
+				}
+
+				DetectedEnemies.Add(Actor);
+			}
+		}
+
+		// Sort by distance (nearest first)
+		DetectedEnemies.Sort([OwnerLocation](const AActor& A, const AActor& B)
+		{
+			float DistA = FVector::DistSquared(OwnerLocation, A.GetActorLocation());
+			float DistB = FVector::DistSquared(OwnerLocation, B.GetActorLocation());
+			return DistA < DistB;
+		});
+
+		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': FALLBACK mode found %d valid targets"),
+			*ControlledPawn->GetName(), DetectedEnemies.Num());
+	}
 
 	// Update visible enemies list in context
 	InstanceData.Context.VisibleEnemies.Empty();
@@ -155,6 +243,9 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 		if (Enemy)
 		{
 			InstanceData.Context.VisibleEnemies.Add(Enemy);
+			float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), Enemy->GetActorLocation());
+			UE_LOG(LogTemp, Display, TEXT("  → Enemy '%s' at distance %.1f cm"),
+				*Enemy->GetName(), Distance);
 		}
 	}
 
@@ -166,6 +257,10 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	{
 		// Use objective-specified target if valid
 		InstanceData.Context.PrimaryTarget = ObjectiveTarget;
+		float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), ObjectiveTarget->GetActorLocation());
+
+		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': PRIMARY TARGET set to OBJECTIVE target '%s' at %.1f cm"),
+			*ControlledPawn->GetName(), *ObjectiveTarget->GetName(), Distance);
 
 		if (InstanceData.bDrawDebugInfo)
 		{
@@ -179,6 +274,10 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	{
 		// Fall back to nearest detected enemy if no command target
 		InstanceData.Context.PrimaryTarget = DetectedEnemies[0]; // Already sorted by distance
+		float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), DetectedEnemies[0]->GetActorLocation());
+
+		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': PRIMARY TARGET set to NEAREST enemy '%s' at %.1f cm"),
+			*ControlledPawn->GetName(), *DetectedEnemies[0]->GetName(), Distance);
 
 		if (InstanceData.bDrawDebugInfo)
 		{
@@ -191,6 +290,8 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	else
 	{
 		InstanceData.Context.PrimaryTarget = nullptr;
+		UE_LOG(LogTemp, Display, TEXT("[SCAN ENEMIES] '%s': No enemies detected, PRIMARY TARGET cleared"),
+			*ControlledPawn->GetName());
 	}
 }
 
@@ -251,12 +352,14 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 {
 	if (!ControlledPawn)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[UPDATE COMBAT] ControlledPawn is NULL"));
 		return;
 	}
 
 	UWorld* World = ControlledPawn->GetWorld();
 	if (!World)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[UPDATE COMBAT] '%s': World is NULL"), *ControlledPawn->GetName());
 		return;
 	}
 
@@ -271,10 +374,18 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 		float Distance = FVector::Dist(StartLocation, TargetLocation);
 		InstanceData.Context.CurrentObservation.DistanceToNearestEnemy = Distance;
 
+		UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': Checking LOS to target '%s' at distance %.1f cm"),
+			*ControlledPawn->GetName(), *InstanceData.Context.PrimaryTarget->GetName(), Distance);
+		UE_LOG(LogTemp, Display, TEXT("  → Start: (%.1f, %.1f, %.1f), Target: (%.1f, %.1f, %.1f)"),
+			StartLocation.X, StartLocation.Y, StartLocation.Z,
+			TargetLocation.X, TargetLocation.Y, TargetLocation.Z);
+
 		// Check line of sight
 		FHitResult HitResult;
 		FCollisionQueryParams QueryParams;
 		QueryParams.AddIgnoredActor(ControlledPawn);
+		QueryParams.bTraceComplex = false;
+		QueryParams.bReturnPhysicalMaterial = false;
 
 		bool bHit = World->LineTraceSingleByChannel(
 			HitResult,
@@ -284,16 +395,42 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 			QueryParams
 		);
 
+		UE_LOG(LogTemp, Display, TEXT("  → LineTrace result: bHit=%d"), bHit ? 1 : 0);
+
+		if (bHit)
+		{
+			AActor* HitActor = HitResult.GetActor();
+			UE_LOG(LogTemp, Display, TEXT("  → Hit Actor: '%s' at distance %.1f cm"),
+				*GetNameSafe(HitActor), HitResult.Distance);
+			UE_LOG(LogTemp, Display, TEXT("  → Hit Location: (%.1f, %.1f, %.1f)"),
+				HitResult.Location.X, HitResult.Location.Y, HitResult.Location.Z);
+			UE_LOG(LogTemp, Display, TEXT("  → Hit Component: '%s'"),
+				*GetNameSafe(HitResult.GetComponent()));
+			UE_LOG(LogTemp, Display, TEXT("  → Is Target? %d"),
+				(HitActor == InstanceData.Context.PrimaryTarget) ? 1 : 0);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Display, TEXT("  → No blocking hit detected (clear LOS)"));
+		}
+
 		// Has LOS if hit the target or no blocking hit
 		InstanceData.Context.bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+
+		UE_LOG(LogTemp, Warning, TEXT("[UPDATE COMBAT] '%s': bHasLOS = %d (bHit=%d, HitActor='%s', Target='%s')"),
+			*ControlledPawn->GetName(),
+			InstanceData.Context.bHasLOS ? 1 : 0,
+			bHit ? 1 : 0,
+			*GetNameSafe(HitResult.GetActor()),
+			*InstanceData.Context.PrimaryTarget->GetName());
 
 		// Debug: Log what blocked LOS
 		if (bHit && HitResult.GetActor() != InstanceData.Context.PrimaryTarget)
 		{
-			/*UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': LOS blocked by '%s' at distance %.1f"),
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE COMBAT] '%s': ❌ LOS BLOCKED by '%s' at distance %.1f cm"),
 				*ControlledPawn->GetName(),
 				HitResult.GetActor() ? *HitResult.GetActor()->GetName() : TEXT("Unknown"),
-				HitResult.Distance);*/
+				HitResult.Distance);
 		}
 
 		if (InstanceData.bDrawDebugInfo)
@@ -306,6 +443,8 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 	{
 		InstanceData.Context.bHasLOS = false;
 		InstanceData.Context.CurrentObservation.DistanceToNearestEnemy = 99999.0f;
+		UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': No PrimaryTarget, bHasLOS = false"),
+			*ControlledPawn->GetName());
 	}
 
 	// Check if under fire (simplified - check if health component recently took damage)

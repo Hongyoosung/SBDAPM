@@ -159,22 +159,75 @@ void UAgentPerceptionComponent::UpdateTrackedEnemies()
 	TArray<AActor*> PerceivedActors;
 	GetCurrentlyPerceivedActors(nullptr, PerceivedActors);
 
+	static int32 LogCounter = 0;
+	bool bShouldLog = (++LogCounter % 60 == 0); // Log every 60 calls (~6 seconds at 10Hz)
+
+	if (bShouldLog)
+	{
+		UE_LOG(LogTemp, Display, TEXT("[PERCEPTION] '%s': GetCurrentlyPerceivedActors returned %d actors"),
+			*GetOwner()->GetName(), PerceivedActors.Num());
+	}
+
+	// Get owner's team ID for diagnostic logging
+	int32 OwnerTeamID = -1;
+	if (CachedSimulationManager && GetOwner())
+	{
+		OwnerTeamID = CachedSimulationManager->GetTeamIDForActor(GetOwner());
+	}
+
+	if (bShouldLog)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PERCEPTION] '%s': Owner TeamID = %d, SimManager = %s"),
+			*GetOwner()->GetName(), OwnerTeamID, CachedSimulationManager ? TEXT("Valid") : TEXT("NULL"));
+	}
+
 	// Filter for enemies only (must be alive)
 	for (AActor* Actor : PerceivedActors)
 	{
-		if (IsActorEnemy(Actor))
+		// Get actor's team ID for diagnostic
+		int32 ActorTeamID = -1;
+		if (CachedSimulationManager && Actor)
+		{
+			ActorTeamID = CachedSimulationManager->GetTeamIDForActor(Actor);
+		}
+
+		bool bIsEnemy = IsActorEnemy(Actor);
+		
+		if (bShouldLog)
+		{
+			UE_LOG(LogTemp, Display, TEXT("  → Actor '%s': TeamID=%d, IsEnemy=%d (OwnerTeam=%d)"),
+				*GetNameSafe(Actor), ActorTeamID, bIsEnemy ? 1 : 0, OwnerTeamID);
+		}
+
+		if (bIsEnemy)
 		{
 			// Skip dead enemies
 			UHealthComponent* HealthComp = Actor->FindComponentByClass<UHealthComponent>();
 			if (HealthComp && HealthComp->IsDead())
 			{
+				if (bShouldLog)
+				{
+					UE_LOG(LogTemp, Display, TEXT("    → Skipping (dead)"));
+				}
 				// Remove from reported enemies so they can be re-reported if respawned
 				ReportedEnemies.Remove(Actor);
 				continue;
 			}
 
 			TrackedEnemies.Add(Actor);
+			
+			if (bShouldLog)
+			{
+				float Distance = FVector::Dist(GetOwner()->GetActorLocation(), Actor->GetActorLocation());
+				UE_LOG(LogTemp, Display, TEXT("    → Added to TrackedEnemies (Distance: %.1f cm)"), Distance);
+			}
 		}
+	}
+
+	if (bShouldLog)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PERCEPTION] '%s': Final TrackedEnemies count = %d"),
+			*GetOwner()->GetName(), TrackedEnemies.Num());
 	}
 
 	// Sort by distance (nearest first)

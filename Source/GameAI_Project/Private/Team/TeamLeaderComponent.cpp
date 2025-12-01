@@ -50,6 +50,30 @@ void UTeamLeaderComponent::BeginPlay()
 		}
 	}
 
+	// Auto-register with SimulationManager (fix for missing team registration)
+	if (bAutoRegisterWithSimManager)
+	{
+		ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+		if (SimManager)
+		{
+			bool InbRegistered = SimManager->RegisterTeam(TeamID, this, TeamName, TeamColor);
+			if (InbRegistered)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("✅ TeamLeader '%s': Registered with SimulationManager (TeamID: %d)"),
+					*TeamName, TeamID);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("❌ TeamLeader '%s': Failed to register with SimulationManager (TeamID: %d)"),
+					*TeamName, TeamID);
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("⚠️ TeamLeader '%s': SimulationManager not found, team registration skipped"), *TeamName);
+		}
+	}
+
 	// Auto-discover objectives from level (v3.0 - Capture/Rescue support)
 	DiscoverWorldObjectives();
 

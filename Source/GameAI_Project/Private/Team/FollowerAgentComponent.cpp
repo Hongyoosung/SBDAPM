@@ -180,6 +180,28 @@ bool UFollowerAgentComponent::RegisterWithTeamLeader()
 	{
 		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Registered with TeamLeader '%s'"),
 			*GetOwner()->GetName(), *TeamLeader->TeamName);
+
+		// Also register with SimulationManager (fix for missing team registration)
+		ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+		if (SimManager)
+		{
+			bool bSimRegistered = SimManager->RegisterTeamMember(TeamLeader->TeamID, GetOwner());
+			if (bSimRegistered)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("✅ Follower '%s': Registered with SimulationManager (TeamID: %d)"),
+					*GetOwner()->GetName(), TeamLeader->TeamID);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("❌ Follower '%s': Failed to register with SimulationManager (TeamID: %d)"),
+					*GetOwner()->GetName(), TeamLeader->TeamID);
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("⚠️ Follower '%s': SimulationManager not found, team member registration skipped"),
+				*GetOwner()->GetName());
+		}
 	}
 	else
 	{
