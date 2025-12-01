@@ -8,6 +8,7 @@
 #include "STTask_Dead.generated.h"
 
 class UAnimMontage;
+class UFollowerStateTreeComponent;
 
 /**
  * State Tree Task: Dead
@@ -37,11 +38,9 @@ struct GAMEAI_PROJECT_API FSTTask_DeadInstanceData
 	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
 	//--------------------------------------------------------------------------
 
-	/**
-	 * Shared context struct - automatically bound by StateTree
-	 */
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
+	/** StateTree component reference - provides access to shared context */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UFollowerStateTreeComponent> StateTreeComp;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION

@@ -29,8 +29,20 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Validate context components (FollowerComponent is REQUIRED, AIController is OPTIONAL for Schola)
-	if (!InstanceData.Context.FollowerComponent)
+	// Get components from context owner
+	UFollowerAgentComponent* FollowerComponent = nullptr;
+	APawn* ControlledPawn = nullptr;
+
+	if (const UObject* ContextOwner = Context.GetOwner())
+	{
+		if (const AActor* OwnerActor = Cast<AActor>(ContextOwner))
+		{
+			FollowerComponent = OwnerActor->FindComponentByClass<UFollowerAgentComponent>();
+			ControlledPawn = const_cast<APawn*>(Cast<APawn>(OwnerActor));
+		}
+	}
+
+	if (!FollowerComponent)
 	{
 		static bool bLoggedOnce = false;
 		if (!bLoggedOnce)
@@ -41,41 +53,12 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 		return;
 	}
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* ControlledPawn = nullptr;
-	if (InstanceData.Context.AIController)
-	{
-		// Normal AI mode: Get pawn from AIController
-		ControlledPawn = InstanceData.Context.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn directly from component owner
-		UFollowerStateTreeComponent* StateTreeComp = Cast<UFollowerStateTreeComponent>(
-			InstanceData.Context.FollowerComponent->GetOwner()->FindComponentByClass<UFollowerStateTreeComponent>()
-		);
-		if (StateTreeComp)
-		{
-			ControlledPawn = Cast<APawn>(StateTreeComp->GetOwner());
-		}
-
-		static bool bLoggedScholaOnce = false;
-		if (!bLoggedScholaOnce)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] Running in SCHOLA MODE (no AIController) for '%s'"),
-				*GetNameSafe(ControlledPawn));
-			bLoggedScholaOnce = true;
-		}
-	}
-
 	if (!ControlledPawn)
 	{
 		static bool bLoggedPawnOnce = false;
 		if (!bLoggedPawnOnce)
 		{
-			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Cannot get Pawn (AIController=%s, Owner=%s)!"),
-				InstanceData.Context.AIController ? TEXT("Valid") : TEXT("NULL"),
-				*GetNameSafe(InstanceData.Context.FollowerComponent->GetOwner()));
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Cannot get Pawn!"));
 			bLoggedPawnOnce = true;
 		}
 		return;
@@ -104,15 +87,26 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 		UE_LOG(LogTemp, Warning, TEXT("[UPDATE OBS] '%s': ⏰ FULL UPDATE triggered (every %.2fs)"), 
 			*ControlledPawn->GetName(), InstanceData.UpdateInterval);
 
+		// Get StateTree component to access shared context
+		UFollowerStateTreeComponent* StateTreeComp = ControlledPawn->FindComponentByClass<UFollowerStateTreeComponent>();
+		if (!StateTreeComp)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPDATE OBS] Cannot find StateTreeComponent!"));
+			return;
+		}
+
+		// Get SHARED context reference (this is the SAME context used by tasks)
+		FFollowerStateTreeContext& SharedContext = StateTreeComp->GetSharedContext();
+
 		// Get observation from follower component
-		InstanceData.Context.PreviousObservation = InstanceData.Context.CurrentObservation;
-		InstanceData.Context.CurrentObservation = InstanceData.Context.FollowerComponent->GetLocalObservation();
+		SharedContext.PreviousObservation = SharedContext.CurrentObservation;
+		SharedContext.CurrentObservation = FollowerComponent->GetLocalObservation();
 
 		// Update target tracking from perception system
-		ScanForEnemies(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+		ScanForEnemies(SharedContext, InstanceData, ControlledPawn, ControlledPawn->GetWorld());
 
 		// Update cover state
-		DetectCover(InstanceData, ControlledPawn, ControlledPawn->GetWorld());
+		DetectCover(SharedContext, InstanceData, ControlledPawn, ControlledPawn->GetWorld());
 	}
 	else
 	{
@@ -120,28 +114,33 @@ void FSTEvaluator_UpdateObservation::Tick(FStateTreeExecutionContext& Context, f
 		static int32 SkipCount = 0;
 		if (++SkipCount % 300 == 0) // Log every 5 seconds at 60fps
 		{
-			UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': Skipping full update (TimeAccum=%.3fs < %.3fs), PrimaryTarget='%s'"),
+			UE_LOG(LogTemp, Display, TEXT("[UPDATE OBS] '%s': Skipping full update (TimeAccum=%.3fs < %.3fs)"),
 				*ControlledPawn->GetName(), 
 				InstanceData.TimeAccumulator, 
-				InstanceData.UpdateInterval,
-				*GetNameSafe(InstanceData.Context.PrimaryTarget));
+				InstanceData.UpdateInterval);
 		}
 	}
 
 	// CRITICAL: Update combat state EVERY tick (LOS, distance) - needed for firing
-	UpdateCombatState(InstanceData, ControlledPawn);
+	// Get StateTree component to access shared context
+	UFollowerStateTreeComponent* StateTreeComp = ControlledPawn->FindComponentByClass<UFollowerStateTreeComponent>();
+	if (StateTreeComp)
+	{
+		FFollowerStateTreeContext& SharedContext = StateTreeComp->GetSharedContext();
+		UpdateCombatState(SharedContext, InstanceData, ControlledPawn);
 
-	// Update distance to primary target
-	if (InstanceData.Context.PrimaryTarget)
-	{
-		InstanceData.Context.DistanceToPrimaryTarget = FVector::Dist(
-			ControlledPawn->GetActorLocation(),
-			InstanceData.Context.PrimaryTarget->GetActorLocation()
-		);
-	}
-	else
-	{
-		InstanceData.Context.DistanceToPrimaryTarget = 99999.0f;
+		// Update distance to primary target
+		if (SharedContext.PrimaryTarget)
+		{
+			SharedContext.DistanceToPrimaryTarget = FVector::Dist(
+				ControlledPawn->GetActorLocation(),
+				SharedContext.PrimaryTarget->GetActorLocation()
+			);
+		}
+		else
+		{
+			SharedContext.DistanceToPrimaryTarget = 99999.0f;
+		}
 	}
 
 	// NOTE: No need to "write back" to external context - InstanceData.Context IS the shared context
@@ -170,7 +169,7 @@ void FSTEvaluator_UpdateObservation::PerformRaycastPerception(FObservationElemen
 	// Placeholder
 }
 
-void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const
+void FSTEvaluator_UpdateObservation::ScanForEnemies(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const
 {
 	if (!ControlledPawn || !World)
 	{
@@ -186,8 +185,8 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': No AgentPerceptionComponent found"),
 			*ControlledPawn->GetName());
 		// No perception component, clear enemies
-		InstanceData.Context.VisibleEnemies.Empty();
-		InstanceData.Context.PrimaryTarget = nullptr;
+		SharedContext.VisibleEnemies.Empty();
+		SharedContext.PrimaryTarget = nullptr;
 		return;
 	}
 
@@ -237,12 +236,12 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	}
 
 	// Update visible enemies list in context
-	InstanceData.Context.VisibleEnemies.Empty();
+	SharedContext.VisibleEnemies.Empty();
 	for (AActor* Enemy : DetectedEnemies)
 	{
 		if (Enemy)
 		{
-			InstanceData.Context.VisibleEnemies.Add(Enemy);
+			SharedContext.VisibleEnemies.Add(Enemy);
 			float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), Enemy->GetActorLocation());
 			UE_LOG(LogTemp, Display, TEXT("  → Enemy '%s' at distance %.1f cm"),
 				*Enemy->GetName(), Distance);
@@ -251,12 +250,12 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 
 
 	// Set primary target - PRIORITIZE objective target over perception target
-	AActor* ObjectiveTarget = InstanceData.Context.CurrentObjective ? InstanceData.Context.CurrentObjective->TargetActor : nullptr;
+	AActor* ObjectiveTarget = SharedContext.CurrentObjective ? SharedContext.CurrentObjective->TargetActor : nullptr;
 
 	if (ObjectiveTarget && ObjectiveTarget->IsValidLowLevel() && !ObjectiveTarget->IsPendingKillPending())
 	{
 		// Use objective-specified target if valid
-		InstanceData.Context.PrimaryTarget = ObjectiveTarget;
+		SharedContext.PrimaryTarget = ObjectiveTarget;
 		float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), ObjectiveTarget->GetActorLocation());
 
 		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': PRIMARY TARGET set to OBJECTIVE target '%s' at %.1f cm"),
@@ -273,7 +272,7 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	else if (DetectedEnemies.Num() > 0)
 	{
 		// Fall back to nearest detected enemy if no command target
-		InstanceData.Context.PrimaryTarget = DetectedEnemies[0]; // Already sorted by distance
+		SharedContext.PrimaryTarget = DetectedEnemies[0]; // Already sorted by distance
 		float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), DetectedEnemies[0]->GetActorLocation());
 
 		UE_LOG(LogTemp, Warning, TEXT("[SCAN ENEMIES] '%s': PRIMARY TARGET set to NEAREST enemy '%s' at %.1f cm"),
@@ -281,7 +280,7 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 
 		if (InstanceData.bDrawDebugInfo)
 		{
-			FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation();
+			FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation();
 			DrawDebugLine(World, ControlledPawn->GetActorLocation(), TargetLocation,
 				FColor::Red, false, 0.2f, 0, 2.0f);
 			DrawDebugSphere(World, TargetLocation, 50.0f, 12, FColor::Red, false, 0.2f);
@@ -289,13 +288,13 @@ void FSTEvaluator_UpdateObservation::ScanForEnemies(FSTEvaluator_UpdateObservati
 	}
 	else
 	{
-		InstanceData.Context.PrimaryTarget = nullptr;
+		SharedContext.PrimaryTarget = nullptr;
 		UE_LOG(LogTemp, Display, TEXT("[SCAN ENEMIES] '%s': No enemies detected, PRIMARY TARGET cleared"),
 			*ControlledPawn->GetName());
 	}
 }
 
-void FSTEvaluator_UpdateObservation::DetectCover(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const
+void FSTEvaluator_UpdateObservation::DetectCover(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const
 {
 	if (!ControlledPawn || !World)
 	{
@@ -319,7 +318,7 @@ void FSTEvaluator_UpdateObservation::DetectCover(FSTEvaluator_UpdateObservationI
 		QueryParams
 	);
 
-	InstanceData.Context.bInCover = false;
+	SharedContext.bInCover = false;
 
 	if (bFoundCover)
 	{
@@ -333,8 +332,8 @@ void FSTEvaluator_UpdateObservation::DetectCover(FSTEvaluator_UpdateObservationI
 				float DistanceToCover = FVector::Dist(AgentLocation, OverlappedActor->GetActorLocation());
 				if (DistanceToCover < 200.0f) // 2 meters
 				{
-					InstanceData.Context.bInCover = true;
-					InstanceData.Context.CurrentCover = OverlappedActor;
+					SharedContext.bInCover = true;
+					SharedContext.CurrentCover = OverlappedActor;
 
 					if (InstanceData.bDrawDebugInfo)
 					{
@@ -348,7 +347,7 @@ void FSTEvaluator_UpdateObservation::DetectCover(FSTEvaluator_UpdateObservationI
 	}
 }
 
-void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn) const
+void FSTEvaluator_UpdateObservation::UpdateCombatState(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn) const
 {
 	if (!ControlledPawn)
 	{
@@ -364,18 +363,18 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 	}
 
 	// Check LOS and distance to primary target
-	if (InstanceData.Context.PrimaryTarget)
+	if (SharedContext.PrimaryTarget)
 	{
 		// Use eye height for LOS trace (avoid hitting ground)
 		FVector StartLocation = ControlledPawn->GetActorLocation() + FVector(0, 0, 80.0f); // Eye height offset
-		FVector TargetLocation = InstanceData.Context.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
+		FVector TargetLocation = SharedContext.PrimaryTarget->GetActorLocation() + FVector(0, 0, 80.0f);
 
 		// Calculate distance
 		float Distance = FVector::Dist(StartLocation, TargetLocation);
-		InstanceData.Context.CurrentObservation.DistanceToNearestEnemy = Distance;
+		SharedContext.CurrentObservation.DistanceToNearestEnemy = Distance;
 
 		UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': Checking LOS to target '%s' at distance %.1f cm"),
-			*ControlledPawn->GetName(), *InstanceData.Context.PrimaryTarget->GetName(), Distance);
+			*ControlledPawn->GetName(), *SharedContext.PrimaryTarget->GetName(), Distance);
 		UE_LOG(LogTemp, Display, TEXT("  → Start: (%.1f, %.1f, %.1f), Target: (%.1f, %.1f, %.1f)"),
 			StartLocation.X, StartLocation.Y, StartLocation.Z,
 			TargetLocation.X, TargetLocation.Y, TargetLocation.Z);
@@ -407,7 +406,7 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 			UE_LOG(LogTemp, Display, TEXT("  → Hit Component: '%s'"),
 				*GetNameSafe(HitResult.GetComponent()));
 			UE_LOG(LogTemp, Display, TEXT("  → Is Target? %d"),
-				(HitActor == InstanceData.Context.PrimaryTarget) ? 1 : 0);
+				(HitActor == SharedContext.PrimaryTarget) ? 1 : 0);
 		}
 		else
 		{
@@ -415,17 +414,17 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 		}
 
 		// Has LOS if hit the target or no blocking hit
-		InstanceData.Context.bHasLOS = !bHit || HitResult.GetActor() == InstanceData.Context.PrimaryTarget;
+		SharedContext.bHasLOS = !bHit || HitResult.GetActor() == SharedContext.PrimaryTarget;
 
 		UE_LOG(LogTemp, Warning, TEXT("[UPDATE COMBAT] '%s': bHasLOS = %d (bHit=%d, HitActor='%s', Target='%s')"),
 			*ControlledPawn->GetName(),
-			InstanceData.Context.bHasLOS ? 1 : 0,
+			SharedContext.bHasLOS ? 1 : 0,
 			bHit ? 1 : 0,
 			*GetNameSafe(HitResult.GetActor()),
-			*InstanceData.Context.PrimaryTarget->GetName());
+			*SharedContext.PrimaryTarget->GetName());
 
 		// Debug: Log what blocked LOS
-		if (bHit && HitResult.GetActor() != InstanceData.Context.PrimaryTarget)
+		if (bHit && HitResult.GetActor() != SharedContext.PrimaryTarget)
 		{
 			UE_LOG(LogTemp, Error, TEXT("[UPDATE COMBAT] '%s': ❌ LOS BLOCKED by '%s' at distance %.1f cm"),
 				*ControlledPawn->GetName(),
@@ -435,14 +434,14 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 
 		if (InstanceData.bDrawDebugInfo)
 		{
-			FColor LOSColor = InstanceData.Context.bHasLOS ? FColor::Green : FColor::Yellow;
+			FColor LOSColor = SharedContext.bHasLOS ? FColor::Green : FColor::Yellow;
 			DrawDebugLine(World, StartLocation, TargetLocation, LOSColor, false, 0.2f, 0, 1.0f);
 		}
 	}
 	else
 	{
-		InstanceData.Context.bHasLOS = false;
-		InstanceData.Context.CurrentObservation.DistanceToNearestEnemy = 99999.0f;
+		SharedContext.bHasLOS = false;
+		SharedContext.CurrentObservation.DistanceToNearestEnemy = 99999.0f;
 		UE_LOG(LogTemp, Display, TEXT("[UPDATE COMBAT] '%s': No PrimaryTarget, bHasLOS = false"),
 			*ControlledPawn->GetName());
 	}
@@ -452,11 +451,11 @@ void FSTEvaluator_UpdateObservation::UpdateCombatState(FSTEvaluator_UpdateObserv
 	{
 		// Consider "under fire" if took damage in last 2 seconds
 		float TimeSinceLastDamage = HealthComp->GetTimeSinceLastDamage();
-		InstanceData.Context.bUnderFire = (TimeSinceLastDamage >= 0.0f && TimeSinceLastDamage < 2.0f);
+		SharedContext.bUnderFire = (TimeSinceLastDamage >= 0.0f && TimeSinceLastDamage < 2.0f);
 	}
 	else
 	{
-		InstanceData.Context.bUnderFire = false;
+		SharedContext.bUnderFire = false;
 	}
 }
 

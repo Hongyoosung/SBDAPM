@@ -340,8 +340,6 @@ void FSTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context, 
 	{
 		// Schola mode: Get pawn from component owner
 		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-
-		UE_LOG(LogTemp, Warning, TEXT("[EXEC FIRE] '%s': Schola mode firing not implemented"), *GetNameSafe(Pawn));
 	}
 
 	if (!Pawn)

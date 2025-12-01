@@ -37,17 +37,6 @@ struct GAMEAI_PROJECT_API FSTEvaluator_UpdateObservationInstanceData
 	GENERATED_BODY()
 
 	//--------------------------------------------------------------------------
-	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
-	//--------------------------------------------------------------------------
-
-	/**
-	 * Shared context struct - automatically bound by StateTree
-	 * Contains all agent state, commands, observations, and targets
-	 */
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
-
-	//--------------------------------------------------------------------------
 	// CONFIGURATION
 	//--------------------------------------------------------------------------
 
@@ -94,13 +83,13 @@ protected:
 	void PerformRaycastPerception(FObservationElement& Observation, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Scan for nearby enemies */
-	void ScanForEnemies(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
+	void ScanForEnemies(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Detect cover availability */
-	void DetectCover(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
+	void DetectCover(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn, UWorld* World) const;
 
 	/** Update combat state */
-	void UpdateCombatState(FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn) const;
+	void UpdateCombatState(FFollowerStateTreeContext& SharedContext, FSTEvaluator_UpdateObservationInstanceData& InstanceData, APawn* ControlledPawn) const;
 
 	/** Classify raycast hit type */
 	ERaycastHitType ClassifyHitType(const FHitResult& HitResult) const;

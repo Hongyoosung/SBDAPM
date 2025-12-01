@@ -2,6 +2,7 @@
 
 #include "StateTree/Tasks/STTask_Dead.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
 #include "AIController.h"
 #include "GameFramework/Character.h"
@@ -17,17 +18,29 @@ EStateTreeRunStatus FSTTask_Dead::EnterState(FStateTreeExecutionContext& Context
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	// Validate inputs
-	if (!InstanceData.Context.AIController)
+	if (!InstanceData.StateTreeComp)
 	{
-		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: Invalid AIController"));
+		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: StateTreeComp is null"));
 		return EStateTreeRunStatus::Failed;
 	}
 
-	APawn* Pawn = InstanceData.Context.AIController->GetPawn();
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
-		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: No pawn found"));
+		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: Cannot get Pawn"));
 		return EStateTreeRunStatus::Failed;
 	}
 
@@ -36,11 +49,12 @@ EStateTreeRunStatus FSTTask_Dead::EnterState(FStateTreeExecutionContext& Context
 	InstanceData.bAnimationStarted = false;
 	InstanceData.bMarkedForDestruction = false;
 
-	// Stop all movement
-	InstanceData.Context.AIController->StopMovement();
-
-	// Clear focus
-	InstanceData.Context.AIController->ClearFocus(EAIFocusPriority::Gameplay);
+	// Stop all movement (only if AIController exists)
+	if (SharedContext.AIController)
+	{
+		SharedContext.AIController->StopMovement();
+		SharedContext.AIController->ClearFocus(EAIFocusPriority::Gameplay);
+	}
 
 	// NOTE: Do NOT call StopLogic() - StateTree IS the brain component, stopping it from within causes crashes
 	// The Dead state itself keeps the agent disabled until respawn
@@ -139,8 +153,26 @@ void FSTTask_Dead::ExitState(FStateTreeExecutionContext& Context, const FStateTr
 	UE_LOG(LogTemp, Warning, TEXT("STTask_Dead: Exiting death state (time: %.1fs) - Re-enabling actor"),
 		InstanceData.TimeSinceDeath);
 
-	// Re-enable actor for respawn (reverse what we did in EnterState)
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!InstanceData.StateTreeComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: StateTreeComp is null"));
+		return;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		// Schola mode: Get pawn from component owner
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		UE_LOG(LogTemp, Error, TEXT("STTask_Dead: Cannot exit - Pawn is NULL"));
@@ -227,7 +259,24 @@ void FSTTask_Dead::PlayDeathAnimation(FStateTreeExecutionContext& Context) const
 		return;
 	}
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!InstanceData.StateTreeComp)
+	{
+		return;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		return;
@@ -264,7 +313,24 @@ void FSTTask_Dead::EnableRagdoll(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	APawn* Pawn = InstanceData.Context.AIController ? InstanceData.Context.AIController->GetPawn() : nullptr;
+	if (!InstanceData.StateTreeComp)
+	{
+		return;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		return;
@@ -302,8 +368,24 @@ void FSTTask_Dead::DestroyActor(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	AAIController* AIController = InstanceData.Context.AIController;
-	APawn* Pawn = AIController ? AIController->GetPawn() : nullptr;
+	if (!InstanceData.StateTreeComp)
+	{
+		return;
+	}
+
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
+	APawn* Pawn = nullptr;
+	if (SharedContext.AIController)
+	{
+		Pawn = SharedContext.AIController->GetPawn();
+	}
+	else
+	{
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	}
+
 	if (!Pawn)
 	{
 		return;
@@ -317,7 +399,7 @@ void FSTTask_Dead::DestroyActor(FStateTreeExecutionContext& Context) const
 	if (World)
 	{
 		// Capture weak references to avoid issues if objects are already destroyed
-		TWeakObjectPtr<AAIController> WeakController = AIController;
+		TWeakObjectPtr<AAIController> WeakController = SharedContext.AIController;
 		TWeakObjectPtr<APawn> WeakPawn = Pawn;
 
 		FTimerHandle TimerHandle;
