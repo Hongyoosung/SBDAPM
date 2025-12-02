@@ -350,8 +350,27 @@ bool UTeamLeaderComponent::RegisterFollower(AActor* Follower)
 
 	Followers.Add(Follower);
 
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Registered follower %s (%d/%d)"),
-		*TeamName, *Follower->GetName(), Followers.Num(), MaxFollowers);
+	// Register with SimulationManager (fix for team ID detection)
+	ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+	if (SimManager)
+	{
+		bool InbRegistered = SimManager->RegisterTeamMember(TeamID, Follower);
+		if (InbRegistered)
+		{
+			UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Registered follower %s with SimulationManager (TeamID: %d, %d/%d)"),
+				*TeamName, *Follower->GetName(), TeamID, Followers.Num(), MaxFollowers);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': Failed to register follower %s with SimulationManager"),
+				*TeamName, *Follower->GetName());
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TeamLeader '%s': SimulationManager not found, follower %s not registered with team mapping"),
+			*TeamName, *Follower->GetName());
+	}
 
 	// Broadcast event
 	OnFollowerRegistered.Broadcast(Follower, Followers.Num());
@@ -373,10 +392,16 @@ void UTeamLeaderComponent::UnregisterFollower(AActor* Follower)
 	Followers.Remove(Follower);
 	CurrentObjectives.Remove(Follower);
 
-	TotalFollowersLost++;
+	// Unregister from SimulationManager (fix for team ID detection)
+	ASimulationManagerGameMode* SimManager = Cast<ASimulationManagerGameMode>(GetWorld()->GetAuthGameMode());
+	if (SimManager)
+	{
+		SimManager->UnregisterTeamMember(TeamID, Follower);
+		UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Unregistered follower %s from SimulationManager (TeamID: %d, %d remaining)"),
+			*TeamName, *Follower->GetName(), TeamID, Followers.Num());
+	}
 
-	UE_LOG(LogTemp, Log, TEXT("TeamLeader '%s': Unregistered follower %s (%d remaining)"),
-		*TeamName, *Follower->GetName(), Followers.Num());
+	TotalFollowersLost++;
 
 	// Broadcast event
 	OnFollowerUnregistered.Broadcast(Follower, Followers.Num());

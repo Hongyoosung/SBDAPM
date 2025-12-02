@@ -88,16 +88,88 @@ class SBDAPMEnv:
         # Internal connection (will be set by Schola)
         self._connected = False
 
-    def reset(self, seed=None, options=None):
-        """Reset environment for new episode."""
+    def reset(self, *, seed=None, options=None):
+        """Reset environment for all agents."""
         self.episode_steps = 0
-        self.total_reward = 0.0
-
-        # Return initial observation (zeros until connected)
-        obs = np.zeros(78, dtype=np.float32)  # 71 + 7 objective embedding
-        info = {"episode_steps": 0}
-
-        return obs, info
+        
+        try:
+            # Get observations from Schola
+            obs_vec, info_vec = self.schola_env.reset(seed=seed, options=options)
+            
+            if isinstance(obs_vec, dict):
+                raw_agent_ids = list(obs_vec.keys())
+                print(f"[SBDAPMMultiAgentEnv] Raw agents detected: {raw_agent_ids}")
+                
+                # ===== 수정: CDO 및 숫자 없는 컴포넌트 필터링 =====
+                filtered_agent_ids = []
+                
+                for aid in raw_agent_ids:
+                    # 1. CDO 필터링 (정확한 매칭)
+                    if aid == "ScholaAgentComponent":
+                        print(f"[SBDAPMMultiAgentEnv] Filtering CDO: {aid}")
+                        continue
+                    
+                    # 2. Default/Archetype 키워드 필터링
+                    if "Default" in aid or "Archetype" in aid:
+                        print(f"[SBDAPMMultiAgentEnv] Filtering default/archetype: {aid}")
+                        continue
+                    
+                    # 3. 숫자가 없는 컴포넌트 필터링 (인스턴스가 아님)
+                    if not any(char.isdigit() for char in aid):
+                        print(f"[SBDAPMMultiAgentEnv] Filtering non-instance: {aid}")
+                        continue
+                    
+                    filtered_agent_ids.append(aid)
+                
+                # 정렬하여 일관성 보장
+                filtered_agent_ids = sorted(filtered_agent_ids)
+                
+                print(f"[SBDAPMMultiAgentEnv] Filtered agents: {filtered_agent_ids}")
+                print(f"[SBDAPMMultiAgentEnv] Agent count: {len(filtered_agent_ids)}")
+                
+                # 예상 개수 검증 (4개)
+                EXPECTED_AGENT_COUNT = 4
+                if len(filtered_agent_ids) != EXPECTED_AGENT_COUNT:
+                    print(f"[SBDAPMMultiAgentEnv] WARNING: Expected {EXPECTED_AGENT_COUNT} agents, "
+                        f"got {len(filtered_agent_ids)}")
+                
+                self._agent_ids = set(filtered_agent_ids)
+                self._agent_id_list = filtered_agent_ids
+                
+                # Extract observations
+                obs_dict = {}
+                for agent_id in self._agent_ids:
+                    if agent_id not in obs_vec:
+                        print(f"[SBDAPMMultiAgentEnv] Error: Missing obs for {agent_id}")
+                        obs_dict[agent_id] = np.zeros(78, dtype=np.float32)
+                        continue
+                    
+                    obs = obs_vec[agent_id]
+                    
+                    # Handle batched obs
+                    if hasattr(obs, 'shape') and len(obs.shape) == 2:
+                        obs = obs[0]
+                    
+                    obs_dict[agent_id] = obs.astype(np.float32)
+                
+                # Extract info
+                info_dict = {}
+                if isinstance(info_vec, dict):
+                    info_dict = {aid: info_vec.get(aid, {}) for aid in self._agent_ids}
+                else:
+                    info_dict = {aid: {} for aid in self._agent_ids}
+                
+                return obs_dict, info_dict
+                
+            else:
+                print(f"[SBDAPMMultiAgentEnv] ERROR: Expected dict, got {type(obs_vec)}")
+                return {}, {}
+                
+        except Exception as e:
+            print(f"[SBDAPMMultiAgentEnv] Error during reset: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}, {}
 
     def step(self, action):
         """
@@ -156,102 +228,175 @@ if SCHOLA_AVAILABLE:
     class SafeUnrealVectorEnv(UnrealVectorEnv):
         """
         Wrapper around UnrealVectorEnv to handle None observations from Schola.
-        Fixes action/observation space mismatch by filtering to id_manager count.
+        Fixes action/observation space mismatch by filtering CDO from action_space.
         """
+        
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-
-            # Store original spaces and create filtered versions
-            self._internal_action_space = None
-            self._internal_obs_space = None
+            
+            # Store original (unfiltered) spaces for parent class
+            self._original_action_space = None
+            self._original_obs_space = None
+            
+            # Track which agents are real (not CDO)
             self._valid_agent_keys = []
-            self._filtered_out_keys = []
-
-            if hasattr(self, 'id_manager'):
+            self._cdo_keys = []
+            
+            if hasattr(self, 'id_manager') and isinstance(self.action_space, spaces.Dict):
+                original_keys = list(self.action_space.keys())
                 id_manager_count = len(self.id_manager.id_list)
-
-                # Store original action space for step() to use
-                if isinstance(self.action_space, spaces.Dict):
-                    original_keys = list(self.action_space.keys())
-                    self._internal_action_space = self.action_space
-
-                    # Filter out invalid keys (CDO, extra agents)
-                    valid_keys = []
-                    for key in original_keys:
-                        # Filter out CDO (Class Default Object) and Archetypes
-                        if key == "ScholaAgentComponent":
-                            continue
-                        if "Default" in key or "Archetype" in key:
-                            continue
-                        # Filter out keys without digits (usually non-instanced components)
-                        if not any(char.isdigit() for char in key):
-                            continue
+                
+                print(f"[SafeUnrealVectorEnv] Original action_space keys: {original_keys}")
+                print(f"[SafeUnrealVectorEnv] id_manager count: {id_manager_count}")
+                
+                # Identify CDO vs real agents
+                valid_keys = []
+                cdo_keys = []
+                
+                for key in original_keys:
+                    # CDO has no number suffix
+                    if key == "ScholaAgentComponent" or ("Default" in key) or ("Archetype" in key):
+                        cdo_keys.append(key)
+                        print(f"[SafeUnrealVectorEnv] Identified CDO: {key}")
+                    elif not any(char.isdigit() for char in key):
+                        cdo_keys.append(key)
+                        print(f"[SafeUnrealVectorEnv] Identified non-instance: {key}")
+                    else:
                         valid_keys.append(key)
-
-                    # Sort and limit to id_manager count
-                    valid_keys = sorted(valid_keys)[:id_manager_count]
-                    self._valid_agent_keys = valid_keys
-                    self._filtered_out_keys = [k for k in original_keys if k not in valid_keys]
-
-                    # Create filtered action space
-                    filtered_action_spaces = {key: self.action_space[key] for key in valid_keys}
-                    super().__setattr__('action_space', spaces.Dict(filtered_action_spaces))
-
-                    print(f"[SafeUnrealVectorEnv] Detected {len(original_keys)} agents, {len(valid_keys)} valid")
-                    print(f"[SafeUnrealVectorEnv] Valid: {valid_keys}")
-                    print(f"[SafeUnrealVectorEnv] Filtered out: {self._filtered_out_keys}")
-
-                # Same for observation space
-                if isinstance(self.observation_space, spaces.Dict):
-                    self._internal_obs_space = self.observation_space
-                    filtered_obs_spaces = {key: self.observation_space[key] for key in valid_keys}
+                
+                valid_keys = sorted(valid_keys)
+                self._valid_agent_keys = valid_keys
+                self._cdo_keys = cdo_keys
+                
+                # Store ORIGINAL action/obs spaces (don't modify them!)
+                self._original_action_space = self.action_space
+                self._original_obs_space = self.observation_space if isinstance(self.observation_space, spaces.Dict) else None
+                
+                # Create FILTERED spaces for RLlib (external interface)
+                filtered_action_spaces = {key: self.action_space[key] for key in valid_keys}
+                super().__setattr__('action_space', spaces.Dict(filtered_action_spaces))
+                
+                if self._original_obs_space:
+                    filtered_obs_spaces = {key: self._original_obs_space[key] for key in valid_keys}
                     super().__setattr__('observation_space', spaces.Dict(filtered_obs_spaces))
+                
+                print(f"[SafeUnrealVectorEnv] Valid agents: {valid_keys}")
+                print(f"[SafeUnrealVectorEnv] CDO keys (will use dummy actions): {cdo_keys}")
+                print(f"[SafeUnrealVectorEnv] Exposed action_space to RLlib: {list(self.action_space.keys())}")
+                print(f"[SafeUnrealVectorEnv] id_manager count matches valid agents: {len(valid_keys) == id_manager_count}")
+
+        def reset(self, **kwargs):
+            """Reset and filter CDO from initial observations."""
+            obs, infos = super().reset(**kwargs)
+
+            # Filter out CDO from observations and infos
+            if self._cdo_keys:
+                if isinstance(obs, dict):
+                    obs = {k: v for k, v in obs.items() if k not in self._cdo_keys}
+                if isinstance(infos, dict):
+                    infos = {k: v for k, v in infos.items() if k not in self._cdo_keys}
+
+                print(f"[SafeUnrealVectorEnv.reset] Filtered observations to {len(obs) if isinstance(obs, dict) else 'N/A'} valid agents")
+
+            return obs, infos
+
+        def unbatch_actions(self, actions):
+            """Override to handle filtered action_space (4 keys) vs id_manager (4 entries)."""
+            if isinstance(actions, dict):
+                # Filter to only valid agent keys (excludes CDO)
+                filtered_actions = {k: v for k, v in actions.items() if k not in self._cdo_keys}
+
+                # Convert to list in the order of valid_agent_keys
+                action_list = [filtered_actions[key] for key in self._valid_agent_keys if key in filtered_actions]
+
+                print(f"[SafeUnrealVectorEnv.unbatch_actions] Input keys: {list(actions.keys())}")
+                print(f"[SafeUnrealVectorEnv.unbatch_actions] Filtered to {len(action_list)} actions")
+                print(f"[SafeUnrealVectorEnv.unbatch_actions] id_manager size: {len(self.id_manager.id_list)}")
+
+                # Validate count matches
+                if len(action_list) != len(self.id_manager.id_list):
+                    print(f"[SafeUnrealVectorEnv.unbatch_actions] WARNING: Mismatch! actions={len(action_list)}, id_manager={len(self.id_manager.id_list)}")
+                    # Pad or truncate to match id_manager
+                    if len(action_list) < len(self.id_manager.id_list):
+                        # Pad with zeros
+                        dummy_action = np.zeros_like(action_list[0]) if action_list else np.zeros(8, dtype=np.float32)
+                        while len(action_list) < len(self.id_manager.id_list):
+                            action_list.append(dummy_action)
+                    else:
+                        action_list = action_list[:len(self.id_manager.id_list)]
+            else:
+                action_list = list(actions)
+
+            # Now nest using id_manager (which should match action_list count)
+            try:
+                nested = self.id_manager.nest_id_list(action_list)
+                print(f"[SafeUnrealVectorEnv.unbatch_actions] Successfully nested actions")
+                return nested
+            except Exception as e:
+                print(f"[SafeUnrealVectorEnv.unbatch_actions] Error nesting: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
 
         def step(self, actions):
-            """Add dummy actions for filtered-out agents (CDO) to match id_manager."""
-            if self._internal_action_space and isinstance(actions, dict):
-                # Create full action dict with dummies for filtered-out agents (CDO)
-                # This ensures we send an action for every key in id_manager
-                full_actions = dict(actions)
-                for key in self._filtered_out_keys:
-                    # Add zero action for CDO
-                    if key in self._internal_action_space.spaces:
-                        full_actions[key] = np.zeros(8, dtype=np.float32)
-
-                print(f"[SafeUnrealVectorEnv.step] Sending {len(full_actions)} actions ({len(actions)} real + {len(self._filtered_out_keys)} CDO)")
-                return super().step(full_actions)
-            else:
+            """Forward actions for valid agents only (matches filtered action_space and id_manager)."""
+            if not isinstance(actions, dict):
                 return super().step(actions)
 
+            # RLlib sends actions for valid agents (no CDO)
+            # Our filtered action_space has 4 keys, id_manager has 4 entries → perfect match
+            print(f"[SafeUnrealVectorEnv.step] Sending {len(actions)} actions (matches id_manager count)")
+
+            # Send actions directly (unbatch_actions will handle filtering)
+            obs, rewards, terminated, truncated, infos = super().step(actions)
+
+            # Filter CDO from results
+            if self._cdo_keys:
+                if isinstance(obs, dict):
+                    obs = {k: v for k, v in obs.items() if k not in self._cdo_keys}
+                if isinstance(rewards, dict):
+                    rewards = {k: v for k, v in rewards.items() if k not in self._cdo_keys}
+                if isinstance(terminated, dict):
+                    terminated = {k: v for k, v in terminated.items() if k not in self._cdo_keys}
+                if isinstance(truncated, dict):
+                    truncated = {k: v for k, v in truncated.items() if k not in self._cdo_keys}
+                if isinstance(infos, dict):
+                    infos = {k: v for k, v in infos.items() if k not in self._cdo_keys}
+
+                print(f"[SafeUnrealVectorEnv.step] Filtered results to {len(obs) if isinstance(obs, dict) else 'N/A'} valid agents")
+
+            return obs, rewards, terminated, truncated, infos
+
+        
         def batch_obs(self, obs):
-            # Check if any observation is None
+            """
+            Batch a list of observations.
+            """
+            # 예제: None 값 처리 및 배칭
             if any(o is None for o in obs):
-                # Find a valid observation to use as template
                 valid_obs = next((o for o in obs if o is not None), None)
                 if valid_obs is not None:
-                    # Replace None with valid_obs
                     obs = [o if o is not None else valid_obs for o in obs]
                 else:
-                    print("[SafeUnrealVectorEnv] Warning: All observations are None! Using zeros.")
-                    # Create dummy observation based on single_observation_space
+                    print("[SBDAPMMultiAgentEnv] Warning: All observations are None! Using zeros.")
                     dummy = self.single_observation_space.sample()
-                    # Zero it out to be safe
                     if isinstance(dummy, np.ndarray):
                         dummy.fill(0)
                     obs = [dummy for _ in obs]
-
             try:
                 return super().batch_obs(obs)
             except Exception as e:
-                print(f"[SafeUnrealVectorEnv] Error in batch_obs: {e}")
-                # Fallback: return stacked zeros
-                # This assumes Box space for simplicity, but handles Dict if we can
+                print("[SBDAPMMultiAgentEnv] Error in batch_obs:", e)
                 try:
                     import gymnasium.experimental.vector.utils as utils
                     return utils.batch_space(self.single_observation_space, len(obs))
-                except:
-                    print("[SafeUnrealVectorEnv] Critical: Failed to create fallback batch.")
+                except Exception:
+                    print("[SBDAPMMultiAgentEnv] Critical: Failed to create fallback batch.")
                     raise e
+
+
+
+
 
     class SBDAPMScholaEnv(gym.Env):
         """
@@ -371,93 +516,87 @@ if SCHOLA_AVAILABLE:
             # Fallback - return as-is
             return action
 
-        def reset(self, seed=None, options=None):
-            """Reset environment and return observation for first agent."""
+        def reset(self, *, seed=None, options=None):
+            """Reset environment for all agents."""
             self.episode_steps = 0
-
+            
             try:
-                print(f"[SBDAPMScholaEnv] Calling Schola reset...")
-                # Get vectorized observations
                 obs_vec, info_vec = self.schola_env.reset(seed=seed, options=options)
-
-                print(f"[SBDAPMScholaEnv] Reset returned obs type: {type(obs_vec)}")
-                print(f"[SBDAPMScholaEnv] Reset returned info type: {type(info_vec)}")
-
-                # Sync agent_ids based on actual observations after reset
+                
                 if isinstance(obs_vec, dict):
-                    actual_agent_ids = list(obs_vec.keys())
-                    if actual_agent_ids != self.agent_ids:
-                        print(f"[SBDAPMScholaEnv] Syncing agent IDs: {self.agent_ids} -> {actual_agent_ids}")
-                        self.agent_ids = actual_agent_ids
-                        self.primary_agent_id = self.agent_ids[0] if self.agent_ids else None
-                        # Also sync action space structure
-                        if isinstance(self.schola_env.action_space, spaces.Dict) and self.primary_agent_id:
-                            self.action_space_structure = self.schola_env.action_space[self.primary_agent_id]
-
-                # Check if obs_vec is a space class (error case)
-                if isinstance(obs_vec, (spaces.Dict, spaces.Box, spaces.Space)):
-                    print(f"[SBDAPMScholaEnv] ERROR: Reset returned a space class instead of observations!")
-                    print(f"[SBDAPMScholaEnv] This likely means the UE environment is not properly initialized.")
-                    obs = np.zeros(78, dtype=np.float32)
-                # Extract first agent's observation
-                elif obs_vec is None:
-                    print(f"[SBDAPMScholaEnv] Warning: No observations returned, using zeros")
-                    obs = np.zeros(78, dtype=np.float32)
-                elif isinstance(obs_vec, dict):
-                    # Dict with actual data: extract using primary agent ID
-                    print(f"[SBDAPMScholaEnv] obs_vec is dict with keys: {list(obs_vec.keys())[:5]}")
-                    if self.primary_agent_id and self.primary_agent_id in obs_vec:
-                        obs = obs_vec[self.primary_agent_id]
-                        print(f"[SBDAPMScholaEnv] Extracted obs for agent {self.primary_agent_id}, shape: {obs.shape if hasattr(obs, 'shape') else 'N/A'}")
-                    else:
-                        print(f"[SBDAPMScholaEnv] Warning: Agent ID {self.primary_agent_id} not found in obs_vec keys: {list(obs_vec.keys())}")
-                        obs = np.zeros(78, dtype=np.float32)
-                elif hasattr(obs_vec, '__len__') and len(obs_vec) == 0:
-                    obs = np.zeros(78, dtype=np.float32)
-                elif isinstance(obs_vec, (list, tuple, np.ndarray)) and len(obs_vec) > 0:
-                    # Array-like: use numeric index
-                    obs = obs_vec[0]
-                else:
-                    print(f"[SBDAPMScholaEnv] Warning: Unexpected obs_vec type: {type(obs_vec)}")
-                    obs = np.zeros(78, dtype=np.float32)
-
-                # Extract first agent's info
-                info = {}
-                if info_vec is not None:
+                    raw_agent_ids = list(obs_vec.keys())
+                    print(f"[SBDAPMMultiAgentEnv] Raw agents detected: {raw_agent_ids}")
+                    
+                    # ===== CDO 필터링 (관찰용) =====
+                    filtered_agent_ids = []
+                    
+                    for aid in raw_agent_ids:
+                        # CDO 제외
+                        if aid == "ScholaAgentComponent":
+                            print(f"[SBDAPMMultiAgentEnv] Filtering CDO from observations: {aid}")
+                            continue
+                        
+                        # Default/Archetype 제외
+                        if "Default" in aid or "Archetype" in aid:
+                            print(f"[SBDAPMMultiAgentEnv] Filtering archetype: {aid}")
+                            continue
+                        
+                        # 숫자 없는 컴포넌트 제외
+                        if not any(char.isdigit() for char in aid):
+                            print(f"[SBDAPMMultiAgentEnv] Filtering non-instance: {aid}")
+                            continue
+                        
+                        filtered_agent_ids.append(aid)
+                    
+                    # 정렬 및 개수 검증
+                    filtered_agent_ids = sorted(filtered_agent_ids)
+                    
+                    print(f"[SBDAPMMultiAgentEnv] Filtered agents: {filtered_agent_ids}")
+                    print(f"[SBDAPMMultiAgentEnv] Agent count: {len(filtered_agent_ids)}")
+                    
+                    # 예상 개수 검증
+                    EXPECTED_AGENT_COUNT = 4
+                    if len(filtered_agent_ids) != EXPECTED_AGENT_COUNT:
+                        print(f"[SBDAPMMultiAgentEnv] WARNING: Expected {EXPECTED_AGENT_COUNT}, "
+                            f"got {len(filtered_agent_ids)}")
+                    
+                    self._agent_ids = set(filtered_agent_ids)
+                    self._agent_id_list = filtered_agent_ids
+                    
+                    # Extract observations (CDO 제외)
+                    obs_dict = {}
+                    for agent_id in self._agent_ids:
+                        if agent_id not in obs_vec:
+                            print(f"[SBDAPMMultiAgentEnv] Error: Missing obs for {agent_id}")
+                            obs_dict[agent_id] = np.zeros(78, dtype=np.float32)
+                            continue
+                        
+                        obs = obs_vec[agent_id]
+                        
+                        # Handle batched obs
+                        if hasattr(obs, 'shape') and len(obs.shape) == 2:
+                            obs = obs[0]
+                        
+                        obs_dict[agent_id] = obs.astype(np.float32)
+                    
+                    # Extract info (CDO 제외)
+                    info_dict = {}
                     if isinstance(info_vec, dict):
-                        # Try to extract for primary agent ID first
-                        if self.primary_agent_id and self.primary_agent_id in info_vec:
-                            info = info_vec[self.primary_agent_id]
-                        else:
-                            # Fallback: extract first entry
-                            info = {k: v[0] if isinstance(v, (list, np.ndarray)) and len(v) > 0 else v
-                                    for k, v in info_vec.items()}
-                    elif isinstance(info_vec, (list, tuple)) and len(info_vec) > 0:
-                        info = info_vec[0] if info_vec[0] is not None else {}
-
+                        info_dict = {aid: info_vec.get(aid, {}) for aid in self._agent_ids}
+                    else:
+                        info_dict = {aid: {} for aid in self._agent_ids}
+                    
+                    return obs_dict, info_dict
+                    
+                else:
+                    print(f"[SBDAPMMultiAgentEnv] ERROR: Expected dict, got {type(obs_vec)}")
+                    return {}, {}
+                    
             except Exception as e:
-                print(f"[SBDAPMScholaEnv] Error during reset: {e}")
+                print(f"[SBDAPMMultiAgentEnv] Error during reset: {e}")
                 import traceback
                 traceback.print_exc()
-                obs = np.zeros(78, dtype=np.float32)
-                info = {}
-
-            # Validate observation shape
-            if hasattr(obs, 'shape') and obs.shape != (78,):
-                print(f"[SBDAPMScholaEnv] Warning: Expected obs shape (78,), got {obs.shape}")
-                # Handle 2D observations (batch dimension) - take first observation
-                if len(obs.shape) == 2 and obs.shape[-1] == 78:
-                    # print(f"[SBDAPMScholaEnv] Extracting first observation from batch")
-                    obs = obs[0]
-                elif obs.size == 78:
-                    obs = obs.reshape(78)
-                else:
-                    print(f"[SBDAPMScholaEnv] Cannot reshape, using zeros. obs.size={obs.size}")
-                    obs = np.zeros(78, dtype=np.float32)
-            elif not hasattr(obs, 'shape'):
-                 obs = np.zeros(78, dtype=np.float32)
-
-            return obs, info
+                return {}, {}
 
         def step(self, action):
             """Execute action for first agent and return result."""
@@ -741,117 +880,143 @@ if SCHOLA_AVAILABLE:
         def step(self, action_dict):
             """
             Execute actions for all agents.
-
+            
             Args:
                 action_dict: {agent_id: action} where action is (8,) numpy array
-
+            
             Returns:
-                obs_dict: {agent_id: observation}
-                reward_dict: {agent_id: reward}
-                terminated_dict: {agent_id: terminated}
-                truncated_dict: {agent_id: truncated}
-                info_dict: {agent_id: info}
+                obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
             """
             try:
-                # Validate action_dict has all agents
+                # Validate action_dict
                 if not isinstance(action_dict, dict):
                     print(f"[SBDAPMMultiAgentEnv] ERROR: Expected action dict, got {type(action_dict)}")
                     action_dict = {agent_id: np.zeros(8, dtype=np.float32) for agent_id in self._agent_ids}
-
-                # Debug: Check what RLlib sent vs what we expect
+                
                 received_agents = set(action_dict.keys())
                 expected_agents = self._agent_ids
                 missing_agents = expected_agents - received_agents
                 extra_agents = received_agents - expected_agents
-
+                
                 if missing_agents:
-                    print(f"[SBDAPMMultiAgentEnv] Warning: RLlib didn't send actions for {len(missing_agents)} agents: {list(missing_agents)[:3]}")
+                    print(f"[SBDAPMMultiAgentEnv] Warning: Missing actions for {len(missing_agents)} agents")
                 if extra_agents:
-                    print(f"[SBDAPMMultiAgentEnv] Warning: RLlib sent actions for {len(extra_agents)} unknown agents: {list(extra_agents)[:3]}")
-
-                # Format actions for Schola
-                # Only send actions for valid agents (those in id_manager), NOT CDO or extra agents
+                    print(f"[SBDAPMMultiAgentEnv] Warning: Extra actions for {len(extra_agents)} unknown agents")
+                
+                # ===== 수정: id_manager 순서와 정확히 일치하도록 액션 딕셔너리 구성 =====
+                # Schola의 action_space.keys() 순서를 사용 (이미 SafeUnrealVectorEnv에서 필터링됨)
+                if not hasattr(self.schola_env, 'action_space') or not isinstance(self.schola_env.action_space, spaces.Dict):
+                    print(f"[SBDAPMMultiAgentEnv] ERROR: schola_env.action_space is not Dict!")
+                    raise ValueError("Expected Dict action space from Schola")
+                
+                schola_action_space_keys = list(self.schola_env.action_space.keys())
+                
+                # Schola의 action_space 키 순서대로 액션 딕셔너리 재구성
                 formatted_actions = {}
-
-                if isinstance(self.schola_env.action_space, spaces.Dict):
-                    # Only create actions for the 4 valid agents we're training
-                    for key in self._agent_ids:
-                        action = action_dict.get(key, np.zeros(8, dtype=np.float32))
-                        if not isinstance(action, np.ndarray):
-                            action = np.array(action, dtype=np.float32)
-                        if action.shape != (8,):
-                            action = np.zeros(8, dtype=np.float32)
-
-                        formatted_actions[key] = action.astype(np.float32)
-
-                        # Debug: Show action values
-                        non_zero = np.count_nonzero(action)
-                        print(f"[DEBUG]   {key}: shape={action.shape}, non-zero={non_zero}, sample={action[:3]}")
-
-                print(f"[DEBUG] Formatted {len(formatted_actions)} actions for valid agents only")
-
+                for key in schola_action_space_keys:
+                    if key in action_dict:
+                        action = action_dict[key]
+                    else:
+                        print(f"[SBDAPMMultiAgentEnv] Warning: Missing action for {key}, using zeros")
+                        action = np.zeros(8, dtype=np.float32)
+                    
+                    if not isinstance(action, np.ndarray):
+                        action = np.array(action, dtype=np.float32)
+                    if action.shape != (8,):
+                        print(f"[SBDAPMMultiAgentEnv] Warning: Invalid shape for {key}: {action.shape}")
+                        action = np.zeros(8, dtype=np.float32)
+                    
+                    formatted_actions[key] = action.astype(np.float32)
+                
+                print(f"[SBDAPMMultiAgentEnv.step] Sending {len(formatted_actions)} actions to Schola")
+                print(f"[DEBUG] Action keys order: {list(formatted_actions.keys())}")
+                for agent_id, action in formatted_actions.items():
+                    non_zero = np.count_nonzero(action)
+                    print(f"[DEBUG]   {agent_id}: shape={action.shape}, non-zero={non_zero}, sample={action[:3]}")
+                
+                # ===== Schola step 호출 (딕셔너리 형태로 전달) =====
                 obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.schola_env.step(formatted_actions)
-
-
-
-                # Process observations
+                
+                # ===== 결과 처리 =====
                 obs_dict = {}
                 if isinstance(obs_vec, dict):
+                    # 딕셔너리로 반환된 경우
                     for agent_id in self._agent_ids:
                         obs = obs_vec.get(agent_id, np.zeros(78, dtype=np.float32))
-                        # Handle batched observations
                         if hasattr(obs, 'shape') and len(obs.shape) == 2 and obs.shape[-1] == 78:
                             obs = obs[0]
                         elif hasattr(obs, 'shape') and obs.shape != (78,):
                             obs = np.zeros(78, dtype=np.float32)
                         obs_dict[agent_id] = obs.astype(np.float32)
+                elif isinstance(obs_vec, (np.ndarray, list)):
+                    # 배열 형태로 반환된 경우 agent_id_list 순서대로 매핑
+                    for i, agent_id in enumerate(self._agent_id_list):
+                        if i < len(obs_vec):
+                            obs = obs_vec[i]
+                            if hasattr(obs, 'shape') and len(obs.shape) == 2 and obs.shape[-1] == 78:
+                                obs = obs[0]
+                            elif hasattr(obs, 'shape') and obs.shape != (78,):
+                                obs = np.zeros(78, dtype=np.float32)
+                            obs_dict[agent_id] = obs.astype(np.float32)
+                        else:
+                            obs_dict[agent_id] = np.zeros(78, dtype=np.float32)
                 else:
                     obs_dict = {agent_id: np.zeros(78, dtype=np.float32) for agent_id in self._agent_ids}
-
-                # Process rewards
+                
+                # Process rewards (딕셔너리 또는 리스트 모두 처리)
                 reward_dict = {}
                 if isinstance(reward_vec, dict):
                     reward_dict = {agent_id: float(reward_vec.get(agent_id, 0.0)) for agent_id in self._agent_ids}
+                elif isinstance(reward_vec, (np.ndarray, list)) and len(reward_vec) >= len(self._agent_id_list):
+                    reward_dict = {agent_id: float(reward_vec[i]) for i, agent_id in enumerate(self._agent_id_list)}
                 else:
                     reward_dict = {agent_id: 0.0 for agent_id in self._agent_ids}
-
+                
                 # Process terminated
                 terminated_dict = {}
                 if isinstance(terminated_vec, dict):
                     terminated_dict = {agent_id: bool(terminated_vec.get(agent_id, False)) for agent_id in self._agent_ids}
+                elif isinstance(terminated_vec, (np.ndarray, list)) and len(terminated_vec) >= len(self._agent_id_list):
+                    terminated_dict = {agent_id: bool(terminated_vec[i]) for i, agent_id in enumerate(self._agent_id_list)}
                 else:
                     terminated_dict = {agent_id: False for agent_id in self._agent_ids}
-
+                
                 # Process truncated
                 truncated_dict = {}
                 if isinstance(truncated_vec, dict):
                     truncated_dict = {agent_id: bool(truncated_vec.get(agent_id, False)) for agent_id in self._agent_ids}
+                elif isinstance(truncated_vec, (np.ndarray, list)) and len(truncated_vec) >= len(self._agent_id_list):
+                    truncated_dict = {agent_id: bool(truncated_vec[i]) for i, agent_id in enumerate(self._agent_id_list)}
                 else:
                     truncated_dict = {agent_id: False for agent_id in self._agent_ids}
-
+                
                 # Process info
                 info_dict = {}
                 if isinstance(info_vec, dict):
                     info_dict = {agent_id: info_vec.get(agent_id, {}) for agent_id in self._agent_ids}
+                elif isinstance(info_vec, (list, tuple)) and len(info_vec) >= len(self._agent_id_list):
+                    info_dict = {agent_id: info_vec[i] if i < len(info_vec) and info_vec[i] is not None else {} 
+                                for i, agent_id in enumerate(self._agent_id_list)}
                 else:
                     info_dict = {agent_id: {} for agent_id in self._agent_ids}
-
+                
                 self.episode_steps += 1
-
+                
                 # Enforce max episode length
                 if self.episode_steps >= self.max_episode_steps:
                     truncated_dict = {agent_id: True for agent_id in self._agent_ids}
-
+                
                 # RLlib expects "__all__" key for global termination
                 terminated_dict["__all__"] = all(terminated_dict.values())
                 truncated_dict["__all__"] = all(truncated_dict.values())
-
+                
                 return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
-
+            
             except Exception as e:
                 print(f"[SBDAPMMultiAgentEnv] Error during step: {e}")
                 import traceback
                 traceback.print_exc()
+                
                 # Return error state
                 obs_dict = {agent_id: np.zeros(78, dtype=np.float32) for agent_id in self._agent_ids}
                 reward_dict = {agent_id: 0.0 for agent_id in self._agent_ids}
@@ -860,7 +1025,9 @@ if SCHOLA_AVAILABLE:
                 truncated_dict = {agent_id: False for agent_id in self._agent_ids}
                 truncated_dict["__all__"] = False
                 info_dict = {agent_id: {} for agent_id in self._agent_ids}
+                
                 return obs_dict, reward_dict, terminated_dict, truncated_dict, info_dict
+
 
         def render(self):
             """Rendering is handled by UE."""
