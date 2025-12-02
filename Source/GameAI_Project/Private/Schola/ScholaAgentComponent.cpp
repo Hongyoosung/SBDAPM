@@ -13,7 +13,23 @@ UScholaAgentComponent::UScholaAgentComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 
-	// Create default subobjects for Schola components
+	// CRITICAL FIX: Hide CDO from TObjectIterator scans
+	// Schola's base class discovers components via TObjectIterator, which includes CDOs
+	// This causes a 5-component discovery (4 agents + 1 CDO) vs 4-entry id_manager mismatch
+	if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		// Disable ticking on CDO (should never execute anyway)
+		PrimaryComponentTick.bCanEverTick = false;
+		PrimaryComponentTick.bStartWithTickEnabled = false;
+
+		// Mark as transient to discourage serialization/discovery
+		SetFlags(RF_Transient);
+
+		// DO NOT create subobjects for CDO (reduces memory footprint)
+		return;
+	}
+
+	// Create default subobjects for Schola components (only for real instances)
 	TacticalObserver = CreateDefaultSubobject<UTacticalObserver>(TEXT("TacticalObserver"));
 	RewardProvider = CreateDefaultSubobject<UTacticalRewardProvider>(TEXT("RewardProvider"));
 	TacticalActuator = CreateDefaultSubobject<UTacticalActuator>(TEXT("TacticalActuator"));
