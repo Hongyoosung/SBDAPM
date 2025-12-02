@@ -156,8 +156,73 @@ if SCHOLA_AVAILABLE:
     class SafeUnrealVectorEnv(UnrealVectorEnv):
         """
         Wrapper around UnrealVectorEnv to handle None observations from Schola.
-        Fixes TypeError when some agents return None during reset/step.
+        Fixes action/observation space mismatch by filtering to id_manager count.
         """
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            # Store original spaces and create filtered versions
+            self._internal_action_space = None
+            self._internal_obs_space = None
+            self._valid_agent_keys = []
+            self._filtered_out_keys = []
+
+            if hasattr(self, 'id_manager'):
+                id_manager_count = len(self.id_manager.id_list)
+
+                # Store original action space for step() to use
+                if isinstance(self.action_space, spaces.Dict):
+                    original_keys = list(self.action_space.keys())
+                    self._internal_action_space = self.action_space
+
+                    # Filter out invalid keys (CDO, extra agents)
+                    valid_keys = []
+                    for key in original_keys:
+                        # Filter out CDO (Class Default Object) and Archetypes
+                        if key == "ScholaAgentComponent":
+                            continue
+                        if "Default" in key or "Archetype" in key:
+                            continue
+                        # Filter out keys without digits (usually non-instanced components)
+                        if not any(char.isdigit() for char in key):
+                            continue
+                        valid_keys.append(key)
+
+                    # Sort and limit to id_manager count
+                    valid_keys = sorted(valid_keys)[:id_manager_count]
+                    self._valid_agent_keys = valid_keys
+                    self._filtered_out_keys = [k for k in original_keys if k not in valid_keys]
+
+                    # Create filtered action space
+                    filtered_action_spaces = {key: self.action_space[key] for key in valid_keys}
+                    super().__setattr__('action_space', spaces.Dict(filtered_action_spaces))
+
+                    print(f"[SafeUnrealVectorEnv] Detected {len(original_keys)} agents, {len(valid_keys)} valid")
+                    print(f"[SafeUnrealVectorEnv] Valid: {valid_keys}")
+                    print(f"[SafeUnrealVectorEnv] Filtered out: {self._filtered_out_keys}")
+
+                # Same for observation space
+                if isinstance(self.observation_space, spaces.Dict):
+                    self._internal_obs_space = self.observation_space
+                    filtered_obs_spaces = {key: self.observation_space[key] for key in valid_keys}
+                    super().__setattr__('observation_space', spaces.Dict(filtered_obs_spaces))
+
+        def step(self, actions):
+            """Add dummy actions for filtered-out agents (CDO) to match id_manager."""
+            if self._internal_action_space and isinstance(actions, dict):
+                # Create full action dict with dummies for filtered-out agents (CDO)
+                # This ensures we send an action for every key in id_manager
+                full_actions = dict(actions)
+                for key in self._filtered_out_keys:
+                    # Add zero action for CDO
+                    if key in self._internal_action_space.spaces:
+                        full_actions[key] = np.zeros(8, dtype=np.float32)
+
+                print(f"[SafeUnrealVectorEnv.step] Sending {len(full_actions)} actions ({len(actions)} real + {len(self._filtered_out_keys)} CDO)")
+                return super().step(full_actions)
+            else:
+                return super().step(actions)
+
         def batch_obs(self, obs):
             # Check if any observation is None
             if any(o is None for o in obs):
@@ -174,7 +239,7 @@ if SCHOLA_AVAILABLE:
                     if isinstance(dummy, np.ndarray):
                         dummy.fill(0)
                     obs = [dummy for _ in obs]
-            
+
             try:
                 return super().batch_obs(obs)
             except Exception as e:
@@ -216,6 +281,15 @@ if SCHOLA_AVAILABLE:
                 print(f"[DEBUG] Action space is Dict with keys: {list(self.schola_env.action_space.keys())}")
                 first_agent = list(self.schola_env.action_space.keys())[0]
                 print(f"[DEBUG] Action space for '{first_agent}': {self.schola_env.action_space[first_agent]}")
+
+            # Check id_manager structure
+            if hasattr(self.schola_env, 'id_manager'):
+                print(f"[DEBUG] id_manager has {len(self.schola_env.id_manager.id_list)} entries")
+                print(f"[DEBUG] id_manager entries: {self.schola_env.id_manager.id_list}")
+                # Map flat_id to agent_id
+                print(f"[DEBUG] Agent ID mapping:")
+                for flat_id, (env_id, agent_id_int) in enumerate(self.schola_env.id_manager.id_list):
+                    print(f"[DEBUG]   flat_id {flat_id} → env={env_id}, agent_int={agent_id_int}")
 
             # Define our single-agent spaces
             self.observation_space = spaces.Box(
@@ -548,11 +622,22 @@ if SCHOLA_AVAILABLE:
             print(f"[SBDAPMMultiAgentEnv] Initialized (host={host}, port={port})")
             print(f"[DEBUG] Schola action_space type: {type(self.schola_env.action_space)}")
             print(f"[DEBUG] Schola observation_space type: {type(self.schola_env.observation_space)}")
-            
+
             # Check if Schola has id_manager
             if hasattr(self.schola_env, 'id_manager'):
-                print(f"[DEBUG] Schola has id_manager with {len(self.schola_env.id_manager.id_list)} agents")
-                print(f"[DEBUG] Schola id_list: {self.schola_env.id_manager.id_list[:10]}")  # First 10
+                print(f"[DEBUG] Schola has id_manager with {len(self.schola_env.id_manager.id_list)} entries")
+                print(f"[DEBUG] id_manager entries: {self.schola_env.id_manager.id_list}")
+                for flat_id, (env_id, agent_id_int) in enumerate(self.schola_env.id_manager.id_list):
+                    print(f"[DEBUG]   flat_id {flat_id} → env={env_id}, agent_int={agent_id_int}")
+
+            # Check action space keys vs id_manager
+            if isinstance(self.schola_env.action_space, spaces.Dict):
+                action_space_keys = list(self.schola_env.action_space.keys())
+                print(f"[DEBUG] Action space has {len(action_space_keys)} keys: {action_space_keys}")
+                if hasattr(self.schola_env, 'id_manager'):
+                    id_manager_count = len(self.schola_env.id_manager.id_list)
+                    if len(action_space_keys) != id_manager_count:
+                        print(f"[WARNING] Mismatch: action_space has {len(action_space_keys)} keys but id_manager has {id_manager_count} entries!")
 
 
 
@@ -678,103 +763,33 @@ if SCHOLA_AVAILABLE:
                 expected_agents = self._agent_ids
                 missing_agents = expected_agents - received_agents
                 extra_agents = received_agents - expected_agents
-                
+
                 if missing_agents:
                     print(f"[SBDAPMMultiAgentEnv] Warning: RLlib didn't send actions for {len(missing_agents)} agents: {list(missing_agents)[:3]}")
                 if extra_agents:
                     print(f"[SBDAPMMultiAgentEnv] Warning: RLlib sent actions for {len(extra_agents)} unknown agents: {list(extra_agents)[:3]}")
 
-                # CRITICAL FIX: Schola's GymVectorEnv.unbatch_actions() expects actions
-                # in the SAME FORMAT as observations are returned - a batched dict/array
-                # that can be iterated using gym.experimental.vector.utils.iterate()
-                #
-                # The unbatch_actions method converts this to nested dict format using:
-                #   it = gym.experimental.vector.utils.iterate(self.action_space, actions)
-                #   return self.id_manager.nest_id_list([value for value in it])
-                #
-                # This means we need to pass actions in the batched format that matches
-                # self.schola_env.action_space (the batched version, not single_action_space)
-                
-                # Convert RLlib's action_dict {agent_id: action} to Schola's expected format
-                # Schola uses integer flat IDs (0, 1, 2, 3...) internally via id_manager
-                
-                # Build a mapping from agent_id (string) to flat_id (int)
-                if not hasattr(self, '_agent_id_to_flat_id'):
-                    # Create mapping on first step
-                    self._agent_id_to_flat_id = {}
-                    if hasattr(self.schola_env, 'id_manager'):
-                        # Map each agent_id to its flat ID in Schola's id_manager
-                        print(f"[DEBUG] Creating agent_id to flat_id mapping...")
-                        for flat_id, (env_id, agent_id_int) in enumerate(self.schola_env.id_manager.id_list):
-                            # Try to find matching agent_id in our _agent_ids
-                            # Schola uses integer agent IDs internally, but exposes string IDs in obs dict
-                            # We need to match by position/index
-                            if flat_id < len(self._agent_id_list):
-                                agent_id_str = self._agent_id_list[flat_id]
-                                self._agent_id_to_flat_id[agent_id_str] = flat_id
-                                print(f"[DEBUG]   {agent_id_str} -> flat_id {flat_id}")
-                
-                # Create action array/dict in Schola's expected batched format
-                # The format depends on self.schola_env.action_space structure
+                # Format actions for Schola
+                # Only send actions for valid agents (those in id_manager), NOT CDO or extra agents
+                formatted_actions = {}
+
                 if isinstance(self.schola_env.action_space, spaces.Dict):
-                    # Batched Dict space: {key: array(num_envs, ...)} for each action component
-                    # Convert our per-agent actions to batched format
-                    formatted_actions = {}
-
-                    # Get action space keys from Schola
-                    schola_action_keys = list(self.schola_env.single_action_space.keys())
-
-                    # Determine batch size (num_envs)
-                    batch_size = self.schola_env.num_envs
-
-                    # Initialize batched arrays for ALL Schola keys (including CDO and extras)
-                    for key in schola_action_keys:
-                        key_space = self.schola_env.single_action_space[key]
-                        if isinstance(key_space, spaces.Box):
-                            shape = (batch_size,) + key_space.shape
-                            formatted_actions[key] = np.zeros(shape, dtype=np.float32)
-
-                    # Fill in actions ONLY for our active agents using flat_id mapping
-                    for agent_id in self._agent_ids:
-                        action = action_dict.get(agent_id, np.zeros(8, dtype=np.float32))
+                    # Only create actions for the 4 valid agents we're training
+                    for key in self._agent_ids:
+                        action = action_dict.get(key, np.zeros(8, dtype=np.float32))
                         if not isinstance(action, np.ndarray):
                             action = np.array(action, dtype=np.float32)
+                        if action.shape != (8,):
+                            action = np.zeros(8, dtype=np.float32)
 
-                        # Get flat_id for this agent
-                        flat_id = self._agent_id_to_flat_id.get(agent_id, 0)
+                        formatted_actions[key] = action.astype(np.float32)
 
-                        # Assign action to the correct position
-                        if agent_id in formatted_actions and flat_id < batch_size:
-                            formatted_actions[agent_id][flat_id] = action
-                        else:
-                            print(f"[WARNING] Agent {agent_id} not found in action space or flat_id {flat_id} >= batch_size {batch_size}")
-                else:
-                    # Batched Box space: array(N, action_dim)
-                    # Create ordered array using flat IDs
-                    num_agents = len(self._agent_ids)
-                    action_dim = 8
-                    formatted_actions = np.zeros((num_agents, action_dim), dtype=np.float32)
-                    
-                    for agent_id in self._agent_ids:
-                        action = action_dict.get(agent_id, np.zeros(8, dtype=np.float32))
-                        if not isinstance(action, np.ndarray):
-                            action = np.array(action, dtype=np.float32)
-                        
-                        # Get flat_id for this agent
-                        flat_id = self._agent_id_to_flat_id.get(agent_id, 0)
-                        formatted_actions[flat_id] = action.astype(np.float32)
-                
-                print(f"[DEBUG] Calling Schola step with formatted_actions type: {type(formatted_actions)}")
-                if isinstance(formatted_actions, dict):
-                    print(f"[DEBUG] formatted_actions keys: {list(formatted_actions.keys())}")
-                    for key, val in formatted_actions.items():
-                        # Print shape and check for non-zero actions
-                        if list(formatted_actions.keys()).index(key) < 6:  # Show first 6 agents
-                            non_zero_count = np.count_nonzero(val) if hasattr(val, 'shape') else 0
-                            print(f"[DEBUG] {key}: shape {val.shape if hasattr(val, 'shape') else 'N/A'}, non-zero: {non_zero_count}")
-                elif isinstance(formatted_actions, np.ndarray):
-                    print(f"[DEBUG] formatted_actions array shape: {formatted_actions.shape}")
-                
+                        # Debug: Show action values
+                        non_zero = np.count_nonzero(action)
+                        print(f"[DEBUG]   {key}: shape={action.shape}, non-zero={non_zero}, sample={action[:3]}")
+
+                print(f"[DEBUG] Formatted {len(formatted_actions)} actions for valid agents only")
+
                 obs_vec, reward_vec, terminated_vec, truncated_vec, info_vec = self.schola_env.step(formatted_actions)
 
 

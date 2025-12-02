@@ -120,11 +120,11 @@ void FSTTask_ExecuteObjective::ExecuteAtomicAction(FStateTreeExecutionContext& C
 		SharedContext.bScholaActionReceived = false; // Reset flag
 
 		APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-		/*UE_LOG(LogTemp, Display, TEXT("🔗 [SCHOLA ACTION] '%s': Move=(%.2f,%.2f) Speed=%.2f, Look=(%.2f,%.2f), Fire=%d"),
+		UE_LOG(LogTemp, Display, TEXT("🔗 [SCHOLA ACTION] '%s': Move=(%.2f,%.2f) Speed=%.2f, Look=(%.2f,%.2f), Fire=%d"),
 			*GetNameSafe(Pawn),
 			RawAction.MoveDirection.X, RawAction.MoveDirection.Y, RawAction.MoveSpeed,
 			RawAction.LookDirection.X, RawAction.LookDirection.Y,
-			RawAction.bFire ? 1 : 0);*/
+			RawAction.bFire ? 1 : 0);
 	}
 	// Priority 2: Query local RL policy (inference mode)
 	else if (SharedContext.TacticalPolicy && SharedContext.CurrentObjective)
@@ -241,10 +241,10 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 			SharedContext.MovementDestination = TargetLocation;
 			SharedContext.bIsMoving = true;
 
-			/*UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC DIRECT] '%s': AddMovementInput(%.2f, %.2f, %.2f), Speed=%.1f"),
+			UE_LOG(LogTemp, Display, TEXT("[MOVE EXEC DIRECT] '%s': AddMovementInput(%.2f, %.2f, %.2f), Speed=%.1f"),
 				*Pawn->GetName(),
 				WorldMoveDir.X, WorldMoveDir.Y, WorldMoveDir.Z,
-				Pawn->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);*/
+				Pawn->FindComponentByClass<UCharacterMovementComponent>()->MaxWalkSpeed);
 		}
 	}
 	else

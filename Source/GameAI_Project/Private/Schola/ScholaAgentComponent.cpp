@@ -23,6 +23,22 @@ void UScholaAgentComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// CRITICAL: Do not initialize CDOs (Class Default Objects)
+	// CDOs are template objects and should never participate in gameplay or training
+	if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] Skipping BeginPlay for CDO/Archetype: %s"), *GetName());
+		return;
+	}
+
+	// Also check owner
+	AActor* Owner = GetOwner();
+	if (!Owner || Owner->HasAnyFlags(RF_ClassDefaultObject))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaAgent] Skipping BeginPlay for component with invalid/CDO owner: %s"), *GetName());
+		return;
+	}
+
 	// Auto-configure follower agent if enabled
 	if (bAutoConfigureFollower)
 	{
@@ -33,7 +49,7 @@ void UScholaAgentComponent::BeginPlay()
 	// This component will be auto-registered by the environment during initialization
 
 	UE_LOG(LogTemp, Log, TEXT("[ScholaAgent] %s: Initialized"),
-		*GetOwner()->GetName());
+		*Owner->GetName());
 }
 
 void UScholaAgentComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)

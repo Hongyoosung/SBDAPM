@@ -87,6 +87,12 @@ public:
 	/** Has InternalRegisterAgents been called this session? */
 	bool bAgentsRegistered = false;
 
+	/** Is this the primary environment instance? (singleton enforcement) */
+	bool bIsPrimaryEnvironment = false;
+
+	/** Static reference to the primary environment (singleton) */
+	static AScholaCombatEnvironment* PrimaryEnvironmentInstance;
+
 	//--------------------------------------------------------------------------
 	// UTILITY
 	//--------------------------------------------------------------------------
