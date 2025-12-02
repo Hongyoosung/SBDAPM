@@ -920,7 +920,15 @@ if SCHOLA_AVAILABLE:
                 
                 # Build action dict for valid agents only (CDO filtered in reset())
                 formatted_actions = {}
-                for agent_id in self._agent_ids:
+                num_envs = self.schola_env.num_envs
+
+                print(f"[SBDAPMMultiAgentEnv.step] num_envs={num_envs}, action_dict keys={list(action_dict.keys())}")
+                print(f"[SBDAPMMultiAgentEnv.step] _agent_id_list (sorted)={self._agent_id_list}")
+
+                # CRITICAL FIX: Schola VectorEnv treats each agent as a separate "environment" index
+                # The id_manager maps: flat_id → (env_id, agent_str) where env_id = agent's index in sorted list
+                # We need to create (num_envs, 8) arrays where only the agent's env_id row contains the action
+                for env_idx, agent_id in enumerate(self._agent_id_list):
                     if agent_id in action_dict:
                         action = action_dict[agent_id]
                         if not isinstance(action, np.ndarray):
@@ -928,13 +936,16 @@ if SCHOLA_AVAILABLE:
                         if action.shape != (8,):
                             print(f"[SBDAPMMultiAgentEnv] Warning: Invalid shape for {agent_id}: {action.shape}")
                             action = np.zeros(8, dtype=np.float32)
-                        # Reshape to (num_envs, 8) by tiling
-                        # Schola VectorEnv expects (num_envs, 8) and slices it for each agent/env index
-                        num_envs = self.schola_env.num_envs
-                        formatted_actions[agent_id] = np.tile(action.reshape(1, 8), (num_envs, 1)).astype(np.float32)
+
+                        # Create (num_envs, 8) array with zeros
+                        batched_action = np.zeros((num_envs, 8), dtype=np.float32)
+                        # Place this agent's action at its env_id (which equals its index in sorted list)
+                        batched_action[env_idx] = action
+                        formatted_actions[agent_id] = batched_action
+
+                        print(f"[SBDAPMMultiAgentEnv.step] Agent {agent_id} (env_idx={env_idx}): action={action[:3]}... placed at row {env_idx}")
                     else:
                         print(f"[SBDAPMMultiAgentEnv] Warning: Missing action for {agent_id}, using zeros")
-                        num_envs = self.schola_env.num_envs
                         formatted_actions[agent_id] = np.zeros((num_envs, 8), dtype=np.float32)
 
                 # Call UnrealEnv step (dict in, dict out)

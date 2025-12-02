@@ -6,6 +6,7 @@
 #include "StateTree/FollowerStateTreeContext.h"
 #include "GameFramework/Pawn.h"
 #include "Inference/InferenceComponent.h"
+#include "Team/Objectives/FormationMoveObjective.h"
 
 UTacticalActuator::UTacticalActuator()
 {
@@ -82,6 +83,26 @@ void UTacticalActuator::TakeAction(const FBoxPoint& Action)
 	FFollowerStateTreeContext& SharedContext = StateTreeComp->GetSharedContext();
 	SharedContext.CurrentAtomicAction = ParsedAction;
 	SharedContext.bScholaActionReceived = true; // Flag that action came from Schola
+
+	// [FIX] Ensure StateTree enters ExecuteObjective state by assigning a dummy objective if none exists
+	// This is critical for Schola training where we drive the agent tactically without a strategic leader
+	if (!FollowerAgent->GetCurrentObjective())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: No objective found! Creating dummy 'ScholaControl' objective to force StateTree execution."),
+			*GetNameSafe(GetOuter()));
+
+		UFormationMoveObjective* DummyObj = NewObject<UFormationMoveObjective>(FollowerAgent);
+		if (DummyObj)
+		{
+			DummyObj->Type = EObjectiveType::FormationMove;
+			DummyObj->Status = EObjectiveStatus::Active;
+			DummyObj->Priority = 10; // High priority
+			DummyObj->TimeLimit = 0.0f; // Infinite
+			
+			// Assign to agent (triggers OnObjectiveReceived -> StateTree context update)
+			FollowerAgent->SetCurrentObjective(DummyObj);
+		}
+	}
 
 	LastAction = ParsedAction;
 

@@ -98,6 +98,13 @@ bool ASimulationManagerGameMode::RegisterTeam(
 
 	RegisteredTeams.Add(TeamID, NewTeam);
 
+	// [FIX] Register Team Leader actor in ActorToTeamMap so it's recognized as part of the team
+	// This fixes "TeamID=-1" logs when checking the leader actor
+	if (AActor* LeaderActor = TeamLeader->GetOwner())
+	{
+		ActorToTeamMap.Add(LeaderActor, TeamID);
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("SimulationManager: Registered team %d (%s)"), TeamID, *TeamName);
 	return true;
 }
