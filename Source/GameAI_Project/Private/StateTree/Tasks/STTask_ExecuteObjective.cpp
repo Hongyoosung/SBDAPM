@@ -55,12 +55,13 @@ EStateTreeRunStatus FSTTask_ExecuteObjective::EnterState(FStateTreeExecutionCont
 		? UEnum::GetValueAsString(SharedContext.CurrentObjective->Type)
 		: TEXT("None");
 
-	UE_LOG(LogTemp, Warning, TEXT("🎯 [EXEC OBJ] '%s': ENTER - Objective: %s, Health: %.1f%%"),
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [EXEC OBJ] '%s': ENTER - Objective: %s, Health: %.1f%%, Returning RUNNING"),
 		*PawnName, *ObjectiveName, SharedContext.CurrentObservation.AgentHealth);
 
 	SharedContext.TimeInTacticalAction = 0.0f;
 	SharedContext.ActionProgress = 0.0f;
 
+	UE_LOG(LogTemp, Warning, TEXT("🎯 [EXEC OBJ] '%s': EnterState returning Running (StateTree should call Tick next)"), *PawnName);
 	return EStateTreeRunStatus::Running;
 }
 
@@ -69,9 +70,27 @@ EStateTreeRunStatus FSTTask_ExecuteObjective::Tick(FStateTreeExecutionContext& C
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
+	// DIAGNOSTIC: Log EVERY tick (not throttled) to diagnose issue
+	static int32 TickCounter = 0;
+	TickCounter++;
+
+	APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+	UE_LOG(LogTemp, Warning, TEXT("🔄 [EXEC OBJ TICK] '%s': Tick #%d (DeltaTime=%.3f), Alive=%d, Objective=%s, ScholaAction=%d"),
+		*GetNameSafe(Pawn),
+		TickCounter,
+		DeltaTime,
+		SharedContext.bIsAlive ? 1 : 0,
+		SharedContext.CurrentObjective ? *UEnum::GetValueAsString(SharedContext.CurrentObjective->Type) : TEXT("NULL"),
+		SharedContext.bScholaActionReceived ? 1 : 0);
+
 	// Check abort conditions
 	if (!SharedContext.bIsAlive || !SharedContext.CurrentObjective)
 	{
+		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+		UE_LOG(LogTemp, Warning, TEXT("❌ [EXEC OBJ EXIT] '%s': Exiting - Alive=%d, Objective=%s"),
+			*GetNameSafe(Pawn),
+			SharedContext.bIsAlive ? 1 : 0,
+			SharedContext.CurrentObjective ? TEXT("Valid") : TEXT("NULL"));
 		return EStateTreeRunStatus::Succeeded;
 	}
 
@@ -101,8 +120,18 @@ void FSTTask_ExecuteObjective::ExitState(FStateTreeExecutionContext& Context, co
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	UE_LOG(LogTemp, Log, TEXT("STTask_ExecuteObjective: Exit (time: %.1fs)"),
-		SharedContext.TimeInTacticalAction);
+	APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
+
+	// Log detailed exit information
+	UE_LOG(LogTemp, Error, TEXT("❌ [EXEC OBJ EXIT] '%s': Exiting after %.1fs, Reason: %s"),
+		*GetNameSafe(Pawn),
+		SharedContext.TimeInTacticalAction,
+		*UEnum::GetValueAsString(Transition.ChangeType));
+
+	UE_LOG(LogTemp, Error, TEXT("   → Objective=%s, Alive=%d, Transition=%s"),
+		SharedContext.CurrentObjective ? *UEnum::GetValueAsString(SharedContext.CurrentObjective->Type) : TEXT("NULL"),
+		SharedContext.bIsAlive ? 1 : 0,
+		Transition.NextActiveFrames.Num() > 0 ? TEXT("To another state") : TEXT("Tree stopped"));
 }
 
 void FSTTask_ExecuteObjective::ExecuteAtomicAction(FStateTreeExecutionContext& Context, float DeltaTime) const

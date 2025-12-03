@@ -2,33 +2,43 @@
 
 #include "StateTree/Evaluators/STEvaluator_SyncObjective.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/FollowerAgentComponent.h"
 
 void FSTEvaluator_SyncObjective::TreeStart(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	if (!InstanceData.StateTreeComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] TreeStart: ❌ StateTreeComp is null!"));
+		return;
+	}
+
+	// Get SHARED context from component (not a local copy!)
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
 	// Initialize context outputs from follower component
 	// CRITICAL: This must happen in TreeStart so conditions can evaluate during initial state selection
-	if (InstanceData.Context.FollowerComponent)
+	if (SharedContext.FollowerComponent)
 	{
-		UObjective* CurrentObjective = InstanceData.Context.FollowerComponent->GetCurrentObjective();
+		UObjective* CurrentObjective = SharedContext.FollowerComponent->GetCurrentObjective();
 		bool bHasObjective = CurrentObjective != nullptr && CurrentObjective->IsActive();
 
 		// Set context outputs (shared with conditions/tasks)
-		InstanceData.Context.CurrentObjective = CurrentObjective;
-		InstanceData.Context.bHasActiveObjective = bHasObjective;
+		SharedContext.CurrentObjective = CurrentObjective;
+		SharedContext.bHasActiveObjective = bHasObjective;
 
 		// Sync PrimaryTarget from objective
 		if (CurrentObjective)
 		{
-			InstanceData.Context.PrimaryTarget = CurrentObjective->TargetActor;
+			SharedContext.PrimaryTarget = CurrentObjective->TargetActor;
 
 			// Initialize tracking variables
 			InstanceData.LastObjectiveType = CurrentObjective->Type;
 			InstanceData.LastObjective = CurrentObjective;
 
-			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] TreeStart: Initialized context - Type=%s, Active=%d, Target=%s"),
+			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] TreeStart: Initialized SharedContext - Type=%s, Active=%d, Target=%s"),
 				*UEnum::GetValueAsString(CurrentObjective->Type),
 				bHasObjective,
 				CurrentObjective->TargetActor ? *CurrentObjective->TargetActor->GetName() : TEXT("None"));
@@ -49,28 +59,37 @@ void FSTEvaluator_SyncObjective::Tick(FStateTreeExecutionContext& Context, float
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-	if (!InstanceData.Context.FollowerComponent)
+	if (!InstanceData.StateTreeComp)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] ❌ FollowerComponent is null!"));
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] Tick: ❌ StateTreeComp is null!"));
+		return;
+	}
+
+	// Get SHARED context from component (not a local copy!)
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+
+	if (!SharedContext.FollowerComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] Tick: ❌ FollowerComponent is null!"));
 		return;
 	}
 
 	// Get current objective from follower component
-	UObjective* NewObjective = InstanceData.Context.FollowerComponent->GetCurrentObjective();
+	UObjective* NewObjective = SharedContext.FollowerComponent->GetCurrentObjective();
 	bool bHasNewObjective = NewObjective != nullptr && NewObjective->IsActive();
 
 	// Update context outputs (shared with all tasks/evaluators)
-	InstanceData.Context.CurrentObjective = NewObjective;
-	InstanceData.Context.bHasActiveObjective = bHasNewObjective;
+	SharedContext.CurrentObjective = NewObjective;
+	SharedContext.bHasActiveObjective = bHasNewObjective;
 
 	// Update primary target from objective
 	if (NewObjective)
 	{
-		InstanceData.Context.PrimaryTarget = NewObjective->TargetActor;
+		SharedContext.PrimaryTarget = NewObjective->TargetActor;
 	}
 	else
 	{
-		InstanceData.Context.PrimaryTarget = nullptr;
+		SharedContext.PrimaryTarget = nullptr;
 	}
 
 	// Log objective changes (Warning level for visibility)
@@ -107,13 +126,10 @@ void FSTEvaluator_SyncObjective::Tick(FStateTreeExecutionContext& Context, float
 	static int32 TickCounter = 0;
 	if (++TickCounter % 60 == 0)
 	{
-		if (NewObjective)
-		{
-			UE_LOG(LogTemp, Verbose, TEXT("[SYNC OBJECTIVE] Current: Type=%s, Active=%d, Progress=%.2f"),
-				*UEnum::GetValueAsString(NewObjective->Type),
-				bHasNewObjective,
-				NewObjective->GetProgress());
-		}
+		UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] Tick #%d: Type=%s, Active=%d"),
+			TickCounter,
+			NewObjective ? *UEnum::GetValueAsString(NewObjective->Type) : TEXT("NULL"),
+			bHasNewObjective);
 	}
 }
 

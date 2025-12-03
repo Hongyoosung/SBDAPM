@@ -2,6 +2,7 @@
 
 #include "StateTree/Evaluators/STEvaluator_SpatialContext.h"
 #include "StateTree/FollowerStateTreeContext.h"
+#include "StateTree/FollowerStateTreeComponent.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
 #include "NavigationSystem.h"
@@ -16,13 +17,25 @@ void FSTEvaluator_SpatialContext::TreeStart(FStateTreeExecutionContext& Context)
 
 	InstanceData.TimeAccumulator = 0.0f;
 
-	// Initialize mask with defaults
-	InstanceData.Context.ActionMask = FActionSpaceMask();
+	if (!InstanceData.StateTreeComp)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SPATIAL CONTEXT] TreeStart: ❌ StateTreeComp is null!"));
+		return;
+	}
+
+	// Get SHARED context and initialize mask with defaults
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+	SharedContext.ActionMask = FActionSpaceMask();
 }
 
 void FSTEvaluator_SpatialContext::Tick(FStateTreeExecutionContext& Context, float DeltaTime) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	if (!InstanceData.StateTreeComp)
+	{
+		return;
+	}
 
 	InstanceData.TimeAccumulator += DeltaTime;
 
@@ -31,9 +44,10 @@ void FSTEvaluator_SpatialContext::Tick(FStateTreeExecutionContext& Context, floa
 	{
 		InstanceData.TimeAccumulator = 0.0f;
 
-		// Compute and update action mask
+		// Compute and update action mask in SHARED context
 		FActionSpaceMask NewMask = ComputeActionMask(Context);
-		InstanceData.Context.ActionMask = NewMask;
+		FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
+		SharedContext.ActionMask = NewMask;
 	}
 }
 
@@ -45,7 +59,14 @@ void FSTEvaluator_SpatialContext::TreeStop(FStateTreeExecutionContext& Context) 
 FActionSpaceMask FSTEvaluator_SpatialContext::ComputeActionMask(FStateTreeExecutionContext& Context) const
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
-	FFollowerStateTreeContext& SharedContext = InstanceData.Context;
+
+	if (!InstanceData.StateTreeComp)
+	{
+		return FActionSpaceMask(); // Return default mask
+	}
+
+	// Get SHARED context (not a local copy!)
+	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
 	FActionSpaceMask Mask;
 

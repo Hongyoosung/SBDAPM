@@ -29,9 +29,9 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SpatialContextInstanceData
 {
 	GENERATED_BODY()
 
-	/** Shared context struct - auto-binds to FollowerContext from schema */
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
+	/** StateTree component reference - provides access to shared context */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<class UFollowerStateTreeComponent> StateTreeComp;
 
 	/** Update interval (seconds) - 0.2 = 5Hz */
 	UPROPERTY(EditAnywhere, Category = "Config", meta = (ClampMin = "0.05", ClampMax = "0.5"))

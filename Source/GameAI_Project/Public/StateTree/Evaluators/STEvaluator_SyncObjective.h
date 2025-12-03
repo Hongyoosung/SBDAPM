@@ -26,15 +26,15 @@ struct GAMEAI_PROJECT_API FSTEvaluator_SyncObjectiveInstanceData
 	GENERATED_BODY()
 
 	//--------------------------------------------------------------------------
-	// CONTEXT BINDING (UE 5.6 - auto-binds to FollowerContext from schema)
+	// INPUT BINDING - StateTreeComp provides access to shared context
 	//--------------------------------------------------------------------------
 
 	/**
-	 * Shared context struct - automatically bound by StateTree
-	 * Contains all agent state, objectives, and components
+	 * StateTree component reference - provides access to shared context
+	 * Bind this to "FollowerStateTreeComponent" in the StateTree editor
 	 */
-	UPROPERTY(EditAnywhere, Category = "Context")
-	FFollowerStateTreeContext Context;
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<class UFollowerStateTreeComponent> StateTreeComp;
 
 	//--------------------------------------------------------------------------
 	// CONFIGURATION

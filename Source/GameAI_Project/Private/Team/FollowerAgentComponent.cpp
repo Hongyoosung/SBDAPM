@@ -11,6 +11,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "StateTree/FollowerStateTreeComponent.h"
 #include "Team/Objective.h"
+#include "Team/Objectives/FormationMoveObjective.h"
+#include "Schola/ScholaAgentComponent.h"
 #include "Simulation/StateTransition.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -118,6 +120,27 @@ void UFollowerAgentComponent::BeginPlay()
 	{
 		UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': Found RewardCalculator, hierarchical rewards enabled"),
 			*GetOwner()->GetName());
+	}
+
+	// [SCHOLA FIX] Create dummy objective for Schola agents BEFORE StateTree starts
+	// This ensures the StateTree can enter ExecuteObjective state immediately
+	bool bIsScholaAgent = GetOwner()->FindComponentByClass<UScholaAgentComponent>() != nullptr;
+	if (bIsScholaAgent && !CurrentObjective)
+	{
+		UFormationMoveObjective* DummyObj = NewObject<UFormationMoveObjective>(this);
+		if (DummyObj)
+		{
+			DummyObj->Type = EObjectiveType::FormationMove;
+			DummyObj->Status = EObjectiveStatus::Active;
+			DummyObj->Priority = 10;
+			DummyObj->TimeLimit = 0.0f; // Infinite
+			DummyObj->TargetLocation = GetOwner()->GetActorLocation(); // Stay in place initially
+
+			SetCurrentObjective(DummyObj);
+
+			UE_LOG(LogTemp, Warning, TEXT("🎮 [SCHOLA INIT] '%s': Created dummy FormationMove objective for Schola training (ensures StateTree can start)"),
+				*GetOwner()->GetName());
+		}
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("FollowerAgentComponent: Initialized on %s"), *GetOwner()->GetName());
