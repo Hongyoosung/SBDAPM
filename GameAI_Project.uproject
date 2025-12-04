@@ -50,6 +50,10 @@
 		{
 			"Name": "NNEDenoiser",
 			"Enabled": true
+		},
+		{
+			"Name": "GameplayAbilities",
+			"Enabled": true
 		}
 	]
 }

@@ -13,6 +13,7 @@
 #include "StateTree/Conditions/STCondition_CheckObjectiveType.h"
 #include "StateTree/Tasks/STTask_ExecuteObjective.h"
 #include "StateTree/Tasks/STTask_Dead.h"
+#include "StateTree/Tasks/STTask_Idle.h"
 #include "StateTree/Evaluators/STEvaluator_SyncObjective.h"
 #include "StateTree/Evaluators/STEvaluator_UpdateObservation.h"
 #include "StateTree/Evaluators/STEvaluator_SpatialContext.h"
@@ -90,7 +91,8 @@ bool UFollowerStateTreeSchema::IsStructAllowed(const UScriptStruct* InScriptStru
 			InScriptStruct->IsChildOf(FSTCondition_IsAlive::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTCondition_CheckObjectiveType::StaticStruct()) ||
 			InScriptStruct->IsChildOf(FSTTask_ExecuteObjective::StaticStruct()) ||
-			InScriptStruct->IsChildOf(FSTTask_Dead::StaticStruct()))
+			InScriptStruct->IsChildOf(FSTTask_Dead::StaticStruct()) ||
+			InScriptStruct->IsChildOf(FSTTask_Idle::StaticStruct()))
 		{
 			return true;
 		}

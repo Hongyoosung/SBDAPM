@@ -139,4 +139,20 @@ public:
 	/** Shared context for State Tree (accessed by all tasks/evaluators/conditions) */
 	UPROPERTY(BlueprintReadOnly, Category = "State Tree")
 	FFollowerStateTreeContext Context;
+
+	//--------------------------------------------------------------------------
+	// STATE TREE EVENTS (for event-driven transitions)
+	//--------------------------------------------------------------------------
+
+	/** Event tag: Objective received */
+	static const FGameplayTag Event_ObjectiveReceived;
+
+	/** Event tag: Follower died */
+	static const FGameplayTag Event_FollowerDied;
+
+	/** Event tag: Follower respawned */
+	static const FGameplayTag Event_FollowerRespawned;
+
+	/** Send StateTree event (helper) */
+	void SendStateTreeEvent(const FGameplayTag& EventTag, FConstStructView Payload = FConstStructView());
 };

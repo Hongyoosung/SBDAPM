@@ -11,10 +11,20 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "StateTreeModule\Public\StateTree.h"
 #include "Team/Objective.h"
+#include "GameplayTagsManager.h"
+#include "StateTreeEvents.h"
 
 #if WITH_EDITOR
-#include "StateTreeDelegates.h" 
+#include "StateTreeDelegates.h"
 #endif
+
+// Define StateTree event tags
+const FGameplayTag UFollowerStateTreeComponent::Event_ObjectiveReceived =
+	FGameplayTag::RequestGameplayTag(FName("StateTree.Follower.ObjectiveReceived"));
+const FGameplayTag UFollowerStateTreeComponent::Event_FollowerDied =
+	FGameplayTag::RequestGameplayTag(FName("StateTree.Follower.Died"));
+const FGameplayTag UFollowerStateTreeComponent::Event_FollowerRespawned =
+	FGameplayTag::RequestGameplayTag(FName("StateTree.Follower.Respawned"));
 
 UFollowerStateTreeComponent::UFollowerStateTreeComponent()
 {
@@ -573,7 +583,8 @@ void UFollowerStateTreeComponent::OnObjectiveReceived(UObjective* Objective, EFo
 		*ObjectiveStr,
 		*UEnum::GetValueAsString(NewState));
 
-	// State Tree will handle state transitions automatically via conditions
+	// Send StateTree event for event-driven transition
+	SendStateTreeEvent(Event_ObjectiveReceived);
 }
 
 void UFollowerStateTreeComponent::OnFollowerDied()
@@ -582,7 +593,8 @@ void UFollowerStateTreeComponent::OnFollowerDied()
 
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Follower died, transitioning to Dead state"));
 
-	// State Tree will transition to Dead state automatically via IsAlive condition
+	// Send StateTree event for event-driven transition
+	SendStateTreeEvent(Event_FollowerDied);
 }
 
 void UFollowerStateTreeComponent::OnFollowerRespawned()
@@ -606,6 +618,8 @@ void UFollowerStateTreeComponent::OnFollowerRespawned()
 			Comp->StartLogic();
 			UE_LOG(LogTemp, Warning, TEXT("✅ StateTree restarted for '%s'"), *GetNameSafe(Comp->GetOwner()));
 
+			// Send StateTree event for event-driven transition
+			Comp->SendStateTreeEvent(Event_FollowerRespawned);
 
 			if (ACharacter* Character = Cast<ACharacter>(Comp->GetOwner()))
 			{
@@ -703,4 +717,21 @@ bool UFollowerStateTreeComponent::CheckRequirementsAndStart()
 		InbIsRunning ? TEXT("RUNNING") : TEXT("STILL NOT RUNNING"));
 
 	return InbIsRunning;
+}
+
+void UFollowerStateTreeComponent::SendStateTreeEvent(const FGameplayTag& EventTag, FConstStructView Payload)
+{
+	if (!IsStateTreeRunning())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: Cannot send event '%s' - StateTree not running"),
+			*EventTag.ToString());
+		return;
+	}
+
+	FStateTreeEvent Event(EventTag, Payload, FName(TEXT("FollowerComponent")));
+
+	// 부모 클래스(UStateTreeComponent)의 SendStateTreeEvent 호출
+	Super::SendStateTreeEvent(Event);
+
+	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Event sent - '%s'"), *EventTag.ToString());
 }
