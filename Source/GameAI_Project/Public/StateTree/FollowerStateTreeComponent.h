@@ -117,6 +117,14 @@ protected:
 	bool CheckRequirementsAndStart();
 
 
+private:
+	/** Handle StateTree run status changes */
+	UFUNCTION()
+	void HandleOnStateTreeRunStatusChanged(const EStateTreeRunStatus Status);
+
+	/** Send StateTree event (helper) */
+	void SendStateTreeEvent(const FGameplayTag& EventTag, FConstStructView Payload = FConstStructView());
+
 public:
 	//--------------------------------------------------------------------------
 	// CONFIGURATION
@@ -126,11 +134,11 @@ public:
 
 	/** Follower agent component reference (auto-found if nullptr) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	UFollowerAgentComponent* FollowerComponent = nullptr;
+	UFollowerAgentComponent* FollowerComponent;
 
 	/** Auto-find FollowerAgentComponent on same actor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State Tree")
-	bool bAutoFindFollowerComponent = true;
+	uint8 bAutoFindFollowerComponent : 1;
 
 	//--------------------------------------------------------------------------
 	// STATE TREE CONTEXT
@@ -153,6 +161,5 @@ public:
 	/** Event tag: Follower respawned */
 	static const FGameplayTag Event_FollowerRespawned;
 
-	/** Send StateTree event (helper) */
-	void SendStateTreeEvent(const FGameplayTag& EventTag, FConstStructView Payload = FConstStructView());
+	int32 TickLogCounter;
 };

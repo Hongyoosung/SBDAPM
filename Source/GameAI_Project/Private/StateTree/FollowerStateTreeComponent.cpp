@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "StateTree/FollowerStateTreeComponent.h"
+#include "StateTree/FollowerStateTreeSchema.h"
 #include "Team/FollowerAgentComponent.h"
 #include "Team/TeamLeaderComponent.h"
 #include "RL/RLPolicyNetwork.h"
@@ -27,6 +28,10 @@ const FGameplayTag UFollowerStateTreeComponent::Event_FollowerRespawned =
 	FGameplayTag::RequestGameplayTag(FName("StateTree.Follower.Respawned"));
 
 UFollowerStateTreeComponent::UFollowerStateTreeComponent()
+	: Super()
+	, FollowerComponent(nullptr)
+	, bAutoFindFollowerComponent(true)
+	, TickLogCounter(0)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
@@ -43,10 +48,9 @@ void UFollowerStateTreeComponent::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("🔵 UFollowerStateTreeComponent::BeginPlay CALLED for '%s'"),
 		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL_OWNER"));
 
-	// ... (StateTree 에셋 검증 및 스키마 확인 로직은 그대로 유지) ...
-	// (중략: StateTree 변수 가져오기, 스키마 체크 등)
-	UStateTree* StateTree = const_cast<UStateTree*>(StateTreeRef.GetStateTree());
-	if (!StateTree) return; // 에러 로그는 위에 있다고 가정
+	// [중요] 상태 변경 델리게이트 바인딩 (종료 원인 파악용)
+	// UStateTreeComponent에 정의된 OnStateTreeRunStatusChanged 델리게이트 사용
+	OnStateTreeRunStatusChanged.AddDynamic(this, &UFollowerStateTreeComponent::HandleOnStateTreeRunStatusChanged);
 
 	// ... (FollowerComponent 찾기) ...
 	if (!FollowerComponent && bAutoFindFollowerComponent)
@@ -90,12 +94,13 @@ void UFollowerStateTreeComponent::BeginPlay()
 }
 void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	// Log FIRST before anything else
-	static int32 TickCount = 0;
-	if (TickCount++ % 60 == 0) // Log every 60 ticks (~1 second at 60fps)
+	
+	// [수정 1] 멤버 변수를 사용하여 개별 에이전트 로그 출력 (60프레임마다)
+	if (TickLogCounter++ % 60 == 0)
 	{
-		//UE_LOG(LogTemp, Warning, TEXT("🔄 UFollowerStateTreeComponent::TickComponent for '%s' (Tick #%d)"),
-		//	*GetOwner()->GetName(), TickCount);
+		EStateTreeRunStatus Status = GetStateTreeRunStatus();
+		UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: 🔄 [Tick] '%s' | Status: %s"),
+			*GetNameSafe(GetOwner()), *UEnum::GetValueAsString(Status));
 	}
 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -129,46 +134,24 @@ void UFollowerStateTreeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		UpdateContextFromFollower();
 	}
 
-	// Check if StateTree needs to be started (check for all non-running states)
 	EStateTreeRunStatus CurrentStatus = GetStateTreeRunStatus();
 	if (CurrentStatus != EStateTreeRunStatus::Running)
 	{
-		// Log status for debugging (only once per 60 ticks to avoid spam)
-		static int32 RetryTickCount = 0;
-		if (RetryTickCount++ % 60 == 0)
+		// Schola 학습 중에는 컨트롤러가 늦게 붙을 수 있으므로 
+		// 컨트롤러가 유효해질 때까지 재시도를 반복하는 것은 괜찮으나,
+		// 종료 이유(Succeeded/Failed)를 확인해야 함.
+
+		// 1초에 한 번만 재시작 시도 로그 출력 (스팸 방지)
+		if (TickLogCounter % 60 == 0)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("🔄 Retry starting StateTree for '%s': Status=%s"),
-				*GetOwner()->GetName(),
-				*UEnum::GetValueAsString(CurrentStatus));
+			// CheckRequirementsAndStart 내부 로그가 이미 있으므로 여기선 생략 가능
+			CheckRequirementsAndStart();
 		}
-
-		// 1. FollowerComponent 지연 찾기 (기존 로직 유지)
-		if (!FollowerComponent && bAutoFindFollowerComponent)
+		else
 		{
-			FollowerComponent = FindFollowerComponent();
-			if (FollowerComponent)
-			{
-				InitializeContext();
-				BindToFollowerEvents();
-			}
+			// 매 틱마다 시도는 하되 로그는 남기지 않음 (반응성 유지)
+			CheckRequirementsAndStart();
 		}
-
-		// 2. 시작 시도
-		CheckRequirementsAndStart();
-	}
-
-	// DEBUG: Log StateTree status periodically
-	static float LastDebugLogTime = 0.0f;
-	if (GetWorld()->GetTimeSeconds() - LastDebugLogTime > 2.0f)
-	{
-		EStateTreeRunStatus Status = GetStateTreeRunStatus();
-		FString ObjectiveStr = Context.CurrentObjective ? UEnum::GetValueAsString(Context.CurrentObjective->Type) : TEXT("None");
-		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: [STATE TREE] '%s': Status=%s, Objective=%s, Active=%d"),
-			*GetOwner()->GetName(),
-			*UEnum::GetValueAsString(Status),
-			*ObjectiveStr,
-			Context.bHasActiveObjective);
-		LastDebugLogTime = GetWorld()->GetTimeSeconds();
 	}
 }
 
@@ -184,6 +167,9 @@ TSubclassOf<UStateTreeSchema> UFollowerStateTreeComponent::GetSchema() const
 
 bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionContext& InContext, bool bLogErrors)
 {
+	UE_LOG(LogTemp, Warning, TEXT("🔵 UFollowerStateTreeComponent::SetContextRequirements START for '%s'"),
+		GetOwner() ? *GetOwner()->GetName() : TEXT("NULL"));
+
 	InContext.SetLinkedStateTreeOverrides(LinkedStateTreeOverrides);
 	InContext.SetCollectExternalDataCallback(FOnCollectStateTreeExternalData::CreateUObject(
 		this, &UFollowerStateTreeComponent::CollectExternalData));
@@ -195,38 +181,66 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	);
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerContext")), ContextView))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerContext"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerContext"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerContext set"));
 	}
 
 	// (B) Follower Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerComponent"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerComponent"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerComponent set: %s"), FollowerComponent ? *FollowerComponent->GetName() : TEXT("NULL"));
 	}
 
 	// (C) Follower State Tree Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerStateTreeComponent")), FStateTreeDataView(this)))
 	{
-		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Failed to set FollowerStateTreeComponent"));
+		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerStateTreeComponent"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerStateTreeComponent (self) set"));
 	}
 
 	// (D) Team Leader (Optional)
 	if (Context.TeamLeader)
 	{
 		InContext.SetContextDataByName(FName(TEXT("TeamLeader")), FStateTreeDataView(Context.TeamLeader));
+		UE_LOG(LogTemp, Log, TEXT("  ✅ TeamLeader set: %s"), *Context.TeamLeader->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("  ⚠️ TeamLeader is NULL (optional)"));
 	}
 
 	// (E) Tactical Policy (Optional)
 	if (Context.TacticalPolicy)
 	{
 		InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(Context.TacticalPolicy));
+		UE_LOG(LogTemp, Log, TEXT("  ✅ TacticalPolicy set: %s"), *Context.TacticalPolicy->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("  ⚠️ TacticalPolicy is NULL (optional)"));
 	}
 
-	const bool bResult = UStateTreeComponentSchema::SetContextRequirements(*this, InContext, bLogErrors);
+	// Use our custom schema's SetContextRequirements which makes AIController optional for Schola
+	UE_LOG(LogTemp, Warning, TEXT("  🔄 Calling Schema SetContextRequirements..."));
+	const bool bResult = UFollowerStateTreeSchema::SetContextRequirements(*this, InContext, true);
 
-	if (!bResult && bLogErrors)
+	if (!bResult)
 	{
-		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent:❌ Parent SetContextRequirements FAILED. Missing Pawn or AIController?"));
+		UE_LOG(LogTemp, Error, TEXT("🔵 UFollowerStateTreeComponent::SetContextRequirements FAILED"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🔵 UFollowerStateTreeComponent::SetContextRequirements SUCCESS"));
 	}
 
 	return bResult;
@@ -404,14 +418,21 @@ bool UFollowerStateTreeComponent::CollectExternalData(const FStateTreeExecutionC
             else
             {
                 // For Schola training: AIController might be NULL (Trainer controller instead)
-                // Only error if it's REQUIRED, otherwise just warn
+                // Provide a null AIController to allow StateTree to continue
+                OutDataViews[Index] = FStateTreeDataView(static_cast<AAIController*>(nullptr));
+
+                // Log appropriately based on requirement
                 if (Desc.Requirement == EStateTreeExternalDataRequirement::Required)
                 {
-                    UE_LOG(LogTemp, Error, TEXT("  ❌ [%d] AIController REQUIRED but NULL (Schola Trainer may be in use)"), Index);
+                    // Even if marked as Required, we provide null to allow Schola training
+                    // StateTree tasks that need AIController should check for null
+                    UE_LOG(LogTemp, Warning, TEXT("  ⚠️ [%d] AIController marked REQUIRED but providing NULL (Schola Trainer active)"), Index);
+                    bProvided = true; // Allow to proceed
                 }
                 else
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("  ⚠️ [%d] AIController optional and NULL (Schola Trainer may be in use)"), Index);
+                    UE_LOG(LogTemp, Log, TEXT("  ✅ [%d] AIController optional - NULL (Schola Trainer may be in use)"), Index);
+                    bProvided = true; // Allow to proceed
                 }
             }
         }
@@ -647,6 +668,27 @@ bool UFollowerStateTreeComponent::CheckRequirementsAndStart()
 		return true;
 	}
 
+	// DIAGNOSTIC: Check StateTree asset configuration
+	const UStateTree* StateTree = StateTreeRef.GetStateTree();
+	if (StateTree)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔍 DIAGNOSTIC: StateTree asset info:"));
+		UE_LOG(LogTemp, Error, TEXT("  → Asset Name: %s"), *StateTree->GetName());
+		UE_LOG(LogTemp, Error, TEXT("  → Schema: %s"), StateTree->GetSchema() ? *StateTree->GetSchema()->GetName() : TEXT("NULL"));
+		UE_LOG(LogTemp, Error, TEXT("  → Valid: %d"), StateTree->IsReadyToRun() ? 1 : 0);
+
+		// Check if StateTree has any states
+		#if WITH_EDITORONLY_DATA
+		UE_LOG(LogTemp, Error, TEXT("  → Editor Only: Cannot inspect runtime states in cooked build"));
+		#else
+		UE_LOG(LogTemp, Error, TEXT("  → Runtime: Cannot introspect state count without editor data"));
+		#endif
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("❌ DIAGNOSTIC: StateTree asset is NULL!"));
+	}
+
 	// 1. 필수 컴포넌트 확인
 	if (!FollowerComponent)
 	{
@@ -717,6 +759,22 @@ bool UFollowerStateTreeComponent::CheckRequirementsAndStart()
 		InbIsRunning ? TEXT("RUNNING") : TEXT("STILL NOT RUNNING"));
 
 	return InbIsRunning;
+}
+
+void UFollowerStateTreeComponent::HandleOnStateTreeRunStatusChanged(const EStateTreeRunStatus Status)
+{
+	FString StatusStr = UEnum::GetValueAsString(Status);
+	UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ⚠️ [StatusChanged] '%s' changed to: %s"),
+		*GetNameSafe(GetOwner()), *StatusStr);
+
+	if (Status == EStateTreeRunStatus::Failed)
+	{
+		UE_LOG(LogTemp, Error, TEXT("UFollowerStateTreeComponent: ❌ StateTree Failed! Check the active State/Task requirements."));
+	}
+	else if (Status == EStateTreeRunStatus::Succeeded)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UFollowerStateTreeComponent: ✅ StateTree Succeeded (Finished). Logic stopped."));
+	}
 }
 
 void UFollowerStateTreeComponent::SendStateTreeEvent(const FGameplayTag& EventTag, FConstStructView Payload)

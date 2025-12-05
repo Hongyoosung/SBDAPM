@@ -8,6 +8,7 @@
 #include "FollowerStateTreeSchema.generated.h"
 
 class AAIController;
+class UStateTreeComponent;
 
 /**
  * State Tree Schema for Follower Agents
@@ -37,6 +38,9 @@ public:
 	virtual bool IsStructAllowed(const UScriptStruct* InScriptStruct) const override;
 	virtual bool IsClassAllowed(const UClass* InClass) const override;
 	virtual bool IsExternalItemAllowed(const UStruct& InStruct) const override;
+
+	// Override to make AIController optional for Schola compatibility
+	static bool SetContextRequirements(UStateTreeComponent& InComponent, FStateTreeExecutionContext& Context, bool bLogErrors = false);
 
 
 protected:

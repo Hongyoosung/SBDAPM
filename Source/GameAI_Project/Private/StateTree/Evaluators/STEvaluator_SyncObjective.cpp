@@ -9,9 +9,12 @@ void FSTEvaluator_SyncObjective::TreeStart(FStateTreeExecutionContext& Context) 
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp ? InstanceData.StateTreeComp->GetOwner() : nullptr);
+	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
+
 	if (!InstanceData.StateTreeComp)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] TreeStart: ❌ StateTreeComp is null!"));
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' TreeStart: ❌ StateTreeComp is null!"), *PawnName);
 		return;
 	}
 
@@ -24,6 +27,17 @@ void FSTEvaluator_SyncObjective::TreeStart(FStateTreeExecutionContext& Context) 
 	{
 		UObjective* CurrentObjective = SharedContext.FollowerComponent->GetCurrentObjective();
 		bool bHasObjective = CurrentObjective != nullptr && CurrentObjective->IsActive();
+
+		// DIAGNOSTIC: Log detailed objective state
+		if (CurrentObjective)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' TreeStart DIAGNOSTIC:"), *PawnName);
+			UE_LOG(LogTemp, Error, TEXT("  → Objective Pointer: %p"), CurrentObjective);
+			UE_LOG(LogTemp, Error, TEXT("  → Objective Type: %s"), *UEnum::GetValueAsString(CurrentObjective->Type));
+			UE_LOG(LogTemp, Error, TEXT("  → Objective Status: %s"), *UEnum::GetValueAsString(CurrentObjective->Status));
+			UE_LOG(LogTemp, Error, TEXT("  → IsActive() result: %d"), CurrentObjective->IsActive() ? 1 : 0);
+			UE_LOG(LogTemp, Error, TEXT("  → bHasObjective: %d"), bHasObjective ? 1 : 0);
+		}
 
 		// Set context outputs (shared with conditions/tasks)
 		SharedContext.CurrentObjective = CurrentObjective;
@@ -38,7 +52,8 @@ void FSTEvaluator_SyncObjective::TreeStart(FStateTreeExecutionContext& Context) 
 			InstanceData.LastObjectiveType = CurrentObjective->Type;
 			InstanceData.LastObjective = CurrentObjective;
 
-			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] TreeStart: Initialized SharedContext - Type=%s, Active=%d, Target=%s"),
+			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] '%s' TreeStart: ✅ Type=%s, Active=%d, Target=%s"),
+				*PawnName,
 				*UEnum::GetValueAsString(CurrentObjective->Type),
 				bHasObjective,
 				CurrentObjective->TargetActor ? *CurrentObjective->TargetActor->GetName() : TEXT("None"));
@@ -46,12 +61,12 @@ void FSTEvaluator_SyncObjective::TreeStart(FStateTreeExecutionContext& Context) 
 		else
 		{
 			InstanceData.LastObjective = nullptr;
-			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] TreeStart: No objective assigned"));
+			UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] '%s' TreeStart: ⚠️ No objective assigned"), *PawnName);
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] TreeStart: ❌ FollowerComponent is null!"));
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' TreeStart: ❌ FollowerComponent is null!"), *PawnName);
 	}
 }
 
@@ -59,9 +74,12 @@ void FSTEvaluator_SyncObjective::Tick(FStateTreeExecutionContext& Context, float
 {
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
+	APawn* Pawn = Cast<APawn>(InstanceData.StateTreeComp ? InstanceData.StateTreeComp->GetOwner() : nullptr);
+	FString PawnName = Pawn ? Pawn->GetName() : TEXT("Unknown");
+
 	if (!InstanceData.StateTreeComp)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] Tick: ❌ StateTreeComp is null!"));
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' Tick: ❌ StateTreeComp is null!"), *PawnName);
 		return;
 	}
 
@@ -70,13 +88,27 @@ void FSTEvaluator_SyncObjective::Tick(FStateTreeExecutionContext& Context, float
 
 	if (!SharedContext.FollowerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] Tick: ❌ FollowerComponent is null!"));
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' Tick: ❌ FollowerComponent is null!"), *PawnName);
 		return;
 	}
 
 	// Get current objective from follower component
 	UObjective* NewObjective = SharedContext.FollowerComponent->GetCurrentObjective();
 	bool bHasNewObjective = NewObjective != nullptr && NewObjective->IsActive();
+
+	// DIAGNOSTIC: Log EVERY tick to see what's happening
+	static int32 TickCounter = 0;
+	if (++TickCounter % 10 == 0) // Log every 10 ticks to avoid spam
+	{
+		UE_LOG(LogTemp, Error, TEXT("[SYNC OBJECTIVE] '%s' Tick #%d: Obj=%s, Status=%s, IsActive=%d, bHasNew=%d"),
+			*PawnName,
+			TickCounter,
+			NewObjective ? *UEnum::GetValueAsString(NewObjective->Type) : TEXT("NULL"),
+			NewObjective ? *UEnum::GetValueAsString(NewObjective->Status) : TEXT("N/A"),
+			NewObjective ? (NewObjective->IsActive() ? 1 : 0) : 0,
+			bHasNewObjective ? 1 : 0);
+
+	}
 
 	// Update context outputs (shared with all tasks/evaluators)
 	SharedContext.CurrentObjective = NewObjective;
@@ -120,16 +152,6 @@ void FSTEvaluator_SyncObjective::Tick(FStateTreeExecutionContext& Context, float
 		}
 
 		InstanceData.LastObjective = NewObjective;
-	}
-
-	// Periodic verbose logging (every 60 ticks)
-	static int32 TickCounter = 0;
-	if (++TickCounter % 60 == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[SYNC OBJECTIVE] Tick #%d: Type=%s, Active=%d"),
-			TickCounter,
-			NewObjective ? *UEnum::GetValueAsString(NewObjective->Type) : TEXT("NULL"),
-			bHasNewObjective);
 	}
 }
 
