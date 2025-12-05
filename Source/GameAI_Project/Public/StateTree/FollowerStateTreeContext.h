@@ -12,6 +12,7 @@
 class UFollowerAgentComponent;
 class URLPolicyNetwork;
 class AAIController;
+class APawn;
 class UTeamLeaderComponent;
 class UObjective;
 
@@ -43,6 +44,9 @@ struct GAMEAI_PROJECT_API FFollowerStateTreeContext
 	/** AI Controller controlling this follower */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<AAIController> AIController = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<APawn> ControlledPawn = nullptr;
 
 	/** Team leader component reference */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

@@ -39,7 +39,7 @@ public:
 	virtual bool IsClassAllowed(const UClass* InClass) const override;
 	virtual bool IsExternalItemAllowed(const UStruct& InStruct) const override;
 
-	// Override to make AIController optional for Schola compatibility
+	// Override to set context requirements for follower agents
 	static bool SetContextRequirements(UStateTreeComponent& InComponent, FStateTreeExecutionContext& Context, bool bLogErrors = false);
 
 

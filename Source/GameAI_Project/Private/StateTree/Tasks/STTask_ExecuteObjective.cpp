@@ -32,21 +32,13 @@ EStateTreeRunStatus FSTTask_ExecuteObjective::EnterState(FStateTreeExecutionCont
 		return EStateTreeRunStatus::Failed;
 	}
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* Pawn = nullptr;
-	if (SharedContext.AIController)
-	{
-		Pawn = SharedContext.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn from component owner
-		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-	}
+	// Get Pawn from InstanceData (bound to FollowerContext.ControlledPawn)
+	APawn* Pawn = InstanceData.ControlledPawn;
 
 	if (!Pawn)
 	{
-		UE_LOG(LogTemp, Error, TEXT("STTask_ExecuteObjective: Cannot get Pawn"));
+		UE_LOG(LogTemp, Error, TEXT("❌ STTask_ExecuteObjective: ControlledPawn not bound in StateTree asset!"));
+		UE_LOG(LogTemp, Error, TEXT("   Bind 'ControlledPawn' to 'FollowerContext.ControlledPawn' in the StateTree asset."));
 		return EStateTreeRunStatus::Failed;
 	}
 
@@ -207,21 +199,11 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* Pawn = nullptr;
-	if (SharedContext.AIController)
-	{
-		Pawn = SharedContext.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn from component owner
-		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-	}
-
+	// Get Pawn from InstanceData (bound to FollowerContext.ControlledPawn)
+	APawn* Pawn = InstanceData.ControlledPawn;
 	if (!Pawn)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("ExecuteMovement: No Pawn available"));
+		UE_LOG(LogTemp, Warning, TEXT("ExecuteMovement: No ControlledPawn available"));
 		return;
 	}
 
@@ -251,10 +233,10 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 		}
 
 		// Move using AI controller (normal AI) or direct input (Schola)
-		if (SharedContext.AIController)
+		if (InstanceData.AIController)
 		{
 			// Normal AI mode: Use pathfinding
-			SharedContext.AIController->MoveToLocation(TargetLocation, 50.0f);
+			InstanceData.AIController->MoveToLocation(TargetLocation, 50.0f);
 			SharedContext.MovementDestination = TargetLocation;
 			SharedContext.bIsMoving = true;
 
@@ -281,9 +263,9 @@ void FSTTask_ExecuteObjective::ExecuteMovement(FStateTreeExecutionContext& Conte
 		UE_LOG(LogTemp, Warning, TEXT("[MOVE EXEC STOP] No movement input"));
 
 		// Stop movement
-		if (SharedContext.AIController)
+		if (InstanceData.AIController)
 		{
-			SharedContext.AIController->StopMovement();
+			InstanceData.AIController->StopMovement();
 		}
 		// For Schola: Movement stops naturally when AddMovementInput isn't called
 		SharedContext.bIsMoving = false;
@@ -295,18 +277,8 @@ void FSTTask_ExecuteObjective::ExecuteAiming(FStateTreeExecutionContext& Context
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* Pawn = nullptr;
-	if (SharedContext.AIController)
-	{
-		Pawn = SharedContext.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn from component owner
-		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-	}
-
+	// Get Pawn from InstanceData (bound to FollowerContext.ControlledPawn)
+	APawn* Pawn = InstanceData.ControlledPawn;
 	if (!Pawn)
 	{
 		return;
@@ -346,21 +318,11 @@ void FSTTask_ExecuteObjective::ExecuteFire(FStateTreeExecutionContext& Context, 
 		return;
 	}
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* Pawn = nullptr;
-	if (SharedContext.AIController)
-	{
-		Pawn = SharedContext.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn from component owner
-		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-	}
-
+	// Get Pawn from InstanceData (bound to FollowerContext.ControlledPawn)
+	APawn* Pawn = InstanceData.ControlledPawn;
 	if (!Pawn)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[EXEC FIRE] No Pawn available"));
+		UE_LOG(LogTemp, Error, TEXT("[EXEC FIRE] No ControlledPawn available"));
 		return;
 	}
 
@@ -404,18 +366,8 @@ void FSTTask_ExecuteObjective::ExecuteCrouch(FStateTreeExecutionContext& Context
 	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 	FFollowerStateTreeContext& SharedContext = InstanceData.StateTreeComp->GetSharedContext();
 
-	// Get Pawn from either AIController (normal AI) or directly from owner (Schola)
-	APawn* Pawn = nullptr;
-	if (SharedContext.AIController)
-	{
-		Pawn = SharedContext.AIController->GetPawn();
-	}
-	else
-	{
-		// Schola mode: Get pawn from component owner
-		Pawn = Cast<APawn>(InstanceData.StateTreeComp->GetOwner());
-	}
-
+	// Get Pawn from InstanceData (bound to FollowerContext.ControlledPawn)
+	APawn* Pawn = InstanceData.ControlledPawn;
 	if (!Pawn)
 	{
 		return;

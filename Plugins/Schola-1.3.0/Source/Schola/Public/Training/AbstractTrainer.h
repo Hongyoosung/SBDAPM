@@ -29,7 +29,7 @@
  * @note This class is designed to be used in conjunction with the AbstractEnvironment class.
  */
 UCLASS(Abstract)
-class SCHOLA_API AAbstractTrainer : public AController
+class SCHOLA_API AAbstractTrainer : public AAIController
 {
 	GENERATED_BODY()
 

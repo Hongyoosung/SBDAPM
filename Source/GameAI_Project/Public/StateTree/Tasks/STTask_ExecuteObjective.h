@@ -10,6 +10,8 @@
 #include "STTask_ExecuteObjective.generated.h"
 
 class UFollowerStateTreeComponent;
+class APawn;
+class AAIController;
 
 /**
  * State Tree Task: Execute Objective
@@ -37,6 +39,14 @@ struct GAMEAI_PROJECT_API FSTTask_ExecuteObjectiveInstanceData
 	/** StateTree component reference - provides access to shared context */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UFollowerStateTreeComponent> StateTreeComp;
+
+	/** Controlled Pawn reference (bind to FollowerContext.ControlledPawn) */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<APawn> ControlledPawn;
+
+	/** AIController reference (bind to FollowerContext.AIController) */
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<AAIController> AIController;
 
 	/** Movement speed multiplier */
 	UPROPERTY(EditAnywhere, Category = "Parameter", meta = (ClampMin = "0.1", ClampMax = "2.0"))

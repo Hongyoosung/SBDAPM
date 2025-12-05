@@ -39,14 +39,14 @@ UFollowerStateTreeSchema::UFollowerStateTreeSchema()
 		ContextDataDescs.Add(PawnDesc);
 	}
 
-	// AIController (OPTIONAL for Schola compatibility - can be AAbstractTrainer instead)
+	// AIController (REQUIRED - includes AAbstractTrainer which now inherits from AAIController)
 	{
 		FStateTreeExternalDataDesc AIDesc(
 			FName("AIController"),
 			AAIController::StaticClass(),
 			FGuid(0x1D291B00, 0x29994FDE, 0xC6546702, 0x47895FD6)
 		);
-		AIDesc.Requirement = EStateTreeExternalDataRequirement::Optional;
+		AIDesc.Requirement = EStateTreeExternalDataRequirement::Required;
 		ContextDataDescs.Add(AIDesc);
 	}
 
@@ -105,14 +105,13 @@ bool UFollowerStateTreeSchema::SetContextRequirements(UStateTreeComponent& InCom
 	UE_LOG(LogTemp, Warning, TEXT("🔵 FollowerStateTreeSchema::SetContextRequirements START for '%s'"),
 		InComponent.GetOwner() ? *InComponent.GetOwner()->GetName() : TEXT("NULL"));
 
-	// CRITICAL: Call parent implementation first to set up base framework
+	// Call parent implementation first to set up base framework
 	if (!Super::SetContextRequirements(InComponent, Context, bLogErrors))
 	{
 		if (bLogErrors)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("FollowerStateTreeSchema: Parent SetContextRequirements failed (may be expected for custom schema)"));
 		}
-		// Continue anyway - we'll handle Pawn/AIController manually for Schola compatibility
 	}
 
 	// Get owner actor and pawn
@@ -136,7 +135,7 @@ bool UFollowerStateTreeSchema::SetContextRequirements(UStateTreeComponent& InCom
 		return false;
 	}
 
-	// REQUIRED: Pawn (always needed) - overwrite what parent set to ensure correctness
+	// REQUIRED: Pawn
 	if (!Context.SetContextDataByName(TEXT("Pawn"), FStateTreeDataView(OwnerPawn)))
 	{
 		if (bLogErrors)
@@ -147,50 +146,28 @@ bool UFollowerStateTreeSchema::SetContextRequirements(UStateTreeComponent& InCom
 	}
 	UE_LOG(LogTemp, Log, TEXT("  ✅ Pawn context set: %s"), *OwnerPawn->GetName());
 
-	// OPTIONAL: AIController (not required for Schola compatibility)
-	// When using Schola, the controller might be AAbstractTrainer instead of AAIController
-	AController* Controller = OwnerPawn->GetController();
-	AAIController* AIController = Cast<AAIController>(Controller);
-
-	if (AIController)
+	// REQUIRED: AIController (includes AAbstractTrainer which now inherits from AAIController)
+	AAIController* AIController = Cast<AAIController>(OwnerPawn->GetController());
+	if (!AIController)
 	{
-		// Normal AI mode - provide AIController
-		if (!Context.SetContextDataByName(TEXT("AIController"), FStateTreeDataView(AIController)))
-		{
-			if (bLogErrors)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FollowerStateTreeSchema: Failed to set AIController context for '%s'"), *Owner->GetName());
-			}
-			// Don't return false - AIController is now optional
-		}
-		else
-		{
-			UE_LOG(LogTemp, Log, TEXT("  ✅ AIController context set: %s"), *AIController->GetName());
-		}
-	}
-	else if (Controller)
-	{
-		// Schola training mode - controller exists but is not AAIController
-		UE_LOG(LogTemp, Warning, TEXT("  ⚠️ '%s' has non-AI controller (%s: %s). This is OK for Schola training."),
-			*Owner->GetName(),
-			*Controller->GetClass()->GetName(),
-			*Controller->GetName());
-
-		// Set a null AIController to satisfy any optional references
-		Context.SetContextDataByName(TEXT("AIController"), FStateTreeDataView(static_cast<AAIController*>(nullptr)));
-	}
-	else
-	{
-		// No controller at all
 		if (bLogErrors)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("  ⚠️ No controller for '%s'"), *Owner->GetName());
+			UE_LOG(LogTemp, Error, TEXT("FollowerStateTreeSchema: No AIController for '%s'"), *Owner->GetName());
 		}
-		// Set null AIController
-		Context.SetContextDataByName(TEXT("AIController"), FStateTreeDataView(static_cast<AAIController*>(nullptr)));
+		return false;
 	}
 
-	// REQUIRED: Actor (base context) - ensure it's set correctly
+	if (!Context.SetContextDataByName(TEXT("AIController"), FStateTreeDataView(AIController)))
+	{
+		if (bLogErrors)
+		{
+			UE_LOG(LogTemp, Error, TEXT("FollowerStateTreeSchema: Failed to set AIController context for '%s'"), *Owner->GetName());
+		}
+		return false;
+	}
+	UE_LOG(LogTemp, Log, TEXT("  ✅ AIController context set: %s"), *AIController->GetName());
+
+	// REQUIRED: Actor
 	if (!Context.SetContextDataByName(TEXT("Actor"), FStateTreeDataView(Owner)))
 	{
 		if (bLogErrors)
@@ -201,7 +178,6 @@ bool UFollowerStateTreeSchema::SetContextRequirements(UStateTreeComponent& InCom
 	}
 	UE_LOG(LogTemp, Log, TEXT("  ✅ Actor context set: %s"), *Owner->GetName());
 
-	// Success - Pawn is set, AIController is optional
 	UE_LOG(LogTemp, Warning, TEXT("🔵 FollowerStateTreeSchema::SetContextRequirements SUCCESS for '%s'"), *Owner->GetName());
 	return true;
 }
