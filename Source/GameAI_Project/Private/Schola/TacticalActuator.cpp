@@ -57,6 +57,27 @@ void UTacticalActuator::TakeAction(const FBoxPoint& Action)
 		return;
 	}
 
+	// CRITICAL FIX: Ignore zero-filled dummy actions from VectorEnv batching
+	// VectorEnv sends (num_envs, 8) batches where only one row is the real action
+	// Schola dispatches ALL rows, so we get multiple TakeAction calls (1 real + N-1 zeros)
+	// Skip if all values are near zero (tolerance for floating point errors)
+	bool bIsZeroAction = true;
+	const float ZeroThreshold = 0.001f;
+	for (int32 i = 0; i < Action.Values.Num(); ++i)
+	{
+		if (FMath::Abs(Action.Values[i]) > ZeroThreshold)
+		{
+			bIsZeroAction = false;
+			break;
+		}
+	}
+
+	if (bIsZeroAction)
+	{
+		// Silently ignore zero actions (expected batching artifact)
+		return;
+	}
+
 	// Parse 8-dimensional action vector
 	FTacticalAction ParsedAction;
 

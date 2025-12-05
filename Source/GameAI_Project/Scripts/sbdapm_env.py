@@ -925,9 +925,9 @@ if SCHOLA_AVAILABLE:
                 print(f"[SBDAPMMultiAgentEnv.step] num_envs={num_envs}, action_dict keys={list(action_dict.keys())}")
                 print(f"[SBDAPMMultiAgentEnv.step] _agent_id_list (sorted)={self._agent_id_list}")
 
-                # CRITICAL FIX: Schola VectorEnv treats each agent as a separate "environment" index
-                # The id_manager maps: flat_id → (env_id, agent_str) where env_id = agent's index in sorted list
-                # We need to create (num_envs, 8) arrays where only the agent's env_id row contains the action
+                # Build batched actions for VectorEnv (num_envs, 8)
+                # CRITICAL: Only place action at the agent's own env_idx, use zeros elsewhere
+                # VectorEnv will dispatch each row to the corresponding agent index
                 for env_idx, agent_id in enumerate(self._agent_id_list):
                     if agent_id in action_dict:
                         action = action_dict[agent_id]
@@ -937,9 +937,8 @@ if SCHOLA_AVAILABLE:
                             print(f"[SBDAPMMultiAgentEnv] Warning: Invalid shape for {agent_id}: {action.shape}")
                             action = np.zeros(8, dtype=np.float32)
 
-                        # Create (num_envs, 8) array with zeros
+                        # Create (num_envs, 8) batch - standard VectorEnv format
                         batched_action = np.zeros((num_envs, 8), dtype=np.float32)
-                        # Place this agent's action at its env_id (which equals its index in sorted list)
                         batched_action[env_idx] = action
                         formatted_actions[agent_id] = batched_action
 
