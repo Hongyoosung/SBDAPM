@@ -710,6 +710,15 @@ void ASimulationManagerGameMode::EndEpisode(int32 WinningTeamID, int32 LosingTea
 
 void ASimulationManagerGameMode::StartNewEpisode()
 {
+	// CRITICAL: Early validation to prevent crashes during reset
+	if (RegisteredTeams.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("===== EPISODE START FAILED ====="));
+		UE_LOG(LogTemp, Error, TEXT("No teams registered! Cannot start episode."));
+		UE_LOG(LogTemp, Error, TEXT("Make sure agents are spawned and teams are registered before starting episodes."));
+		return;
+	}
+
 	// Clear timer
 	GetWorldTimerManager().ClearTimer(EpisodeRestartTimerHandle);
 

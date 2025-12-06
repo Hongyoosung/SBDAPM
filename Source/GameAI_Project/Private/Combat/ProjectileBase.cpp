@@ -203,18 +203,6 @@ float AProjectileBase::GetRemainingLifetime() const
 	return FMath::Max(Lifetime - Elapsed, 0.0f);
 }
 
-void AProjectileBase::Explode()
-{
-	if (!bIsActive)
-	{
-		return;
-	}
-
-	//UE_LOG(LogTemp, Warning, TEXT("💥 Projectile exploded at %s"), *GetActorLocation().ToString());
-
-	SpawnImpactEffects(GetActorLocation(), FVector::UpVector);
-	DeactivateProjectile();
-}
 
 //------------------------------------------------------------------------------
 // COLLISION & DAMAGE
@@ -228,56 +216,48 @@ void AProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor*
 		return;
 	}
 
-	// Ignore self and instigator
 	if (OtherActor == this || OtherActor == OwnerActor || OtherActor == InstigatorActor)
 	{
 		return;
 	}
 
-	// Check if already hit this actor (for penetration)
-	if (HitActors.Contains(OtherActor))
+
+	UHealthComponent* TargetHealth = OtherActor->FindComponentByClass<UHealthComponent>();
+	if (TargetHealth)
 	{
-		return;
+		if (!ValidateHit(OtherActor))
+		{
+			DeactivateProjectile();
+			return;
+		}
 	}
 
-	// Validate hit
-	if (!ValidateHit(OtherActor))
+	SpawnImpactEffects(Hit.ImpactPoint, Hit.ImpactNormal);
+
+	if (TargetHealth)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("❌ Invalid hit: %s (friendly fire disabled)"), *OtherActor->GetName());
-		return;
+
+		if (HitActors.Contains(OtherActor))
+		{
+			return;
+		}
+
+		ApplyDamageToActor(OtherActor, Hit.ImpactPoint, Hit.ImpactNormal);
+
+		HitActors.Add(OtherActor);
+		HitCount++;
+
+		float FinalDamage = CalculateDamageWithFalloff(DistanceTraveled);
+		FProjectileHitData HitData(OtherActor, Hit.ImpactPoint, Hit.ImpactNormal, DistanceTraveled, FinalDamage, true);
+		OnProjectileHit_Delegate.Broadcast(HitData);
+
+		if (bPenetrateActors && (MaxPenetrations == 0 || HitCount < MaxPenetrations))
+		{
+			UE_LOG(LogTemp, Log, TEXT("🏹 Projectile penetrated %s"), *OtherActor->GetName());
+			return;
+		}
 	}
 
-
-	// Get hit location and normal from HitResult
-	FVector HitLocation = Hit.ImpactPoint;
-	FVector HitNormal = Hit.ImpactNormal;
-
-	// Apply damage
-	ApplyDamageToActor(OtherActor, HitLocation, HitNormal);
-
-	// Track hit
-	HitActors.Add(OtherActor);
-	HitCount++;
-	
-	// Spawn impact effects
-	SpawnImpactEffects(HitLocation, HitNormal);
-
-	// Create hit data
-	float FinalDamage = CalculateDamageWithFalloff(DistanceTraveled);
-	FProjectileHitData HitData(OtherActor, HitLocation, HitNormal, DistanceTraveled, FinalDamage, true);
-
-	// Broadcast event
-	OnProjectileHit_Delegate.Broadcast(HitData);
-
-	// Check penetration
-	if (bPenetrateActors && (MaxPenetrations == 0 || HitCount < MaxPenetrations))
-	{
-		UE_LOG(LogTemp, Log, TEXT("🔫 Projectile penetrated %s (Hit %d/%d)"),
-			*OtherActor->GetName(), HitCount, MaxPenetrations);
-		return; // Continue flying
-	}
-
-	// Destroy or deactivate
 	if (bDestroyOnHit)
 	{
 		DeactivateProjectile();

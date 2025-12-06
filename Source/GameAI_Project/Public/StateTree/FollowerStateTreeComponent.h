@@ -112,7 +112,7 @@ protected:
 
 	/** Handle objective received from leader (v3.0) */
 	UFUNCTION()
-	void OnObjectiveReceived(UObjective* Objective, EFollowerState NewState);
+	void OnObjectiveReceived(UObjective* Objective);
 
 	bool CheckRequirementsAndStart();
 

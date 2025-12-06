@@ -146,9 +146,10 @@ void UObjectiveManager::UnassignAgentFromObjective(AActor* Agent)
 
 void UObjectiveManager::ClearAllAssignments()
 {
-    for (UObjective* Objective : Objectives)
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (IsValid(Objective))
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective != nullptr && IsValid(Objective))
         {
             Objective->AssignedAgents.Empty();
         }
@@ -203,9 +204,10 @@ void UObjectiveManager::ClearCompletedObjectives()
 {
     TArray<UObjective*> ToRemove;
 
-    for (UObjective* Objective : Objectives)
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (IsValid(Objective) && (Objective->IsCompleted() || Objective->IsFailed()))
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective != nullptr && IsValid(Objective) && (Objective->IsCompleted() || Objective->IsFailed()))
         {
             ToRemove.Add(Objective);
         }
@@ -213,7 +215,10 @@ void UObjectiveManager::ClearCompletedObjectives()
 
     for (UObjective* Objective : ToRemove)
     {
-        RemoveObjective(Objective);
+        if (Objective != nullptr)
+        {
+            RemoveObjective(Objective);
+        }
     }
 }
 
@@ -221,9 +226,10 @@ TArray<UObjective*> UObjectiveManager::GetActiveObjectives() const
 {
     TArray<UObjective*> ActiveObjectives;
 
-    for (UObjective* Objective : Objectives)
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (IsValid(Objective) && Objective->IsActive())
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective != nullptr && IsValid(Objective) && Objective->IsActive())
         {
             ActiveObjectives.Add(Objective);
         }
@@ -281,9 +287,10 @@ float UObjectiveManager::CalculateTotalTeamReward() const
 {
     float TotalReward = 0.0f;
 
-    for (UObjective* Objective : Objectives)
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (IsValid(Objective))
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective != nullptr && IsValid(Objective))
         {
             TotalReward += Objective->CalculateStrategicReward();
         }
@@ -305,9 +312,12 @@ T* UObjectiveManager::CreateObjectiveOfType(EObjectiveType Type)
 
 void UObjectiveManager::TickObjectives(float DeltaTime)
 {
-    for (UObjective* Objective : Objectives)
+    // CRITICAL: Add nullptr check BEFORE IsValid() to prevent crash from corrupted pointers
+    // During rapid agent respawning (Schola training), objectives can be GC'd mid-iteration
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (IsValid(Objective) && Objective->IsActive())
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective != nullptr && IsValid(Objective) && Objective->IsActive())
         {
             Objective->Tick(DeltaTime);
         }
@@ -328,9 +338,11 @@ void UObjectiveManager::CleanupObjectives()
     // Remove invalid, completed, or failed objectives
     TArray<UObjective*> ToRemove;
 
-    for (UObjective* Objective : Objectives)
+    // CRITICAL: Same nullptr safety as TickObjectives
+    for (const TObjectPtr<UObjective>& ObjectivePtr : Objectives)
     {
-        if (!IsValid(Objective) || !Objective->IsActive())
+        UObjective* Objective = ObjectivePtr.Get();
+        if (Objective == nullptr || !IsValid(Objective) || !Objective->IsActive())
         {
             // Remove invalid or inactive objectives
             ToRemove.Add(Objective);
@@ -339,7 +351,7 @@ void UObjectiveManager::CleanupObjectives()
 
     for (UObjective* Objective : ToRemove)
     {
-        if (IsValid(Objective))
+        if (Objective != nullptr && IsValid(Objective))
         {
             RemoveObjective(Objective);
         }

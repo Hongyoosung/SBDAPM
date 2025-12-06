@@ -192,16 +192,64 @@ void AScholaCombatEnvironment::InitializeEnvironment()
 
 void AScholaCombatEnvironment::ResetEnvironment()
 {
-	// Called by Schola when episode resets
-	// The SimulationManager already handles agent reset, so we just log
-	UE_LOG(LogTemp, Log, TEXT("[ScholaEnv] ResetEnvironment called"));
+	// Called by Schola when Python calls env.reset()
+	UE_LOG(LogTemp, Warning, TEXT("╔════════════════════════════════════════════════════════════════╗"));
+	UE_LOG(LogTemp, Warning, TEXT("║ [ScholaEnv] ResetEnvironment called                            ║"));
+	UE_LOG(LogTemp, Warning, TEXT("╚════════════════════════════════════════════════════════════════╝"));
+
+	if (!SimulationManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[ScholaEnv] ✗ FATAL: SimulationManager not found!"));
+		return;
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ SimulationManager found"));
+
+	// CRITICAL: Verify teams are registered before calling StartNewEpisode
+	// This prevents crashes when reset is called before agents are fully initialized
+	TArray<int32> AllTeamIDs = SimulationManager->GetAllTeamIDs();
+	if (AllTeamIDs.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("╔════════════════════════════════════════════════════════════════╗"));
+		UE_LOG(LogTemp, Error, TEXT("║ RESET BLOCKED - No teams registered!                          ║"));
+		UE_LOG(LogTemp, Error, TEXT("╠════════════════════════════════════════════════════════════════╣"));
+		UE_LOG(LogTemp, Error, TEXT("║ This happens when env.reset() is called before agents spawn.  ║"));
+		UE_LOG(LogTemp, Error, TEXT("║ Solution: Wait for level to finish loading before calling     ║"));
+		UE_LOG(LogTemp, Error, TEXT("║ reset(), or add a delay in your Python script.                ║"));
+		UE_LOG(LogTemp, Error, TEXT("╚════════════════════════════════════════════════════════════════╝"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ Validation passed - %d teams registered"), AllTeamIDs.Num());
+
+	// Log team details for debugging
+	for (int32 TeamID : AllTeamIDs)
+	{
+		TArray<AActor*> Members = SimulationManager->GetTeamMembers(TeamID);
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv]   - Team %d: %d members"), TeamID, Members.Num());
+	}
 
 	// Ensure simulation is running (starts it on first connection/reset)
-	if (SimulationManager && !SimulationManager->IsSimulationRunning())
+	if (!SimulationManager->IsSimulationRunning())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] First reset received - Starting Simulation"));
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] First reset - Starting Simulation"));
 		SimulationManager->StartSimulation();
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ Simulation started"));
+
+		// On first start, also trigger initial episode
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Calling StartNewEpisode..."));
+		SimulationManager->StartNewEpisode();
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ Episode started successfully"));
 	}
+	else
+	{
+		// Subsequent resets: Directly trigger new episode
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Subsequent reset - Restarting episode"));
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] Calling StartNewEpisode..."));
+		SimulationManager->StartNewEpisode();
+		UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ✓ Episode restarted successfully"));
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[ScholaEnv] ═══ ResetEnvironment completed successfully ═══"));
 }
 
 void AScholaCombatEnvironment::InternalRegisterAgents(TArray<FTrainerAgentPair>& OutAgentTrainerPairs)
@@ -587,8 +635,8 @@ void AScholaCombatEnvironment::OnEpisodeStarted(int32 EpisodeNumber)
 		}
 	}
 
-	// Notify Schola environment (calls ResetEnvironment)
-	Reset();
+	// NOTE: Do NOT call Reset() here - it creates circular dependency
+	// ResetEnvironment() already triggers StartNewEpisode() which broadcasts this event
 }
 
 void AScholaCombatEnvironment::OnEpisodeEnded(const FEpisodeResult& Result)

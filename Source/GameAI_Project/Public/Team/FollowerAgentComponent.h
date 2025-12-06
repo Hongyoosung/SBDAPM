@@ -20,10 +20,9 @@ struct FDeathEventData;
 /**
  * Delegate for follower events (v3.0)
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnObjectiveReceived,
-	UObjective*, Objective,
-	EFollowerState, NewState
+	UObjective*, Objective
 );
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
@@ -31,12 +30,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	EStrategicEvent, Event,
 	AActor*, Instigator,
 	int32, Priority
-);
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FOnStateChanged,
-	EFollowerState, OldState,
-	EFollowerState, NewState
 );
 
 /**
@@ -113,14 +106,6 @@ public:
 	//--------------------------------------------------------------------------
 	// STATE MANAGEMENT
 	//--------------------------------------------------------------------------
-
-	/** Transition to new follower state */
-	UFUNCTION(BlueprintCallable, Category = "Follower|State")
-	void TransitionToState(EFollowerState NewState);
-
-	/** Get current follower state */
-	UFUNCTION(BlueprintPure, Category = "Follower|State")
-	EFollowerState GetCurrentState() const { return CurrentFollowerState; }
 
 	/** Mark follower as dead */
 	UFUNCTION(BlueprintCallable, Category = "Follower|State")
@@ -233,9 +218,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Follower|Profiling")
 	void GetPerformanceStats(float& OutObservationTime, float& OutCoverQueryTime, int32& OutCoverQueriesThisEpisode) const;
 
-	/** Get state name as string */
-	UFUNCTION(BlueprintPure, Category = "Follower|State")
-	static FString GetStateName(EFollowerState State);
 
 
 private:
@@ -318,10 +300,6 @@ public:
 	// STATE
 	//--------------------------------------------------------------------------
 
-	/** Current follower state */
-	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
-	EFollowerState CurrentFollowerState = EFollowerState::Idle;
-
 	/** Current objective from leader (v3.0) */
 	UPROPERTY(BlueprintReadOnly, Category = "Follower|State")
 	TObjectPtr<UObjective> CurrentObjective = nullptr;
@@ -362,16 +340,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
 	FOnEventSignaled OnEventSignaled;
 
-	/** Fired when follower state changes */
-	UPROPERTY(BlueprintAssignable, Category = "Follower|Events")
-	FOnStateChanged OnStateChanged;
-
 
 
 private:
-	/** Previous state (for state change detection) */
-	EFollowerState PreviousFollowerState = EFollowerState::Idle;
-
 	//--------------------------------------------------------------------------
 	// STATE TRANSITION LOGGING (Sprint 2)
 	//--------------------------------------------------------------------------

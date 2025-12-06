@@ -183,19 +183,11 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	{
 		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerContext"));
 	}
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerContext set"));
-	}
 
 	// (B) Follower Component
 	if (!InContext.SetContextDataByName(FName(TEXT("FollowerComponent")), FStateTreeDataView(FollowerComponent)))
 	{
 		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerComponent"));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerComponent set: %s"), FollowerComponent ? *FollowerComponent->GetName() : TEXT("NULL"));
 	}
 
 	// (C) Follower State Tree Component
@@ -203,16 +195,12 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	{
 		if (bLogErrors) UE_LOG(LogTemp, Error, TEXT("  ❌ Failed to set FollowerStateTreeComponent"));
 	}
-	else
-	{
-		UE_LOG(LogTemp, Log, TEXT("  ✅ FollowerStateTreeComponent (self) set"));
-	}
+
 
 	// (D) Team Leader (Optional)
 	if (Context.TeamLeader)
 	{
 		InContext.SetContextDataByName(FName(TEXT("TeamLeader")), FStateTreeDataView(Context.TeamLeader));
-		UE_LOG(LogTemp, Log, TEXT("  ✅ TeamLeader set: %s"), *Context.TeamLeader->GetName());
 	}
 	else
 	{
@@ -223,7 +211,6 @@ bool UFollowerStateTreeComponent::SetContextRequirements(FStateTreeExecutionCont
 	if (Context.TacticalPolicy)
 	{
 		InContext.SetContextDataByName(FName(TEXT("TacticalPolicy")), FStateTreeDataView(Context.TacticalPolicy));
-		UE_LOG(LogTemp, Log, TEXT("  ✅ TacticalPolicy set: %s"), *Context.TacticalPolicy->GetName());
 	}
 	else
 	{
@@ -560,7 +547,7 @@ void UFollowerStateTreeComponent::BindToFollowerEvents()
 	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Bound to FollowerAgentComponent events"));
 }
 
-void UFollowerStateTreeComponent::OnObjectiveReceived(UObjective* Objective, EFollowerState NewState)
+void UFollowerStateTreeComponent::OnObjectiveReceived(UObjective* Objective)
 {
 	// Update context immediately when objective changes (v3.0)
 	Context.CurrentObjective = Objective;
@@ -587,9 +574,8 @@ void UFollowerStateTreeComponent::OnObjectiveReceived(UObjective* Objective, EFo
 	}
 
 	FString ObjectiveStr = Objective ? UEnum::GetValueAsString(Objective->Type) : TEXT("None");
-	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Objective received - Type: %s, State: %s"),
-		*ObjectiveStr,
-		*UEnum::GetValueAsString(NewState));
+	UE_LOG(LogTemp, Log, TEXT("UFollowerStateTreeComponent: Objective received - Type: %s"),
+		*ObjectiveStr);
 
 	// Send StateTree event for event-driven transition
 	SendStateTreeEvent(Event_ObjectiveReceived);
@@ -607,18 +593,29 @@ void UFollowerStateTreeComponent::OnFollowerDied()
 
 void UFollowerStateTreeComponent::OnFollowerRespawned()
 {
+	// Called when agent respawns after death or episode reset
 	Context.bIsAlive = true;
 	AActor* Owner = GetOwner();
 
 	UE_LOG(LogTemp, Warning, TEXT("🔄 Follower '%s' Respawned: Restarting StateTree"), *GetNameSafe(Owner));
 
+	// Stop StateTree if running (clears dead state)
 	if (IsStateTreeRunning())
 	{
 		StopLogic("Respawn");
-		UE_LOG(LogTemp, Log, TEXT("  → StateTree stopped to trigger ExitState"));
+		UE_LOG(LogTemp, Log, TEXT("  → StateTree stopped to clear dead state"));
 	}
 
-	GetWorld()->GetTimerManager().SetTimerForNextTick([WeakThis = TWeakObjectPtr<UFollowerStateTreeComponent>(this)]()
+	// CRITICAL FIX: Check if World is valid before accessing TimerManager
+	UWorld* World = GetWorld();
+	if (!World || !World->IsValidLowLevel())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⚠️ Follower '%s': World not ready during respawn, skipping StateTree restart"), *GetNameSafe(Owner));
+		return;
+	}
+
+	// Restart StateTree on next tick (allows proper re-initialization)
+	World->GetTimerManager().SetTimerForNextTick([WeakThis = TWeakObjectPtr<UFollowerStateTreeComponent>(this)]()
 		{
 			UFollowerStateTreeComponent* Comp = WeakThis.Get();
 			if (!Comp) return;
@@ -626,16 +623,19 @@ void UFollowerStateTreeComponent::OnFollowerRespawned()
 			Comp->StartLogic();
 			UE_LOG(LogTemp, Warning, TEXT("✅ StateTree restarted for '%s'"), *GetNameSafe(Comp->GetOwner()));
 
-			// Send StateTree event for event-driven transition
+			// NOTE: Event_FollowerRespawned event is not used in current StateTree asset
+			// (StateTree uses IsAlive condition checks instead of event-driven transitions)
+			// Keeping event send for potential future use or custom StateTree assets
 			Comp->SendStateTreeEvent(Event_FollowerRespawned);
 
+			// Re-enable movement component (may be disabled during death)
 			if (ACharacter* Character = Cast<ACharacter>(Comp->GetOwner()))
 			{
 				UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
 				if (MoveComp && !MoveComp->IsActive())
 				{
 					MoveComp->Activate();
-					UE_LOG(LogTemp, Warning, TEXT("  → Force-activated CharacterMovementComponent"));
+					UE_LOG(LogTemp, Warning, TEXT("  → Re-activated CharacterMovementComponent"));
 				}
 			}
 		});

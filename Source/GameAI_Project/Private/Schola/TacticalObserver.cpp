@@ -64,11 +64,12 @@ void UTacticalObserver::CollectObservations(FBoxPoint& OutObservations)
 
 	OutObservations.Values.SetNum(78);
 
-	if (!FollowerAgent)
+	// CRITICAL: Add safety checks to prevent crash during initialization
+	if (!FollowerAgent || !FollowerAgent->IsValidLowLevel() || !FollowerAgent->GetOwner())
 	{
 		if (CallCount % 100 == 1) // Log every 100th call to avoid spam
 		{
-			UE_LOG(LogTemp, Error, TEXT("[TacticalObserver] CollectObservations called but FollowerAgent is NULL! (Call #%d)"), CallCount);
+			UE_LOG(LogTemp, Error, TEXT("[TacticalObserver] CollectObservations called but FollowerAgent is NULL or invalid! (Call #%d)"), CallCount);
 		}
 		// Return zeros if no follower
 		for (int32 i = 0; i < 78; ++i)
@@ -95,28 +96,32 @@ void UTacticalObserver::CollectObservations(FBoxPoint& OutObservations)
 		OutObservations.Values[i] = Features[i];
 	}
 
-	// Add 7-dimensional objective embedding (one-hot encoding of current state)
-	// States mapped to embedding indices:
-	// Idle=0, Assault=1, Defend=2, Support=3, Move=4, Retreat=5, Dead=6
+	// Add 7-dimensional objective embedding (one-hot encoding of current objective type)
+	// Objective types mapped to embedding indices (v3.0 fix):
+	// Eliminate=0, CaptureObjective=1, DefendObjective=2, SupportAlly=3,
+	// FormationMove=4, Retreat=5, RescueAlly=6
+	// None = all zeros
 	for (int32 i = 0; i < 7; ++i)
 	{
 		OutObservations.Values[71 + i] = 0.0f;
 	}
 
-	// Get current state from follower and encode as one-hot
-	EFollowerState CurrentState = FollowerAgent->GetCurrentState();
-	int32 StateIndex = static_cast<int32>(CurrentState);
+	// Get current objective from follower and encode as one-hot
+	UObjective* CurrentObjective = FollowerAgent->GetCurrentObjective();
+	if (CurrentObjective && CurrentObjective->IsActive())
+	{
+		// EObjectiveType enum: None=0, Eliminate=1, CaptureObjective=2, DefendObjective=3,
+		// SupportAlly=4, FormationMove=5, Retreat=6, RescueAlly=7
+		int32 ObjectiveIndex = static_cast<int32>(CurrentObjective->Type);
 
-	// Ensure index is valid (Dead state should map to index 6)
-	if (StateIndex >= 0 && StateIndex < 7)
-	{
-		OutObservations.Values[71 + StateIndex] = 1.0f;
+		// Map to 0-6 range (skip None=0 by subtracting 1)
+		if (ObjectiveIndex >= 1 && ObjectiveIndex <= 7)
+		{
+			OutObservations.Values[71 + (ObjectiveIndex - 1)] = 1.0f;
+		}
+		// If None (0) or invalid: keep all zeros (already initialized)
 	}
-	else
-	{
-		// Fallback to Idle (index 0)
-		OutObservations.Values[71] = 1.0f;
-	}
+	// If no objective or inactive: keep all zeros (already initialized)
 }
 
 UFollowerAgentComponent* UTacticalObserver::FindFollowerAgent() const

@@ -122,11 +122,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat|Projectile")
 	float GetRemainingLifetime() const;
 
-	/**
-	 * Explode projectile manually (for proximity detonation, etc.)
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Combat|Projectile")
-	void Explode();
 
 protected:
 	/** Handle hit (collision) */

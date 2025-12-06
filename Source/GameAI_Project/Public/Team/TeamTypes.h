@@ -128,17 +128,5 @@ public:
 	float MCTSExecutionTime = 0.0f;
 };
 
-/**
- * Follower state enum (command-driven FSM states)
- */
-UENUM(BlueprintType)
-enum class EFollowerState : uint8
-{
-	Idle        UMETA(DisplayName = "Idle - No orders"),
-	Assault     UMETA(DisplayName = "Assault - Offensive actions"),
-	Defend      UMETA(DisplayName = "Defend - Defensive actions"),
-	Support     UMETA(DisplayName = "Support - Support actions"),
-	Move        UMETA(DisplayName = "Move - Movement actions"),
-	Retreat     UMETA(DisplayName = "Retreat - Retreat actions"),
-	Dead        UMETA(DisplayName = "Dead - Terminal state")
-};
+// REMOVED: EFollowerState enum (legacy FSM, replaced by StateTree in v3.0)
+// StateTree uses condition-based transitions (IsAlive, HasObjective) instead of explicit states

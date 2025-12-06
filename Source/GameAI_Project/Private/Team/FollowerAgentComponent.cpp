@@ -134,11 +134,19 @@ void UFollowerAgentComponent::BeginPlay()
 			DummyObj->Status = EObjectiveStatus::Active;
 			DummyObj->Priority = 10;
 			DummyObj->TimeLimit = 0.0f; // Infinite
-			DummyObj->TargetLocation = GetOwner()->GetActorLocation(); // Stay in place initially
+
+			// CRITICAL: Set unreachable target to prevent completion
+			// FormationMoveObjective completes when all agents reach destination
+			// Setting target 100km away ensures it NEVER completes during training
+			DummyObj->TargetLocation = GetOwner()->GetActorLocation() + FVector(10000000.0f, 10000000.0f, 0.0f);
+
+			// Add self to AssignedAgents to prevent edge-case completion
+			// (CheckCompletion returns true when AssignedAgents.Num() == 0)
+			DummyObj->AssignedAgents.Add(GetOwner());
 
 			SetCurrentObjective(DummyObj);
 
-			UE_LOG(LogTemp, Warning, TEXT("🎮 [SCHOLA INIT] '%s': Created dummy FormationMove objective for Schola training (ensures StateTree can start)"),
+			UE_LOG(LogTemp, Warning, TEXT("🎮 [SCHOLA INIT] '%s': Created dummy FormationMove objective (infinite, never completes)"),
 				*GetOwner()->GetName());
 		}
 	}
@@ -341,43 +349,24 @@ bool UFollowerAgentComponent::HasActiveObjective() const
 }
 
 //------------------------------------------------------------------------------
-// STATE MANAGEMENT
+// STATE MANAGEMENT (v3.0: StateTree-based, no explicit FSM)
 //------------------------------------------------------------------------------
-
-void UFollowerAgentComponent::TransitionToState(EFollowerState NewState)
-{
-	if (CurrentFollowerState == NewState)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("FollowerAgent '%s': Already in state %s"),
-			*GetOwner()->GetName(), *GetStateName(NewState));
-		return;
-	}
-
-	EFollowerState OldState = CurrentFollowerState;
-	CurrentFollowerState = NewState;
-
-	UE_LOG(LogTemp, Log, TEXT("FollowerAgent '%s': State transition %s → %s"),
-		*GetOwner()->GetName(),
-		*GetStateName(OldState),
-		*GetStateName(NewState));
-
-	// Broadcast state change event (StateTree reacts via evaluators/conditions)
-	OnStateChanged.Broadcast(OldState, NewState);
-
-	// State changes are automatically handled by StateTree evaluators and conditions
-	// No explicit FSM transition needed - StateTree evaluates conditions each tick
-	// and transitions based on current objective and alive status
-}
 
 void UFollowerAgentComponent::MarkAsDead()
 {
 	if (!bIsAlive) return;
 
 	bIsAlive = false;
-	TransitionToState(EFollowerState::Dead);
 
 	// Signal death to team leader
 	SignalEventToLeader(EStrategicEvent::AllyKilled, GetOwner(), FVector::ZeroVector, 10);
+
+	// Notify StateTree of death (triggers state transition)
+	UFollowerStateTreeComponent* StateTreeComp = GetOwner()->FindComponentByClass<UFollowerStateTreeComponent>();
+	if (StateTreeComp)
+	{
+		StateTreeComp->OnFollowerDied();
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Marked as dead"), *GetOwner()->GetName());
 }
@@ -402,13 +391,18 @@ void UFollowerAgentComponent::MarkAsAlive()
 	// Reset episode (v3.0: objectives are cleared via ObjectiveManager)
 	ResetEpisode();
 
-	// Transition to Idle state
-	TransitionToState(EFollowerState::Idle);
-
 	// Notify StateTree of respawn (this will exit Dead state and re-enable systems)
+	// CRITICAL FIX: Only call if StateTree is valid and world is ready
 	if (UFollowerStateTreeComponent* StateTreeComp = GetOwner()->FindComponentByClass<UFollowerStateTreeComponent>())
 	{
-		StateTreeComp->OnFollowerRespawned();
+		if (StateTreeComp->IsValidLowLevel() && StateTreeComp->GetWorld())
+		{
+			StateTreeComp->OnFollowerRespawned();
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': StateTree not ready during respawn, skipping restart"), *GetOwner()->GetName());
+		}
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("FollowerAgent '%s': Respawn complete - ready for new commands"), *GetOwner()->GetName());
@@ -724,11 +718,6 @@ bool UFollowerAgentComponent::IsRegisteredWithLeader() const
 	return TeamLeader->IsFollowerRegistered(GetOwner());
 }
 
-FString UFollowerAgentComponent::GetStateName(EFollowerState State)
-{
-	return UEnum::GetValueAsString(State);
-}
-
 
 //------------------------------------------------------------------------------
 // DEBUG VISUALIZATION
@@ -743,12 +732,12 @@ void UFollowerAgentComponent::DrawDebugInfo()
 
 	FVector FollowerPos = GetOwner()->GetActorLocation();
 
-	// Draw state above follower (v3.0)
+	// Draw objective info above follower (v3.0)
 	FString ObjectiveStr = CurrentObjective ? UEnum::GetValueAsString(CurrentObjective->Type) : TEXT("None");
 	float Progress = CurrentObjective ? CurrentObjective->GetProgress() : 0.0f;
 
-	FString StateText = FString::Printf(TEXT("State: %s\nObjective: %s\nProgress: %.1f%%"),
-		*GetStateName(CurrentFollowerState),
+	FString StateText = FString::Printf(TEXT("Alive: %s\nObjective: %s\nProgress: %.1f%%"),
+		bIsAlive ? TEXT("Yes") : TEXT("Dead"),
 		*ObjectiveStr,
 		Progress * 100.0f);
 
@@ -930,6 +919,9 @@ void UFollowerAgentComponent::SetCurrentObjective(UObjective* Objective)
 		*GetOwner()->GetName(),
 		Objective ? *UEnum::GetValueAsString(Objective->Type) : TEXT("None"),
 		Objective ? Objective->IsActive() : false);
+
+	// Broadcast delegate for StateTree event binding
+	OnObjectiveReceived.Broadcast(Objective);
 }
 
 //------------------------------------------------------------------------------

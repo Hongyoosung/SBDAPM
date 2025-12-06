@@ -6,6 +6,7 @@
 #include "StateTree/FollowerStateTreeContext.h"
 #include "GameFramework/Pawn.h"
 #include "Inference/InferenceComponent.h"
+#include "StateTreeExecutionTypes.h"
 
 UTacticalActuator::UTacticalActuator()
 {
@@ -33,19 +34,28 @@ FBoxSpace UTacticalActuator::GetActionSpace()
 
 void UTacticalActuator::TakeAction(const FBoxPoint& Action)
 {
-	if (!FollowerAgent)
+	if (!FollowerAgent || !FollowerAgent->IsValidLowLevel() || !FollowerAgent->GetOwner())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: FollowerAgent not found!"),
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: FollowerAgent not found or invalid!"),
 			*GetNameSafe(GetOuter()));
 		return;
 	}
 
 	// Find state tree component
 	UFollowerStateTreeComponent* StateTreeComp = FindStateTreeComponent();
-	if (!StateTreeComp)
+	if (!StateTreeComp || !StateTreeComp->IsValidLowLevel())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: StateTreeComponent not found!"),
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: StateTreeComponent not found or invalid!"),
 			*GetNameSafe(GetOuter()));
+		return;
+	}
+
+	// CRITICAL: Check if StateTree is in a valid state before accessing context
+	EStateTreeRunStatus StateTreeStatus = StateTreeComp->GetStateTreeRunStatus();
+	if (StateTreeStatus == EStateTreeRunStatus::Failed || StateTreeStatus == EStateTreeRunStatus::Unset)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[TacticalActuator] %s: StateTree not ready (Status=%s), ignoring action"),
+			*GetNameSafe(GetOuter()), *UEnum::GetValueAsString(StateTreeStatus));
 		return;
 	}
 

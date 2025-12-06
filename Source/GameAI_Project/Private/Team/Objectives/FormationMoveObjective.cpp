@@ -17,6 +17,12 @@ UFormationMoveObjective::UFormationMoveObjective()
 
 bool UFormationMoveObjective::CheckCompletion()
 {
+    // SAFEGUARD: Prevent completion if no agents assigned (dummy objective edge case)
+    if (AssignedAgents.Num() == 0)
+    {
+        return false;
+    }
+
     // Complete when all agents reach destination with good formation
     return AgentsAtDestination >= AssignedAgents.Num() &&
            FormationCoherence >= FormationThreshold;
